@@ -3,7 +3,7 @@ import { StreamableHTTPServerTransport } from "@modelcontextprotocol/sdk/server/
 import { createMcpExpressApp } from "@modelcontextprotocol/sdk/server/express.js"
 import { createServer } from "./mcpServer.js"
 
-const app = createMcpExpressApp()
+const app = createMcpExpressApp({ allowedHosts: ["mcp.tyneside.io"] })
 
 app.post("/mcp", async (req, res) => {
   const server = createServer()
