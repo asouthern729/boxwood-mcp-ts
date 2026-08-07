@@ -52,7 +52,7 @@ app.delete("/mcp", (_req, res) => {
 const PORT = Number(process.env.PORT) || 3000
 
 app.listen(PORT, () => {
-  console.log(`tyneside-boxwood-mcp listening on http://127.0.0.1:${ PORT }/mcp`)
+  console.log(`boxwood-mcp-ts listening on http://127.0.0.1:${ PORT }/mcp`)
 })
 
 process.on("SIGINT", () => {

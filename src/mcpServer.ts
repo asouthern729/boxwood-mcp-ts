@@ -1,21 +1,27 @@
 import { McpServer } from "@modelcontextprotocol/sdk/server/mcp.js"
 import * as z from "zod"
-import { runReadOnlyQuery } from "./db.js"
+import { runReadOnlyQuery, runWriteQuery, devToolsEnabled } from "./db.js"
 
 const SELECT_ONLY_PATTERN = /^select\b/i
 
-function assertSelectOnly(sql: string) {
+function assertSingleStatement(sql: string) {
   const trimmed = sql.trim()
   const withoutTrailingSemicolon = trimmed.endsWith(";") ?
     trimmed.slice(0, -1) :
     trimmed
 
-  if(!SELECT_ONLY_PATTERN.test(withoutTrailingSemicolon)) {
-    throw new Error("Only single SELECT statements are allowed")
-  }
-
   if(withoutTrailingSemicolon.includes(";")) {
     throw new Error("Multiple statements are not allowed")
+  }
+
+  return withoutTrailingSemicolon
+}
+
+function assertSelectOnly(sql: string) {
+  const withoutTrailingSemicolon = assertSingleStatement(sql)
+
+  if(!SELECT_ONLY_PATTERN.test(withoutTrailingSemicolon)) {
+    throw new Error("Only single SELECT statements are allowed")
   }
 
   return withoutTrailingSemicolon
@@ -38,7 +44,7 @@ function errorResult(error: unknown) {
 
 export function createServer() {
   const server = new McpServer({
-    name: "tyneside-boxwood-mcp",
+    name: "boxwood-mcp-ts",
     version: "1.0.0"
   })
 
@@ -130,6 +136,28 @@ export function createServer() {
       }
     }
   )
+
+  if(devToolsEnabled) {
+    server.registerTool(
+      "run_write_query",
+      {
+        description: "DEV ONLY: run a single write/DDL statement (CREATE/INSERT/UPDATE/DELETE/etc.) against boxwood-ams360 as the andrew role. Not available in production.",
+        inputSchema: {
+          sql: z.string().describe("A single SQL statement")
+        }
+      },
+      async ({ sql }) => {
+        try {
+          const safeSql = assertSingleStatement(sql)
+          const rows = await runWriteQuery(safeSql)
+
+          return textResult(rows)
+        } catch(error) {
+          return errorResult(error)
+        }
+      }
+    )
+  }
 
   return server
 }

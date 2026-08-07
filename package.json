@@ -1,5 +1,5 @@
 {
-  "name": "tyneside-boxwood-mcp",
+  "name": "boxwood-mcp-ts",
   "version": "1.0.0",
   "description": "Basic MCP server exposing SQL tooling over the boxwood-ams360 Postgres database",
   "type": "module",
