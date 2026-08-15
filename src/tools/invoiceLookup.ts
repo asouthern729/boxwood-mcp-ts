@@ -1,8 +1,8 @@
 import { McpServer } from "@modelcontextprotocol/sdk/server/mcp.js"
 import * as z from "zod"
 import { runReadOnlyQuery } from "../db.js"
-import { logger } from "../logger.js"
-import { errorResult, groupByKey, textResult } from "../mcpHelpers.js"
+import { logger } from "../utils/logger.js"
+import { errorResult, groupByKey, textResult } from "../utils/mcpHelpers.js"
 
 const INCLUDE_OPTIONS = ["activity"] as const
 
@@ -45,54 +45,87 @@ const CORE_QUERY = `
   LEFT JOIN afw_generalledgerbranch glb ON i.glbrnchcode = glb.glbrnchcode
   LEFT JOIN afw_generalledgerdepartment gldep ON i.gldeptcode = gldep.gldeptcode
   LEFT JOIN afw_generalledgergroup glg ON i.glgrpcode = glg.glgrpcode
-  WHERE
 `
+
+const SORT_OPTIONS = {
+  inveffdate_desc: "i.inveffdate DESC",
+  inveffdate_asc: "i.inveffdate ASC",
+  invno_asc: "i.invno ASC",
+  invno_desc: "i.invno DESC",
+  duedate_asc: "i.duedate ASC",
+  duedate_desc: "i.duedate DESC"
+} as const
+
+type Sort = keyof typeof SORT_OPTIONS
 
 export function registerInvoiceLookupTool(server: McpServer) {
   server.registerTool(
     "invoice_lookup",
     {
-      description: "Look up invoice(s) by ID, invoice number, owning customer, or policy, with resolved customer/policy/broker/rep/GL names. Optionally include related policy activity log entries.",
+      description: "Look up invoice(s) by ID or invoice number, or browse/search invoices by owning customer, policy, and coarse filters (cancelled, closed status, invoice type), with sorting and pagination. With no filters at all, returns a paginated list of all invoices. Resolves customer/policy/broker/rep/GL names inline. Optionally include related policy activity log entries.",
       inputSchema: {
         invid: z.string().uuid().describe("Exact invoice ID (afw_invoice.invid)").optional(),
         invno: z.number().int().describe("Exact invoice number (afw_invoice.invno)").optional(),
-        custid: z.string().uuid().describe("List all invoices for this customer").optional(),
-        polid: z.string().uuid().describe("List all invoices for this policy").optional(),
+        custid: z.string().uuid().describe("Filter to invoices for this customer").optional(),
+        polid: z.string().uuid().describe("Filter to invoices for this policy").optional(),
+        iscancelled: z.enum(["Y", "N"]).describe("Filter by cancelled status").optional(),
+        closedstatus: z.enum(["Y", "N"]).describe("Filter by closed status").optional(),
+        invtype: z.number().int().describe("Exact match against invoice type code (afw_invoice.invtype)").optional(),
+        sort: z.enum(Object.keys(SORT_OPTIONS) as [Sort, ...Sort[]]).default("inveffdate_desc").describe("Sort order, ignored when invid/invno is given"),
+        offset: z.number().int().min(0).default(0).describe("Number of invoices to skip, ignored when invid/invno is given"),
         include: z.array(z.enum(INCLUDE_OPTIONS)).describe("Related record sets to attach to each invoice").optional(),
-        limit: z.number().int().min(1).max(50).default(10).describe("Max invoices to return for custid/polid searches")
+        limit: z.number().int().min(1).max(50).default(10).describe("Max invoices to return per page")
       }
     },
-    async ({ invid, invno, custid, polid, include, limit }) => {
+    async ({ invid, invno, custid, polid, iscancelled, closedstatus, invtype, sort, offset, include, limit }) => {
       try {
-        if(!invid && !invno && !custid && !polid) {
-          return errorResult("Provide at least one of: invid, invno, custid, polid")
-        }
-
-        let whereClause: string
+        let sql: string
         let params: unknown[]
+        let hasMore = false
 
-        if(invid) {
-          whereClause = "i.invid = $1"
-          params = [invid]
-        } else if(invno) {
-          whereClause = "i.invno = $1"
-          params = [invno]
-        } else if(custid) {
-          whereClause = "i.custid = $1"
-          params = [custid]
+        if(invid || invno) {
+          const whereClause = invid ? "i.invid = $1" : "i.invno = $1"
+          params = [invid ?? invno]
+          sql = `${ CORE_QUERY } WHERE ${ whereClause }`
         } else {
-          whereClause = "i.polid = $1"
-          params = [polid]
+          const conditions: string[] = []
+          params = []
+
+          if(custid) {
+            params.push(custid)
+            conditions.push(`i.custid = $${ params.length }`)
+          }
+          if(polid) {
+            params.push(polid)
+            conditions.push(`i.polid = $${ params.length }`)
+          }
+          if(iscancelled) {
+            params.push(iscancelled)
+            conditions.push(`i.iscancelled = $${ params.length }`)
+          }
+          if(closedstatus) {
+            params.push(closedstatus)
+            conditions.push(`i.closedstatus = $${ params.length }`)
+          }
+          if(invtype !== undefined) {
+            params.push(invtype)
+            conditions.push(`i.invtype = $${ params.length }`)
+          }
+
+          const whereClause = conditions.length ? `WHERE ${ conditions.join(" AND ") }` : ""
+
+          sql = `${ CORE_QUERY } ${ whereClause } ORDER BY ${ SORT_OPTIONS[sort] } LIMIT ${ limit + 1 } OFFSET ${ offset }`
         }
 
-        const sql = invid || invno ?
-          `${ CORE_QUERY }${ whereClause }` :
-          `${ CORE_QUERY }${ whereClause } ORDER BY i.inveffdate DESC LIMIT ${ limit }`
+        let invoices = await runReadOnlyQuery(sql, params)
 
-        const invoices = await runReadOnlyQuery(sql, params)
+        if(!invid && !invno && invoices.length > limit) {
+          hasMore = true
+          invoices = invoices.slice(0, limit)
+        }
 
         if(invoices.length === 0) {
-          return textResult({ invoices: [] })
+          return textResult({ invoices: [], has_more: false })
         }
 
         const polids = invoices.map((row) => row.polid).filter((id) => id !== null)
@@ -114,9 +147,9 @@ export function registerInvoiceLookupTool(server: McpServer) {
           return include?.length ? { ...invoice, included } : invoice
         })
 
-        return textResult({ invoices: results })
+        return textResult({ invoices: results, has_more: hasMore })
       } catch(error) {
-        logger.error({ err: error, invid, invno, custid, polid, include }, "invoice_lookup failed")
+        logger.error({ err: error, invid, invno, custid, polid, iscancelled, closedstatus, invtype, sort, offset, include }, "invoice_lookup failed")
         return errorResult(error)
       }
     }

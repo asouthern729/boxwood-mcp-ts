@@ -2,7 +2,7 @@ module.exports = {
   apps: [
     {
       name: "boxwood-mcp-ts",
-      script: "dist/index.js",
+      script: "dist/app.js",
       cwd: __dirname,
       instances: 1,
       exec_mode: "fork",

@@ -1,8 +1,8 @@
 import { McpServer } from "@modelcontextprotocol/sdk/server/mcp.js"
 import * as z from "zod"
 import { runReadOnlyQuery } from "../db.js"
-import { logger } from "../logger.js"
-import { errorResult, groupByKey, textResult } from "../mcpHelpers.js"
+import { logger } from "../utils/logger.js"
+import { errorResult, groupByKey, textResult } from "../utils/mcpHelpers.js"
 
 const INCLUDE_OPTIONS = [
   "contacts",
@@ -103,50 +103,92 @@ const CORE_QUERY = `
   LEFT JOIN afw_generalledgerbranch glb ON c.glbrnchcode = glb.glbrnchcode
   LEFT JOIN afw_generalledgerdepartment gldep ON c.gldeptcode = gldep.gldeptcode
   LEFT JOIN afw_generalledgergroup glg ON c.glgrpcode = glg.glgrpcode
-  WHERE
 `
+
+const SORT_OPTIONS = {
+  lastname_asc: "c.lastname ASC, c.firstname ASC",
+  lastname_desc: "c.lastname DESC, c.firstname DESC",
+  custno_asc: "c.custno ASC",
+  custno_desc: "c.custno DESC",
+  entereddate_asc: "c.entereddate ASC",
+  entereddate_desc: "c.entereddate DESC"
+} as const
+
+type Sort = keyof typeof SORT_OPTIONS
 
 export function registerCustomerLookupTool(server: McpServer) {
   server.registerTool(
     "customer_lookup",
     {
-      description: "Look up customer(s) by ID, customer number, or name, with resolved producer/CSR/broker/GL names. Optionally include related records (contacts, dependents, loss history, attributes, relationships, cross-references, expiring outside business, service team).",
+      description: "Look up customer(s) by ID or customer number, or browse/search customers by name and coarse filters (active, city, state, producer, CSR), with sorting and pagination. With no filters at all, returns a paginated list of all customers. Resolves producer/CSR/broker/GL names inline. Optionally include related records (contacts, dependents, loss history, attributes, relationships, cross-references, expiring outside business, service team).",
       inputSchema: {
         custid: z.string().uuid().describe("Exact customer ID (afw_customer.custid)").optional(),
         custno: z.number().int().describe("Exact customer number (afw_customer.custno)").optional(),
         name: z.string().describe("Partial match against last name, first name, or DBA").optional(),
+        active: z.enum(["Y", "N"]).describe("Filter by active status").optional(),
+        city: z.string().describe("Partial match against city").optional(),
+        state: z.string().length(2).describe("Exact 2-letter state code").optional(),
+        producer_code: z.string().describe("Exact match against producer employee code (afw_customer.prod1code)").optional(),
+        csr_code: z.string().describe("Exact match against CSR employee code (afw_customer.csrcode)").optional(),
+        sort: z.enum(Object.keys(SORT_OPTIONS) as [Sort, ...Sort[]]).default("lastname_asc").describe("Sort order, ignored when custid/custno is given"),
+        offset: z.number().int().min(0).default(0).describe("Number of customers to skip, ignored when custid/custno is given"),
         include: z.array(z.enum(INCLUDE_OPTIONS)).describe("Related record sets to attach to each customer").optional(),
-        limit: z.number().int().min(1).max(50).default(10).describe("Max customers to return for name searches")
+        limit: z.number().int().min(1).max(50).default(10).describe("Max customers to return per page")
       }
     },
-    async ({ custid, custno, name, include, limit }) => {
+    async ({ custid, custno, name, active, city, state, producer_code, csr_code, sort, offset, include, limit }) => {
       try {
-        if(!custid && !custno && !name) {
-          return errorResult("Provide at least one of: custid, custno, name")
-        }
-
-        let whereClause: string
+        let sql: string
         let params: unknown[]
+        let hasMore = false
 
-        if(custid) {
-          whereClause = "c.custid = $1"
-          params = [custid]
-        } else if(custno) {
-          whereClause = "c.custno = $1"
-          params = [custno]
+        if(custid || custno) {
+          const whereClause = custid ? "c.custid = $1" : "c.custno = $1"
+          params = [custid ?? custno]
+          sql = `${ CORE_QUERY } WHERE ${ whereClause }`
         } else {
-          whereClause = "(c.lastname ILIKE $1 OR c.firstname ILIKE $1 OR c.dba ILIKE $1)"
-          params = [`%${ name }%`]
+          const conditions: string[] = []
+          params = []
+
+          if(name) {
+            params.push(`%${ name }%`)
+            conditions.push(`(c.lastname ILIKE $${ params.length } OR c.firstname ILIKE $${ params.length } OR c.dba ILIKE $${ params.length })`)
+          }
+          if(active) {
+            params.push(active)
+            conditions.push(`c.active = $${ params.length }`)
+          }
+          if(city) {
+            params.push(`%${ city }%`)
+            conditions.push(`c.city ILIKE $${ params.length }`)
+          }
+          if(state) {
+            params.push(state.toUpperCase())
+            conditions.push(`c.state = $${ params.length }`)
+          }
+          if(producer_code) {
+            params.push(producer_code)
+            conditions.push(`c.prod1code = $${ params.length }`)
+          }
+          if(csr_code) {
+            params.push(csr_code)
+            conditions.push(`c.csrcode = $${ params.length }`)
+          }
+
+          const whereClause = conditions.length ? `WHERE ${ conditions.join(" AND ") }` : ""
+
+          sql = `${ CORE_QUERY } ${ whereClause } ORDER BY ${ SORT_OPTIONS[sort] } LIMIT ${ limit + 1 } OFFSET ${ offset }`
         }
 
-        const sql = custid || custno ?
-          `${ CORE_QUERY }${ whereClause }` :
-          `${ CORE_QUERY }${ whereClause } ORDER BY c.lastname, c.firstname LIMIT ${ limit }`
+        let customers = await runReadOnlyQuery(sql, params)
 
-        const customers = await runReadOnlyQuery(sql, params)
+        if(!custid && !custno && customers.length > limit) {
+          hasMore = true
+          customers = customers.slice(0, limit)
+        }
 
         if(customers.length === 0) {
-          return textResult({ customers: [] })
+          return textResult({ customers: [], has_more: false })
         }
 
         const custids = customers.map((row) => row.custid)
@@ -168,9 +210,9 @@ export function registerCustomerLookupTool(server: McpServer) {
           return include?.length ? { ...customer, included } : customer
         })
 
-        return textResult({ customers: results })
+        return textResult({ customers: results, has_more: hasMore })
       } catch(error) {
-        logger.error({ err: error, custid, custno, name, include }, "customer_lookup failed")
+        logger.error({ err: error, custid, custno, name, active, city, state, producer_code, csr_code, sort, offset, include }, "customer_lookup failed")
         return errorResult(error)
       }
     }

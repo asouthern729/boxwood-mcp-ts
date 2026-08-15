@@ -1,8 +1,8 @@
 import { McpServer } from "@modelcontextprotocol/sdk/server/mcp.js"
 import * as z from "zod"
 import { runReadOnlyQuery } from "../db.js"
-import { logger } from "../logger.js"
-import { errorResult, groupByKey, textResult } from "../mcpHelpers.js"
+import { logger } from "../utils/logger.js"
+import { errorResult, groupByKey, textResult } from "../utils/mcpHelpers.js"
 
 const INCLUDE_OPTIONS = [
   "transactions",
@@ -94,50 +94,90 @@ const CORE_QUERY = `
   LEFT JOIN afw_generalledgerbranch glb ON p.glbrnchcode = glb.glbrnchcode
   LEFT JOIN afw_generalledgerdepartment gldep ON p.gldeptcode = gldep.gldeptcode
   LEFT JOIN afw_generalledgergroup glg ON p.glgrpcode = glg.glgrpcode
-  WHERE
 `
+
+const SORT_OPTIONS = {
+  poleffdate_desc: "p.poleffdate DESC",
+  poleffdate_asc: "p.poleffdate ASC",
+  polno_asc: "p.polno ASC",
+  polno_desc: "p.polno DESC",
+  entereddate_asc: "p.entereddate ASC",
+  entereddate_desc: "p.entereddate DESC"
+} as const
+
+type Sort = keyof typeof SORT_OPTIONS
 
 export function registerPolicyQueryTool(server: McpServer) {
   server.registerTool(
     "policy_query",
     {
-      description: "Look up policy/policies by ID, policy number, or owning customer, with resolved carrier/producer/CSR/broker/GL names. Optionally include related records (transactions, lines of business, coverage, personnel, submissions, attributes).",
+      description: "Look up policy/policies by ID, or browse/search policies by policy number, owning customer, and coarse filters (status, type of business, carrier, CSR), with sorting and pagination. With no filters at all, returns a paginated list of all policies. Resolves carrier/producer/CSR/broker/GL names inline. Optionally include related records (transactions, lines of business, coverage, personnel, submissions, attributes).",
       inputSchema: {
         polid: z.string().uuid().describe("Exact policy ID (afw_basicpolinfo.polid)").optional(),
         polno: z.string().describe("Partial match against policy number or short policy number").optional(),
-        custid: z.string().uuid().describe("List all policies belonging to this customer").optional(),
+        custid: z.string().uuid().describe("Filter to policies belonging to this customer").optional(),
+        status: z.string().length(1).describe("Exact match against raw AMS360 status code (afw_basicpolinfo.status)").optional(),
+        typeofbus: z.number().int().describe("Exact match against type-of-business code (afw_basicpolinfo.typeofbus)").optional(),
+        carrier_code: z.string().describe("Exact match against carrier code (afw_basicpolinfo.cocode)").optional(),
+        csr_code: z.string().describe("Exact match against CSR employee code (afw_basicpolinfo.csrcode)").optional(),
+        sort: z.enum(Object.keys(SORT_OPTIONS) as [Sort, ...Sort[]]).default("poleffdate_desc").describe("Sort order, ignored when polid is given"),
+        offset: z.number().int().min(0).default(0).describe("Number of policies to skip, ignored when polid is given"),
         include: z.array(z.enum(INCLUDE_OPTIONS)).describe("Related record sets to attach to each policy").optional(),
-        limit: z.number().int().min(1).max(50).default(10).describe("Max policies to return for polno/custid searches")
+        limit: z.number().int().min(1).max(50).default(10).describe("Max policies to return per page")
       }
     },
-    async ({ polid, polno, custid, include, limit }) => {
+    async ({ polid, polno, custid, status, typeofbus, carrier_code, csr_code, sort, offset, include, limit }) => {
       try {
-        if(!polid && !polno && !custid) {
-          return errorResult("Provide at least one of: polid, polno, custid")
-        }
-
-        let whereClause: string
+        let sql: string
         let params: unknown[]
+        let hasMore = false
 
         if(polid) {
-          whereClause = "p.polid = $1"
           params = [polid]
-        } else if(custid) {
-          whereClause = "p.custid = $1"
-          params = [custid]
+          sql = `${ CORE_QUERY } WHERE p.polid = $1`
         } else {
-          whereClause = "(p.polno ILIKE $1 OR p.shortpolno ILIKE $1)"
-          params = [`%${ polno }%`]
+          const conditions: string[] = []
+          params = []
+
+          if(polno) {
+            params.push(`%${ polno }%`)
+            conditions.push(`(p.polno ILIKE $${ params.length } OR p.shortpolno ILIKE $${ params.length })`)
+          }
+          if(custid) {
+            params.push(custid)
+            conditions.push(`p.custid = $${ params.length }`)
+          }
+          if(status) {
+            params.push(status)
+            conditions.push(`p.status = $${ params.length }`)
+          }
+          if(typeofbus !== undefined) {
+            params.push(typeofbus)
+            conditions.push(`p.typeofbus = $${ params.length }`)
+          }
+          if(carrier_code) {
+            params.push(carrier_code)
+            conditions.push(`p.cocode = $${ params.length }`)
+          }
+          if(csr_code) {
+            params.push(csr_code)
+            conditions.push(`p.csrcode = $${ params.length }`)
+          }
+
+          const whereClause = conditions.length ? `WHERE ${ conditions.join(" AND ") }` : ""
+
+          sql = `${ CORE_QUERY } ${ whereClause } ORDER BY ${ SORT_OPTIONS[sort] } LIMIT ${ limit + 1 } OFFSET ${ offset }`
         }
 
-        const sql = polid ?
-          `${ CORE_QUERY }${ whereClause }` :
-          `${ CORE_QUERY }${ whereClause } ORDER BY p.poleffdate DESC LIMIT ${ limit }`
+        let policies = await runReadOnlyQuery(sql, params)
 
-        const policies = await runReadOnlyQuery(sql, params)
+        if(!polid && policies.length > limit) {
+          hasMore = true
+          policies = policies.slice(0, limit)
+        }
 
         if(policies.length === 0) {
-          return textResult({ policies: [] })
+          return textResult({ policies: [], has_more: false })
         }
 
         const polids = policies.map((row) => row.polid)
@@ -159,9 +199,9 @@ export function registerPolicyQueryTool(server: McpServer) {
           return include?.length ? { ...policy, included } : policy
         })
 
-        return textResult({ policies: results })
+        return textResult({ policies: results, has_more: hasMore })
       } catch(error) {
-        logger.error({ err: error, polid, polno, custid, include }, "policy_query failed")
+        logger.error({ err: error, polid, polno, custid, status, typeofbus, carrier_code, csr_code, sort, offset, include }, "policy_query failed")
         return errorResult(error)
       }
     }
