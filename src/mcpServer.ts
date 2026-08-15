@@ -1,6 +1,11 @@
 import { McpServer } from "@modelcontextprotocol/sdk/server/mcp.js"
 import * as z from "zod"
 import { runReadOnlyQuery, runWriteQuery, devToolsEnabled } from "./db.js"
+import { logger } from "./logger.js"
+import { errorResult, textResult } from "./mcpHelpers.js"
+import { registerCustomerLookupTool } from "./tools/customerLookup.js"
+import { registerPolicyQueryTool } from "./tools/policyQuery.js"
+import { registerInvoiceLookupTool } from "./tools/invoiceLookup.js"
 
 const SELECT_ONLY_PATTERN = /^select\b/i
 
@@ -27,21 +32,6 @@ function assertSelectOnly(sql: string) {
   return withoutTrailingSemicolon
 }
 
-function textResult(data: unknown) {
-  return {
-    content: [{ type: "text" as const, text: JSON.stringify(data, null, 2) }]
-  }
-}
-
-function errorResult(error: unknown) {
-  const message = error instanceof Error ? error.message : String(error)
-
-  return {
-    content: [{ type: "text" as const, text: message }],
-    isError: true
-  }
-}
-
 export function createServer() {
   const server = new McpServer({
     name: "boxwood-mcp-ts",
@@ -65,6 +55,7 @@ export function createServer() {
 
         return textResult(rows)
       } catch(error) {
+        logger.error({ err: error }, "list_tables failed")
         return errorResult(error)
       }
     }
@@ -90,14 +81,13 @@ export function createServer() {
               c.column_default,
               EXISTS (
                 SELECT 1
-                FROM information_schema.table_constraints tc
-                JOIN information_schema.key_column_usage kcu
-                  ON tc.constraint_name = kcu.constraint_name
-                  AND tc.table_schema = kcu.table_schema
-                WHERE tc.constraint_type = 'PRIMARY KEY'
-                  AND tc.table_schema = c.table_schema
-                  AND tc.table_name = c.table_name
-                  AND kcu.column_name = c.column_name
+                FROM pg_constraint pk
+                JOIN pg_attribute a
+                  ON a.attrelid = pk.conrelid
+                  AND a.attnum = ANY(pk.conkey)
+                WHERE pk.contype = 'p'
+                  AND pk.conrelid = (quote_ident(c.table_schema) || '.' || quote_ident(c.table_name))::regclass
+                  AND a.attname = c.column_name
               ) AS is_primary_key
             FROM information_schema.columns c
             WHERE c.table_schema = $1 AND c.table_name = $2
@@ -112,10 +102,15 @@ export function createServer() {
 
         return textResult(rows)
       } catch(error) {
+        logger.error({ err: error, schema, table }, "describe_table failed")
         return errorResult(error)
       }
     }
   )
+
+  registerCustomerLookupTool(server)
+  registerPolicyQueryTool(server)
+  registerInvoiceLookupTool(server)
 
   server.registerTool(
     "run_query",
@@ -132,6 +127,7 @@ export function createServer() {
 
         return textResult(rows)
       } catch(error) {
+        logger.error({ err: error, sql }, "run_query failed")
         return errorResult(error)
       }
     }
@@ -153,6 +149,7 @@ export function createServer() {
 
           return textResult(rows)
         } catch(error) {
+          logger.error({ err: error, sql }, "run_write_query failed")
           return errorResult(error)
         }
       }

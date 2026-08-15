@@ -2,8 +2,13 @@ import "dotenv/config"
 import { StreamableHTTPServerTransport } from "@modelcontextprotocol/sdk/server/streamableHttp.js"
 import { createMcpExpressApp } from "@modelcontextprotocol/sdk/server/express.js"
 import { createServer } from "./mcpServer.js"
+import { logger } from "./logger.js"
 
-const app = createMcpExpressApp({ allowedHosts: ["mcp.tyneside.io"] })
+const allowedHosts = process.env.NODE_ENV === "production" ?
+  ["mcp.boxwoodins.com"] :
+  ["mcp.boxwoodins.com", "localhost", "127.0.0.1"]
+
+const app = createMcpExpressApp({ allowedHosts })
 
 app.post("/mcp", async (req, res) => {
   const server = createServer()
@@ -21,7 +26,7 @@ app.post("/mcp", async (req, res) => {
       server.close()
     })
   } catch(error) {
-    console.error("Error handling MCP request:", error)
+    logger.error({ err: error }, "Error handling MCP request")
 
     if(!res.headersSent) {
       res.status(500).json({
@@ -50,9 +55,10 @@ app.delete("/mcp", (_req, res) => {
 })
 
 const PORT = Number(process.env.PORT) || 3000
+const HOST = process.env.HOST
 
-app.listen(PORT, () => {
-  console.log(`boxwood-mcp-ts listening on http://127.0.0.1:${ PORT }/mcp`)
+app.listen(PORT, HOST as any, () => {
+  logger.info(`boxwood-mcp-ts listening on http://${ HOST ?? "0.0.0.0" }:${ PORT }/mcp`)
 })
 
 process.on("SIGINT", () => {
