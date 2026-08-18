@@ -317,3 +317,128 @@ INSERT INTO afw_transaction (tranid, entityid, entitytype, polid, dbaction, tran
   ('a1000000-0000-4000-a000-000000000001', '80000000-0000-4000-a000-000000000001', 1, '90000000-0000-4000-a000-000000000001', 'I', '2026-01-20 10:15:00', 'MKR', 'BOP-TN-1001', 'MKR', 'CLW', 'N', 'Initial quote presented to Tyneside Innovations LLC; bundled BOP + GL per client request.', 'SYS', '2026-01-20 10:15:00', '2026-01-20 10:15:00'),
   ('a1000001-0000-4000-a000-000000000001', '80000000-0000-4000-a000-000000000001', 1, '90000000-0000-4000-a000-000000000001', 'I', '2026-02-01 14:00:00', 'CLW', 'BOP-TN-1001', 'MKR', 'CLW', 'N', 'Policy bound. Welcome packet and certificate of insurance sent.', 'SYS', '2026-02-01 14:00:00', '2026-02-01 14:00:00'),
   ('a1000000-0000-4000-a000-000000000011', '80000000-0000-4000-a000-00000000000b', 1, '90000000-0000-4000-a000-000000000011', 'I', '2026-06-25 11:30:00', 'MKR', 'WC-TN-1011', 'MKR', 'CLW', 'N', 'Payroll audit worksheet requested from client ahead of binding.', 'SYS', '2026-06-25 11:30:00', '2026-06-25 11:30:00');
+
+
+-- ============================================================================
+-- Deeper per-customer history (added 2026-08-18)
+-- ============================================================================
+-- Six of the fifteen customers get real depth added for a client demo:
+-- a prior-year (2025) renewed-over policy term linked via priorpolid, a
+-- second (or first) claim, and more afw_transaction activity-log entries.
+-- A few also get an additional invoice. The other nine customers are
+-- untouched — this is a "deeper, not wider" pass per explicit direction.
+--
+-- New UUID prefixes, following the existing file's convention:
+--   95xxxxxx = prior-term (2025, expired/renewed-over) afw_basicpolinfo row
+--   96xxxxxx = prior-term afw_lineofbusiness row
+-- New claims/losshist/invoices/activity reuse the original 89/83/a0/a1
+-- prefixes with additional differentiator digits.
+-- ============================================================================
+
+-- ----------------------------------------------------------------------------
+-- Prior-year (2025) renewed-over policy terms, linked to the current term
+-- via priorpolid
+-- ----------------------------------------------------------------------------
+
+INSERT INTO afw_basicpolinfo (
+  custid, polid, status, polno, shortpolno, typeofbus, poltype, poltypelob, polsubtype,
+  cocode, cotype, writingcocode, execcode, csrcode, brokercode,
+  poleffdate, polexpdate, iscontinuous, renewallist, renewalrptflag,
+  ismultientity, multientityarflag, isposted, issuspended,
+  gldivcode, gldeptcode, billmethod, paypid, instday, glbrnchcode, glgrpcode,
+  billedstmtprem, fulltermpremium, isexcldelete, isfiltered,
+  changedby, changeddate, entereddate
+) VALUES
+  ('80000000-0000-4000-a000-000000000001', '95000000-0000-4000-a000-000000000001', 'X', 'BOP-TN-1001-25', 'TN1001-25', 2, 'P', 'BOP', 'P', 'CUMB', 'C', 'CUMB', 'MKR', 'CLW', 'TBG', '2025-02-01', '2026-02-01', 'Y', 'N', 'N', 'N', 'N', 'Y', 'N', 'DIV', 'DPT', 'A', '23000000-0000-4000-a000-000000000002', 1, 'BR1', 'GRP', 0, 4500.00, 'N', 'N', 'SYS', '2026-02-01 09:00:00', '2025-01-10 09:00:00'),
+  ('80000000-0000-4000-a000-000000000002', '95000000-0000-4000-a000-000000000002', 'X', 'PA-TN-1002-25', 'TN1002-25', 1, 'P', 'PAUTO', 'P', 'CUMB', 'C', 'CUMB', 'AJS', 'DPH', NULL, '2025-03-01', '2026-03-01', 'Y', 'N', 'N', 'N', 'N', 'Y', 'N', 'DIV', 'DPT', 'D', '23000000-0000-4000-a000-000000000001', 1, 'BR1', 'GRP', 0, 1550.00, 'N', 'N', 'SYS', '2026-03-01 09:00:00', '2025-02-10 09:00:00'),
+  ('80000000-0000-4000-a000-000000000004', '95000000-0000-4000-a000-000000000004', 'X', 'BOP-TN-1004-25', 'TN1004-25', 2, 'P', 'BOP', 'P', 'CUMB', 'C', 'CUMB', 'RTM', 'CLW', NULL, '2025-01-01', '2026-01-01', 'Y', 'N', 'N', 'N', 'N', 'Y', 'N', 'DIV', 'DPT', 'A', '23000000-0000-4000-a000-000000000002', 1, 'BR1', 'GRP', 0, 4900.00, 'N', 'N', 'SYS', '2026-01-01 09:00:00', '2024-12-10 09:00:00'),
+  ('80000000-0000-4000-a000-000000000006', '95000000-0000-4000-a000-000000000006', 'X', 'HO-TN-1006-25', 'TN1006-25', 1, 'P', 'HOME', 'P', 'RVRS', 'C', 'RVRS', 'MKR', 'CLW', NULL, '2025-05-01', '2026-05-01', 'Y', 'N', 'N', 'N', 'N', 'Y', 'N', 'DIV', 'DPT', 'D', '23000000-0000-4000-a000-000000000001', 1, 'BR1', 'GRP', 0, 1950.00, 'N', 'N', 'SYS', '2026-05-01 09:00:00', '2025-04-10 09:00:00'),
+  ('80000000-0000-4000-a000-000000000009', '95000000-0000-4000-a000-000000000009', 'X', 'BOP-TN-1009-25', 'TN1009-25', 2, 'P', 'BOP', 'P', 'APPL', 'C', 'APPL', 'AJS', 'CLW', 'TBG', '2025-06-15', '2026-06-15', 'Y', 'N', 'N', 'N', 'N', 'Y', 'N', 'DIV', 'DPT', 'A', '23000000-0000-4000-a000-000000000002', 1, 'BR1', 'GRP', 0, 3200.00, 'N', 'N', 'SYS', '2026-06-15 09:00:00', '2025-05-20 09:00:00'),
+  ('80000000-0000-4000-a000-00000000000b', '95000000-0000-4000-a000-000000000011', 'X', 'WC-TN-1011-25', 'TN1011a-25', 2, 'P', 'WC', 'P', 'CUMB', 'C', 'CUMB', 'MKR', 'CLW', NULL, '2025-07-01', '2026-07-01', 'Y', 'N', 'N', 'N', 'N', 'Y', 'N', 'DIV', 'DPT', 'A', '23000000-0000-4000-a000-000000000002', 1, 'BR1', 'GRP', 0, 11800.00, 'N', 'N', 'SYS', '2026-07-01 09:00:00', '2025-06-10 09:00:00');
+
+UPDATE afw_basicpolinfo SET priorpolid = '95000000-0000-4000-a000-000000000001' WHERE polid = '90000000-0000-4000-a000-000000000001';
+UPDATE afw_basicpolinfo SET priorpolid = '95000000-0000-4000-a000-000000000002' WHERE polid = '90000000-0000-4000-a000-000000000002';
+UPDATE afw_basicpolinfo SET priorpolid = '95000000-0000-4000-a000-000000000004' WHERE polid = '90000000-0000-4000-a000-000000000004';
+UPDATE afw_basicpolinfo SET priorpolid = '95000000-0000-4000-a000-000000000006' WHERE polid = '90000000-0000-4000-a000-000000000006';
+UPDATE afw_basicpolinfo SET priorpolid = '95000000-0000-4000-a000-000000000009' WHERE polid = '90000000-0000-4000-a000-000000000009';
+UPDATE afw_basicpolinfo SET priorpolid = '95000000-0000-4000-a000-000000000011' WHERE polid = '90000000-0000-4000-a000-000000000011';
+
+-- Prior-term lines of business (Tyneside Innovations carries the same
+-- BOP+GL package back into 2025; everyone else is single-LOB, matching
+-- their current term)
+INSERT INTO afw_lineofbusiness (polid, lobid, effdate, expdate, lineofbus, writingcocode, description, insertseqno, changedby, changeddate, entereddate) VALUES
+  ('95000000-0000-4000-a000-000000000001', '96000000-0000-4000-a000-000000000001', '2025-02-01', '2026-02-01', 'BOP', 'CUMB', 'Businessowners Policy', 1, 'SYS', '2026-02-01 09:00:00', '2025-01-10 09:00:00'),
+  ('95000000-0000-4000-a000-000000000001', '96000001-0000-4000-a000-000000000001', '2025-02-01', '2026-02-01', 'GL', 'CUMB', 'General Liability', 1, 'SYS', '2026-02-01 09:00:00', '2025-01-10 09:00:00'),
+  ('95000000-0000-4000-a000-000000000002', '96000000-0000-4000-a000-000000000002', '2025-03-01', '2026-03-01', 'PAUTO', 'CUMB', 'Personal Auto', 1, 'SYS', '2026-03-01 09:00:00', '2025-02-10 09:00:00'),
+  ('95000000-0000-4000-a000-000000000004', '96000000-0000-4000-a000-000000000004', '2025-01-01', '2026-01-01', 'BOP', 'CUMB', 'Businessowners Policy', 1, 'SYS', '2026-01-01 09:00:00', '2024-12-10 09:00:00'),
+  ('95000000-0000-4000-a000-000000000006', '96000000-0000-4000-a000-000000000006', '2025-05-01', '2026-05-01', 'HOME', 'RVRS', 'Homeowners', 1, 'SYS', '2026-05-01 09:00:00', '2025-04-10 09:00:00'),
+  ('95000000-0000-4000-a000-000000000009', '96000000-0000-4000-a000-000000000009', '2025-06-15', '2026-06-15', 'BOP', 'APPL', 'Businessowners Policy', 1, 'SYS', '2026-06-15 09:00:00', '2025-05-20 09:00:00'),
+  ('95000000-0000-4000-a000-000000000011', '96000000-0000-4000-a000-000000000011', '2025-07-01', '2026-07-01', 'WC', 'CUMB', 'Workers Compensation', 1, 'SYS', '2026-07-01 09:00:00', '2025-06-10 09:00:00');
+
+-- Prior-term "New Business" transactions, plus one mid-term endorsement on
+-- Tyneside Innovations' 2025 term
+INSERT INTO afw_policytransaction (polid, effdate, trantype, description, source, billednonprem, isuploaded, billmethodpolt, instdaypolt, paypid, isposted, changedby, changeddate, entereddate) VALUES
+  ('95000000-0000-4000-a000-000000000001', '2025-02-01', 'N', 'New Business', 'E', 0, 'N', 'A', 1, '23000000-0000-4000-a000-000000000002', 'Y', 'SYS', '2025-02-01 09:00:00', '2025-01-10 09:00:00'),
+  ('95000000-0000-4000-a000-000000000001', '2025-09-10', 'E', 'Endorsement - Added additional insured (property management vendor)', 'E', 0, 'N', 'A', 1, '23000000-0000-4000-a000-000000000002', 'Y', 'SYS', '2025-09-10 09:00:00', '2025-09-10 09:00:00'),
+  ('95000000-0000-4000-a000-000000000002', '2025-03-01', 'N', 'New Business', 'E', 0, 'N', 'D', 1, '23000000-0000-4000-a000-000000000001', 'Y', 'SYS', '2025-03-01 09:00:00', '2025-02-10 09:00:00'),
+  ('95000000-0000-4000-a000-000000000004', '2025-01-01', 'N', 'New Business', 'E', 0, 'N', 'A', 1, '23000000-0000-4000-a000-000000000002', 'Y', 'SYS', '2025-01-01 09:00:00', '2024-12-10 09:00:00'),
+  ('95000000-0000-4000-a000-000000000006', '2025-05-01', 'N', 'New Business', 'E', 0, 'N', 'D', 1, '23000000-0000-4000-a000-000000000001', 'Y', 'SYS', '2025-05-01 09:00:00', '2025-04-10 09:00:00'),
+  ('95000000-0000-4000-a000-000000000009', '2025-06-15', 'N', 'New Business', 'E', 0, 'N', 'A', 1, '23000000-0000-4000-a000-000000000002', 'Y', 'SYS', '2025-06-15 09:00:00', '2025-05-20 09:00:00'),
+  ('95000000-0000-4000-a000-000000000011', '2025-07-01', 'N', 'New Business', 'E', 0, 'N', 'A', 1, '23000000-0000-4000-a000-000000000002', 'Y', 'SYS', '2025-07-01 09:00:00', '2025-06-10 09:00:00');
+
+-- Current-term endorsement on Tyneside Innovations — raised the GL
+-- aggregate ahead of a new vendor contract, with the added premium shown
+-- via premoneffdate
+INSERT INTO afw_policytransaction (polid, effdate, trantype, description, source, billednonprem, isuploaded, billmethodpolt, instdaypolt, paypid, premoneffdate, isposted, changedby, changeddate, entereddate) VALUES
+  ('90000000-0000-4000-a000-000000000001', '2026-06-10', 'E', 'Endorsement - Increased GL aggregate limit to $2M/$4M per client request', 'E', 0, 'N', 'A', 1, '23000000-0000-4000-a000-000000000002', 150.00, 'Y', 'SYS', '2026-06-10 09:00:00', '2026-06-10 09:00:00');
+
+-- ----------------------------------------------------------------------------
+-- Additional claims + loss history
+-- ----------------------------------------------------------------------------
+
+INSERT INTO afw_claim (claimid, polid, lineofbus, causeofloss, lossdate, reportdate, claimno, claimstatus, closeddate, status, changedby, changeddate, entereddate) VALUES
+  ('89000001-0000-4000-a000-000000000001', '90000000-0000-4000-a000-000000000001', 'GL', 'General Liability - Slip and Fall', '2026-05-14', '2026-05-15', 'CLM-2026-0512', 'Open', NULL, 'O', 'SYS', '2026-05-15 09:00:00', '2026-05-15 09:00:00'),
+  ('89000001-0000-4000-a000-000000000002', '90000000-0000-4000-a000-000000000002', 'PAUTO', 'Collision - Minor At-Fault Accident', '2026-06-05', '2026-06-06', 'CLM-2026-0606', 'Closed', '2026-06-25', 'C', 'SYS', '2026-06-25 09:00:00', '2026-06-06 09:00:00'),
+  ('89000001-0000-4000-a000-000000000004', '90000000-0000-4000-a000-000000000004', 'BOP', 'Equipment Breakdown', '2026-06-20', '2026-06-21', 'CLM-2026-0622', 'Closed', '2026-07-10', 'C', 'SYS', '2026-07-10 09:00:00', '2026-06-21 09:00:00'),
+  ('89000001-0000-4000-a000-000000000006', '90000000-0000-4000-a000-000000000006', 'HOME', 'Wind/Hail Damage', '2026-04-02', '2026-04-03', 'CLM-2026-0402', 'Closed', '2026-05-01', 'C', 'SYS', '2026-05-01 09:00:00', '2026-04-03 09:00:00'),
+  ('89000001-0000-4000-a000-000000000009', '90000000-0000-4000-a000-000000000009', 'BOP', 'Theft - Outdoor Equipment Inventory', '2026-02-10', '2026-02-11', 'CLM-2026-0210', 'Closed', '2026-03-15', 'C', 'SYS', '2026-03-15 09:00:00', '2026-02-11 09:00:00'),
+  ('89000001-0000-4000-a000-000000000011', '90000000-0000-4000-a000-000000000011', 'WC', 'Workplace Injury - Forklift Operator', '2026-07-20', '2026-07-21', 'CLM-2026-0720', 'Open', NULL, 'O', 'SYS', '2026-07-21 09:00:00', '2026-07-21 09:00:00');
+
+INSERT INTO afw_custlosshist (closshistid, custid, claimid, company, polno, kindofloss, lineofbus, poleffdate, polexpdate, amountpaid, dateofloss, claimstatus, claimno, closeddate, lossdescclhis, changedby, changeddate, entereddate) VALUES
+  ('83000001-0000-4000-a000-000000000001', '80000000-0000-4000-a000-000000000001', '89000001-0000-4000-a000-000000000001', 'Cumberland Gap Mutual Insurance', 'BOP-TN-1001', 'General Liability', 'GL', '2026-02-01', '2027-02-01', 0.00, '2026-05-14', 'Open', 'CLM-2026-0512', NULL, 'Customer reported a client slip-and-fall in the Innovation Way lobby; claim under investigation, reserve pending adjuster review.', 'SYS', '2026-05-15 09:00:00', '2026-05-15 09:00:00'),
+  ('83000001-0000-4000-a000-000000000002', '80000000-0000-4000-a000-000000000002', '89000001-0000-4000-a000-000000000002', 'Cumberland Gap Mutual Insurance', 'PA-TN-1002', 'Collision', 'PAUTO', '2026-03-01', '2027-03-01', 2650.00, '2026-06-05', 'Closed', 'CLM-2026-0606', '2026-06-25', 'Minor at-fault rear-end collision in a parking lot; other vehicle bumper damage, no injuries.', 'SYS', '2026-06-25 09:00:00', '2026-06-06 09:00:00'),
+  ('83000001-0000-4000-a000-000000000004', '80000000-0000-4000-a000-000000000004', '89000001-0000-4000-a000-000000000004', 'Cumberland Gap Mutual Insurance', 'BOP-TN-1004', 'Equipment Breakdown', 'BOP', '2026-01-01', '2027-01-01', 3200.00, '2026-06-20', 'Closed', 'CLM-2026-0622', '2026-07-10', 'Dental x-ray imaging unit failed and required full replacement; covered under equipment breakdown endorsement.', 'SYS', '2026-07-10 09:00:00', '2026-06-21 09:00:00'),
+  ('83000001-0000-4000-a000-000000000006', '80000000-0000-4000-a000-000000000006', '89000001-0000-4000-a000-000000000006', 'Riverstone Casualty & Surety', 'HO-TN-1006', 'Wind/Hail', 'HOME', '2026-05-01', '2027-05-01', 6750.00, '2026-04-02', 'Closed', 'CLM-2026-0402', '2026-05-01', 'Spring storm caused roof shingle and gutter damage; roofer estimate matched adjuster assessment.', 'SYS', '2026-05-01 09:00:00', '2026-04-03 09:00:00'),
+  ('83000001-0000-4000-a000-000000000009', '80000000-0000-4000-a000-000000000009', '89000001-0000-4000-a000-000000000009', 'Appalachian Underwriters Inc', 'BOP-TN-1009', 'Theft', 'BOP', '2026-06-15', '2027-06-15', 4100.00, '2026-02-10', 'Closed', 'CLM-2026-0210', '2026-03-15', 'Overnight break-in at the outfitters retail location; kayaks and outdoor gear stolen from storage room.', 'SYS', '2026-03-15 09:00:00', '2026-02-11 09:00:00'),
+  ('83000001-0000-4000-a000-00000000000b', '80000000-0000-4000-a000-00000000000b', '89000001-0000-4000-a000-000000000011', 'Cumberland Gap Mutual Insurance', 'WC-TN-1011', 'Workers Compensation', 'WC', '2026-07-01', '2027-07-01', 1800.00, '2026-07-20', 'Open', 'CLM-2026-0720', NULL, 'Forklift operator sustained a lower-back strain during a loading dock shift; medical-only claim, lost-time not yet determined.', 'SYS', '2026-07-21 09:00:00', '2026-07-21 09:00:00');
+
+-- ----------------------------------------------------------------------------
+-- Additional invoices
+-- ----------------------------------------------------------------------------
+
+INSERT INTO afw_invoice (
+  invid, invseriesid, custid, polid, invtype, inveffdate, invdate, duedate, invno,
+  polrelation, polno, gldivcode, gldeptcode, glbrnchcode, glgrpcode,
+  brokercode, execcode, repcode, isinstallment, iscancelled, binderstatus,
+  closeddate, closedstatus, arcloseddate, arclosedstatus, dbreccloseddate,
+  ispre35data, isposted, originalinvidinv, voidinvidinv,
+  changedby, changeddate, entereddate
+) VALUES
+  ('a0000002-0000-4000-a000-000000000001', 'a0000002-0000-4000-a000-000000000001', '80000000-0000-4000-a000-000000000001', '90000000-0000-4000-a000-000000000001', 1, '2026-08-01', '2026-08-01', '2026-08-15', 5017, 'P', 'BOP-TN-1001', 'DIV', 'DPT', 'BR1', 'GRP', 'TBG', 'MKR', 'CLW', 'Y', 'N', 'N', '1900-01-01', 'N', '1900-01-01', 'N', '1900-01-01', 'N', 'Y', NULL, NULL, 'SYS', '2026-08-01 09:00:00', '2026-08-01 09:00:00'),
+  ('a0000002-0000-4000-a000-000000000011', 'a0000002-0000-4000-a000-000000000011', '80000000-0000-4000-a000-00000000000b', '90000000-0000-4000-a000-000000000011', 1, '2026-08-15', '2026-08-15', '2026-08-29', 5018, 'P', 'WC-TN-1011', 'DIV', 'DPT', 'BR1', 'GRP', NULL, 'MKR', 'CLW', 'N', 'N', 'N', '2026-08-20', 'Y', '1900-01-01', 'N', '1900-01-01', 'N', 'Y', NULL, NULL, 'SYS', '2026-08-15 09:00:00', '2026-08-15 09:00:00'),
+  ('a0000001-0000-4000-a000-000000000009', 'a0000001-0000-4000-a000-000000000009', '80000000-0000-4000-a000-000000000009', '90000000-0000-4000-a000-000000000009', 1, '2026-09-15', '2026-09-15', '2026-09-29', 5019, 'P', 'BOP-TN-1009', 'DIV', 'DPT', 'BR1', 'GRP', 'TBG', 'AJS', 'CLW', 'Y', 'N', 'N', '1900-01-01', 'N', '1900-01-01', 'N', '1900-01-01', 'N', 'Y', NULL, NULL, 'SYS', '2026-09-15 09:00:00', '2026-09-15 09:00:00');
+
+-- ----------------------------------------------------------------------------
+-- Additional activity log entries
+-- ----------------------------------------------------------------------------
+
+INSERT INTO afw_transaction (tranid, entityid, entitytype, polid, dbaction, trandate, empcode, polno, execcode, csrcode, trantype, commenttran, changedby, changeddate, entereddate) VALUES
+  ('a1000002-0000-4000-a000-000000000001', '80000000-0000-4000-a000-000000000001', 1, '90000000-0000-4000-a000-000000000001', 'I', '2026-05-16 09:30:00', 'CLW', 'BOP-TN-1001', 'MKR', 'CLW', 'N', 'Claim intake call — client reported a slip-and-fall incident at the Innovation Way office; walked through GL claim reporting process.', 'SYS', '2026-05-16 09:30:00', '2026-05-16 09:30:00'),
+  ('a1000003-0000-4000-a000-000000000001', '80000000-0000-4000-a000-000000000001', 1, '90000000-0000-4000-a000-000000000001', 'I', '2026-06-08 13:45:00', 'MKR', 'BOP-TN-1001', 'MKR', 'CLW', 'N', 'Endorsement request received — client asked to raise the GL aggregate to $2M/$4M ahead of a new vendor contract.', 'SYS', '2026-06-08 13:45:00', '2026-06-08 13:45:00'),
+  ('a1000000-0000-4000-a000-000000000002', '80000000-0000-4000-a000-000000000002', 1, '90000000-0000-4000-a000-000000000002', 'I', '2026-06-07 08:50:00', 'DPH', 'PA-TN-1002', 'AJS', 'DPH', 'N', 'Claim follow-up email sent — confirmed adjuster contact info after the minor fender-bender reported 6/5.', 'SYS', '2026-06-07 08:50:00', '2026-06-07 08:50:00'),
+  ('a1000000-0000-4000-a000-000000000004', '80000000-0000-4000-a000-000000000004', 1, '90000000-0000-4000-a000-000000000004', 'I', '2026-06-22 10:00:00', 'CLW', 'BOP-TN-1004', 'RTM', 'CLW', 'N', 'Claim status update call — equipment breakdown claim moving to settlement, expect payment within two weeks.', 'SYS', '2026-06-22 10:00:00', '2026-06-22 10:00:00'),
+  ('a1000001-0000-4000-a000-000000000004', '80000000-0000-4000-a000-000000000004', 1, '90000000-0000-4000-a000-000000000004', 'I', '2026-07-11 15:20:00', 'CLW', 'BOP-TN-1004', 'RTM', 'CLW', 'N', 'Endorsement confirmation email — updated equipment coverage schedule after claim closure.', 'SYS', '2026-07-11 15:20:00', '2026-07-11 15:20:00'),
+  ('a1000000-0000-4000-a000-000000000006', '80000000-0000-4000-a000-000000000006', 1, '90000000-0000-4000-a000-000000000006', 'I', '2026-04-03 11:00:00', 'CLW', 'HO-TN-1006', 'MKR', 'CLW', 'N', 'Adjuster visit scheduled — wind/hail damage to roof, adjuster confirmed for 4/8.', 'SYS', '2026-04-03 11:00:00', '2026-04-03 11:00:00'),
+  ('a1000000-0000-4000-a000-000000000009', '80000000-0000-4000-a000-000000000009', 1, '90000000-0000-4000-a000-000000000009', 'I', '2026-02-12 09:15:00', 'CLW', 'BOP-TN-1009', 'AJS', 'CLW', 'N', 'Theft report follow-up call — police report filed, inventory loss list submitted to carrier.', 'SYS', '2026-02-12 09:15:00', '2026-02-12 09:15:00'),
+  ('a1000001-0000-4000-a000-000000000011', '80000000-0000-4000-a000-00000000000b', 1, '90000000-0000-4000-a000-000000000011', 'I', '2026-07-21 08:40:00', 'CLW', 'WC-TN-1011', 'MKR', 'CLW', 'N', 'Workers comp injury intake call — forklift operator injury reported, OSHA log update discussed.', 'SYS', '2026-07-21 08:40:00', '2026-07-21 08:40:00'),
+  ('a1000002-0000-4000-a000-000000000011', '80000000-0000-4000-a000-00000000000b', 1, '90000000-0000-4000-a000-000000000011', 'I', '2026-08-16 14:10:00', 'MKR', 'WC-TN-1011', 'MKR', 'CLW', 'N', 'Payroll audit completed — audit premium billed, no significant payroll variance from the original estimate.', 'SYS', '2026-08-16 14:10:00', '2026-08-16 14:10:00');
