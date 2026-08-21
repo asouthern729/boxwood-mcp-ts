@@ -1,7 +1,7 @@
 {
   "name": "boxwood-mcp-ts",
   "version": "1.0.0",
-  "description": "Basic MCP server exposing SQL tooling over the boxwood-ams360 Postgres database",
+  "description": "MCP server exposing customer/policy/invoice lookup tools over the boxwood-ams360 Postgres database",
   "type": "module",
   "main": "dist/app.js",
   "scripts": {

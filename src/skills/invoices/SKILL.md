@@ -37,6 +37,7 @@ Only one include exists today. It attaches to the invoice's `polid` — invoices
 - **`polrelation` tells you whether an invoice is policy-specific or customer-level** — don't assume every invoice ties to one policy; a customer-level invoice (fees, adjustments) can have `polid IS NULL`.
 - **The `activity` include is scoped by `polid`, not the raw entity/activity link.** `afw_transaction` actually has a separate polymorphic `entityid`/`entitytype` pair that can attach an activity to non-policy entities (a bank, broker, company, employee, vendor) too — this tool deliberately joins on `polid` instead, because `entitytype`'s code-to-table lookup (`afw_logicaltable`) is still incomplete and can't reliably resolve back to a customer. So `activity` only ever shows policy-tied entries, not every logged interaction with the customer.
 - **`invtype` is a raw int code, not resolved to a label** — `afw_constant` (the general constants/enum table it points to) isn't built yet, so filter by the exact numeric value the data uses rather than a name.
+- **Timestamp fields (`invdate`, `inveffdate`, `duedate`, `changeddate`, `entereddate`) come back agency-local (`America/Chicago`), not UTC** — e.g. `2026-08-21T00:00:00.000-05:00`. No conversion needed on the caller's end.
 
 ## Shared lookup tables joined into every result
 

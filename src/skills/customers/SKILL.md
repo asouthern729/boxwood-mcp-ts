@@ -41,7 +41,8 @@ Pass an array of any of these to attach related record sets to each customer:
 
 - **PII is excluded at the database grant level, not just left out of the query.** `afw_customer.ssn`/`driverslicense`/`fedidno` and `afw_dependent.ssn`/`driverslicense` are not selectable by the role this tool runs as — a direct `run_query` against those columns returns `permission denied`, it isn't just omitted from `customer_lookup`'s output. Don't imply they could be fetched another way.
 - **`mastersubtype`/`mastercustid`** encode Multiple Entity setups — `mastersubtype` is `M` (master) or `S` (sub), and a sub-customer's `mastercustid` points back to the master. Useful for "who are the related entities on this commercial account."
-- **`active`, `typecust`, and other single-char fields are raw AMS360 passthrough codes, not enums** — e.g. `typecust` is `C` (commercial) or `P` (personal) in the seed data, but treat any single-char field as "whatever the source system sent," not a fixed list to validate against.
+- **`active`, `typecust`, and other single-char fields are raw AMS360 passthrough codes, not enums** — e.g. `typecust` is `C` (commercial, 1,780 of 3,004) or `P` (personal, 1,224) in the current book, but treat any single-char field as "whatever the source system sent," not a fixed list to validate against.
+- **Timestamp fields (`changeddate`, `entereddate`, dependents' `dob`) come back agency-local (`America/Chicago`), not UTC** — e.g. `2026-08-21T14:00:00.000-05:00`. No conversion needed on the caller's end.
 - **`loss_history` here is a summary, not the full claim.** Full claim detail (loss location, report authority, catastrophe code, etc.) lives in `afw_claim`, which isn't exposed through any current MCP tool — `loss_history`'s `claimid` is the join key if that ever needs deeper detail via `run_query`.
 
 ## Shared lookup tables joined into every result
@@ -58,4 +59,4 @@ Pass an array of any of these to attach related record sets to each customer:
 - "What's this commercial account's claims history?" → `include: ["loss_history"]`
 - "Which prospects have outside business expiring soon we could quote?" → browse with `active: "N"` (or no filter) + `include: ["expiring_business"]`, inspect `expdate`/`interestlevel`
 - "Who's on the service team for this account besides the CSR?" → `include: ["service_team"]`
-- "Show me all active commercial customers in Tyneside sorted by name" → `city: "Tyneside"`, `active: "Y"`, default `sort`
+- "Show me all active commercial customers in Franklin sorted by name" → `city: "Franklin"`, `active: "Y"`, default `sort`

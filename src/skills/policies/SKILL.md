@@ -15,7 +15,7 @@ Two modes:
   - `polno` — partial match against policy number or short policy number
   - `custid` — policies belonging to one customer (use this to get a customer's full book, current + expired terms)
   - `status` — exact match, single raw AMS360 status char (e.g. `A` active, `X` expired/renewed-over — passthrough, not a fixed enum)
-  - `typeofbus` — exact match, integer code (`1` personal, `2` commercial in the seed data)
+  - `typeofbus` — exact match, integer code. `1` (personal) and `2` (commercial) dominate the book (10,308 and 5,947 policies respectively); `0`/`3`/`4`/`5`/`6`/`7` also appear in small numbers and aren't decoded anywhere (no `afw_constant` lookup built) — don't assume it's strictly binary
   - `carrier_code` — exact match against `afw_basicpolinfo.cocode`
   - `csr_code` — exact match
 
@@ -41,6 +41,7 @@ Every result already has carrier name, writing-carrier name, exec/CSR name, brok
 - **`underwriter`, `masteragent`, `ticomid`, `istid` exist on `afw_basicpolinfo` but don't resolve to names.** Their lookup tables (`afw_underwriter`, `afw_masteragent`, `afw_defaulttieredcommission`, `afw_invoicesplittemplate`) aren't built yet — these come back as raw text/ids if selected via `run_query`, and `policy_query`'s core result doesn't surface them at all.
 - **`coverage`'s `attachid`/`attachtype` polymorphic pair doesn't resolve** — the `afw_logicaltable` code-to-table lookup behind it is incomplete, so don't try to chase what `attachid` "points to" beyond the coverage row itself.
 - **Endorsements live in `transactions`, not as edits to the policy row** — `afw_basicpolinfo.fulltermpremium` is the term total; a mid-term premium change shows up as a new `afw_policytransaction` row (`trantype = 'E'`) with its own `premoneffdate`, not a mutation of the original figure.
+- **Timestamp fields (`poleffdate`, `polexpdate`, `changeddate`, `entereddate`, etc.) come back agency-local (`America/Chicago`), not UTC** — e.g. `2026-08-21T00:00:00.000-05:00`. No conversion needed on the caller's end.
 
 ## Shared lookup tables joined into every result
 

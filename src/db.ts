@@ -1,4 +1,5 @@
 import { Pool } from "pg"
+import { formatTimestampColumn } from "./utils/localTime.js"
 
 export const pool = new Pool()
 
@@ -11,39 +12,22 @@ export async function runReadOnlyQuery(sql: string, params: unknown[] = []) {
     await client.query("BEGIN TRANSACTION READ ONLY")
     await client.query(`SET LOCAL statement_timeout = ${ STATEMENT_TIMEOUT_MS }`)
     const result = await client.query(sql, params)
-    return result.rows
+    return result.rows.map(localizeTimestamps)
   } finally {
     await client.query("ROLLBACK")
     client.release()
   }
 }
 
-export const devToolsEnabled = process.env.ENABLE_DEV_TOOLS === "true"
+// Every tool reads through this function, so this is the single place that converts raw
+// timestamp/date columns (which pg parses into Date objects) to agency-local, offset-suffixed
+// strings before they ever reach a client — see utils/localTime.ts for why.
+function localizeTimestamps(row: Record<string, unknown>): Record<string, unknown> {
+  const localized: Record<string, unknown> = {}
 
-const devPool = devToolsEnabled ?
-  new Pool({
-    host: process.env.PGHOST,
-    port: Number(process.env.PGPORT) || 5432,
-    database: process.env.PGDATABASE,
-    user: process.env.DEV_PGUSER,
-    password: process.env.DEV_PGPASSWORD
-  }) :
-  undefined
-
-export async function runWriteQuery(sql: string, params: unknown[] = []) {
-  if(!devPool) throw new Error("Dev tools are disabled")
-
-  const client = await devPool.connect()
-
-  try {
-    await client.query("BEGIN")
-    const result = await client.query(sql, params)
-    await client.query("COMMIT")
-    return result.rows
-  } catch(error) {
-    await client.query("ROLLBACK")
-    throw error
-  } finally {
-    client.release()
+  for(const [key, value] of Object.entries(row)) {
+    localized[key] = value instanceof Date ? formatTimestampColumn(value, key) : value
   }
+
+  return localized
 }
