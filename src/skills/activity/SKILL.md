@@ -26,13 +26,15 @@ Narrow with any combination of:
 |---|---|---|---|
 | `policy_transaction` | `afw_policytransaction` | An endorsement/renewal/cancellation/new-business transaction | Richest signal — `summary` is `trantype: description`. PK is `(polid, effdate)`, so `source_id` is `polid:effdate`, not just `polid` — a policy can have several transactions in the same window. |
 | `policy` | `afw_basicpolinfo` | A policy term header change | Catches status/term changes not captured as their own transaction row. `summary` is the raw status code, not decoded (no status lookup exists yet — same as `policy_query`). |
-| `claim` | `afw_claim` | A claim record change | |
+| `claim` | `afw_claim` | A claim record change | `source_id` is the `claimid` — pass it to `claim_lookup` (see the `claims` skill) for full claim detail (cause, loss location, report chain), which this feed doesn't surface beyond the `summary` string. |
 | `invoice` | `afw_invoice` | An invoice/billing change | Uses `changeddate`, not `invdate`/`inveffdate` — an invoice can show up here without being newly issued, e.g. a void. |
 | `activity` | `afw_transaction` | A staff-logged communication/note | `commenttran` is the summary. The only domain where `changed_by` is regularly a real staff member rather than a system code. |
 
 ## `changed_by_type` classification
 
 `changedby` is a real identity/foreign-key value — it renders as an opaque short code (e.g. `"!!Z"`) rather than something human-readable (see `ams360-code-encoding-investigation.md` at the repo root for the open investigation into why), but a given code reliably and consistently resolves to the same `afw_employee` row every time. Matching it against `afw_employee.empcode` is a sound, ordinary FK lookup — that part isn't in question.
+
+**The tool's `changed_by` output field is this raw code, unresolved to a name.** It has no inherent meaning to an end user — never paste it into an answer as if it were an identifier the user could do anything with (e.g. don't say "changed by `!!Z`"). If who-made-the-change matters, resolve the code against `afw_employee` (or use `customer_lookup`'s `service_team`/`policy_query`'s `personnel` include, which already join to `afw_employee` for a name) before answering, or fall back to the `changed_by_type` classification (staff vs. system) below.
 
 What *is* not safe to assume: that "matches an employee row" means "a human did this." **AMS360 represents its own system/integration accounts as real rows in `afw_employee`** — `DBO`, `API Services`, `Conversion Service`, and `Administrator` all have `empcode`s and would pass a naive `changedby IN (SELECT empcode FROM afw_employee)` check as `"staff"`. So classification excludes these explicitly:
 

@@ -10,7 +10,8 @@ const INCLUDE_OPTIONS = [
   "coverage",
   "personnel",
   "submissions",
-  "attributes"
+  "attributes",
+  "contacts"
 ] as const
 
 type Include = typeof INCLUDE_OPTIONS[number]
@@ -60,6 +61,14 @@ const INCLUDE_QUERIES: Record<Include, string> = {
     JOIN afw_policyattributetype t ON a.policyattributetypeid = t.policyattributetypeid
     WHERE a.polid = ANY($1::uuid[])
     ORDER BY t.policyattributetypename
+  `,
+  contacts: `
+    SELECT polid, polcid, name, title, responsibility, status,
+      areacode, phone, ext, mobileareacode, mobilephone,
+      email, contactmethod, notes
+    FROM afw_polcontact
+    WHERE polid = ANY($1::uuid[])
+    ORDER BY polid, name
   `
 }
 
@@ -111,7 +120,7 @@ export function registerPolicyQueryTool(server: McpServer) {
   server.registerTool(
     "policy_query",
     {
-      description: "Look up policy/policies by ID, or browse/search policies by policy number, owning customer, and coarse filters (status, type of business, carrier, CSR), with sorting and pagination. With no filters at all, returns a paginated list of all policies. Resolves carrier/producer/CSR/broker/GL names inline. Optionally include related records (transactions, lines of business, coverage, personnel, submissions, attributes).",
+      description: "Look up policy/policies by ID, or browse/search policies by policy number, owning customer, and coarse filters (status, type of business, carrier, CSR), with sorting and pagination. With no filters at all, returns a paginated list of all policies. Resolves carrier/producer/CSR/broker/GL names inline. Optionally include related records (transactions, lines of business, coverage, personnel, submissions, attributes, policy-level contacts).",
       inputSchema: {
         polid: z.string().uuid().describe("Exact policy ID (afw_basicpolinfo.polid)").optional(),
         polno: z.string().describe("Partial match against policy number or short policy number").optional(),

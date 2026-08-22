@@ -49,14 +49,14 @@ export function registerUpcomingRenewalsTool(server: McpServer) {
   server.registerTool(
     "upcoming_renewals",
     {
-      description: "Answer \"what's renewing soon?\" — active policy terms (afw_basicpolinfo) whose polexpdate falls within a day window from now. Excludes marketing/submission shells, non-active terms, and terms that already have a successor via priorpolid (already renewed). Resolves carrier/producer/CSR/customer names inline and flags whether a renewal transaction (RWL/RWQ) already exists. Optionally scope by producer, CSR, carrier, or type of business, and group counts by producer or carrier.",
+      description: "Answer \"what's renewing soon?\" — active policy terms (afw_basicpolinfo) whose polexpdate falls within a day window from now. Excludes marketing/submission shells, non-active terms, and terms that already have a successor via priorpolid (already renewed). Resolves carrier/producer/CSR/customer names inline and flags whether a renewal transaction (RWL/RWQ) already exists. Optionally scope by producer, CSR, carrier, or type of business, and group by producer or carrier for a count plus premium sum/average within the window (e.g. \"premium renewing next quarter, by carrier\").",
       inputSchema: {
         within_days: z.number().int().min(1).max(365).default(30).describe("Renewal window in days from now"),
         producer_code: z.string().describe("Exact match against producer/exec employee code (afw_basicpolinfo.execcode)").optional(),
         csr_code: z.string().describe("Exact match against CSR employee code (afw_basicpolinfo.csrcode)").optional(),
         carrier_code: z.string().describe("Exact match against carrier code (afw_basicpolinfo.cocode)").optional(),
         typeofbus: z.number().int().describe("Exact match against type-of-business code (afw_basicpolinfo.typeofbus)").optional(),
-        group_by: z.enum(["producer", "carrier", "none"]).default("none").describe("Include a count breakdown grouped by producer or carrier"),
+        group_by: z.enum(["producer", "carrier", "none"]).default("none").describe("Include a breakdown (count + premium sum/average) grouped by producer or carrier, scoped to the same renewal window"),
         limit: z.number().int().min(1).max(200).default(25).describe("Max results to return per page"),
         offset: z.number().int().min(0).default(0).describe("Number of results to skip")
       }
@@ -109,16 +109,22 @@ export function registerUpcomingRenewalsTool(server: McpServer) {
         if(group_by !== "none") {
           const dimension = BREAKDOWN_DIMENSIONS[group_by as Exclude<GroupBy, "none">]
           const breakdownSql = `
-            SELECT ${ dimension.select }, COUNT(*)::int AS count
+            SELECT ${ dimension.select }, COUNT(*)::int AS count,
+              SUM(p.fulltermpremium) AS premium_sum, AVG(p.fulltermpremium) AS premium_avg
             FROM afw_basicpolinfo p
             ${ dimension.join }
             WHERE ${ whereClause }
             GROUP BY 1, 2
             ORDER BY count DESC
           `
-          const breakdownRows = await runReadOnlyQuery(breakdownSql, params) as { key: string; label: string; count: number }[]
+          const breakdownRows = await runReadOnlyQuery(breakdownSql, params) as {
+            key: string; label: string; count: number; premium_sum: string | null; premium_avg: string | null
+          }[]
 
-          response.breakdown = breakdownRows.map((row) => ({ code: row.key, label: row.label, count: row.count }))
+          response.breakdown = breakdownRows.map((row) => ({
+            code: row.key, label: row.label, count: row.count,
+            premium_sum: row.premium_sum, premium_avg: row.premium_avg
+          }))
         }
 
         return textResult(response)

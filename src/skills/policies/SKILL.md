@@ -42,6 +42,7 @@ Every result already has carrier name, writing-carrier name, exec/CSR name, brok
 - **`coverage`'s `attachid`/`attachtype` polymorphic pair doesn't resolve** — the `afw_logicaltable` code-to-table lookup behind it is incomplete, so don't try to chase what `attachid` "points to" beyond the coverage row itself.
 - **Endorsements live in `transactions`, not as edits to the policy row** — `afw_basicpolinfo.fulltermpremium` is the term total; a mid-term premium change shows up as a new `afw_policytransaction` row (`trantype = 'E'`) with its own `premoneffdate`, not a mutation of the original figure.
 - **Timestamp fields (`poleffdate`, `polexpdate`, `changeddate`, `entereddate`, etc.) come back agency-local (`America/Chicago`), not UTC** — e.g. `2026-08-21T00:00:00.000-05:00`. No conversion needed on the caller's end.
+- **`changedby` on the core result is a raw AMS360 code (e.g. `!!Z`), not a name — it isn't resolved in this tool's output.** It has no inherent meaning to an end user and should never be surfaced verbatim in an answer. It's an `afw_employee.empcode`, but the code alone doesn't tell you whether a human or a system/integration account made the change (see the `activity` skill's `changed_by_type` classification). If the user needs who changed a record, say that and point at `activity_feed`/`afw_employee` rather than printing the code.
 
 ## Shared lookup tables joined into every result
 

@@ -4,6 +4,9 @@ import { registerPolicyQueryTool } from "./tools/policyQuery.js"
 import { registerInvoiceLookupTool } from "./tools/invoiceLookup.js"
 import { registerActivityFeedTool } from "./tools/activityFeed.js"
 import { registerUpcomingRenewalsTool } from "./tools/upcomingRenewals.js"
+import { registerClaimLookupTool } from "./tools/claimLookup.js"
+import { registerBookSummaryTool } from "./tools/bookSummary.js"
+import { registerEmployeeLookupTool } from "./tools/employeeLookup.js"
 
 export function createServer() {
   const server = new McpServer({
@@ -16,6 +19,9 @@ export function createServer() {
   registerInvoiceLookupTool(server)
   registerActivityFeedTool(server)
   registerUpcomingRenewalsTool(server)
+  registerClaimLookupTool(server)
+  registerBookSummaryTool(server)
+  registerEmployeeLookupTool(server)
 
   return server
 }

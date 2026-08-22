@@ -2,6 +2,7 @@ import { McpServer } from "@modelcontextprotocol/sdk/server/mcp.js"
 import * as z from "zod"
 import { runReadOnlyQuery } from "../db.js"
 import { resolveSince, resolveUntil } from "../utils/dateRange.js"
+import { systemEmployeeCondition } from "../utils/employeeClassification.js"
 import { logger } from "../utils/logger.js"
 import { errorResult, textResult } from "../utils/mcpHelpers.js"
 
@@ -9,21 +10,12 @@ const DOMAIN_OPTIONS = ["policy_transaction", "policy", "claim", "invoice", "act
 
 const CUSTOMER_NAME_EXPR = "COALESCE(c.dba, NULLIF(TRIM(CONCAT_WS(' ', c.firstname, c.lastname)), ''))"
 
-// afw_employee rows exist for AMS360's own system/integration accounts (DBO, API Services,
-// Conversion Service, Administrator, third-party integrations flagged status='S', etc.), so
-// "changedby matches an empcode" alone doesn't imply a human made the change — these known
-// non-human accounts have to be excluded explicitly.
-const SYSTEM_EMPLOYEE_LASTNAMES = ["dbo", "api services", "conversion service", "administrator", "login", "vertafore", "test", "testuser"]
-
 function changedByTypeExpr(changedByColumn: string): string {
-  const lastnameList = SYSTEM_EMPLOYEE_LASTNAMES.map((name) => `'${ name }'`).join(", ")
-
   return `
     CASE WHEN EXISTS (
       SELECT 1 FROM afw_employee e
       WHERE e.empcode = ${ changedByColumn }
-        AND e.status <> 'S'
-        AND lower(e.lastname) NOT IN (${ lastnameList })
+        AND NOT ${ systemEmployeeCondition("e") }
     ) THEN 'staff' ELSE 'system' END
   `
 }

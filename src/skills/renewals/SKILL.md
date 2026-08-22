@@ -40,6 +40,8 @@ There are three other renewal-adjacent `trantype` codes in the data (`RWX`, `RRQ
 
 `execcode` is the producer/agent of record (who sold and owns the account); `csrcode` is the customer service rep (who services it day-to-day). They're frequently different people. `producer_code` filters on `execcode` — if a request says "CSR" instead of "producer" or "agent," use `csr_code` instead.
 
+Unlike `changedby` elsewhere in this domain (see the `activity`/`customers`/`policies`/`invoices` skills), `execcode`/`csrcode` here are always resolved to a producer/CSR name in the core result and in the `producer`/`carrier` breakdown labels — there's no raw employee code to accidentally surface to the end user. If this tool is ever extended to expose another employee-linked field, resolve it to a name before returning it rather than passing through the bare code.
+
 ## Common questions → calls
 
 - "What's renewing in the next 30 days?" → `within_days: 30` (the default — can omit)
