@@ -17,6 +17,7 @@ Narrow with any combination of:
 - `domains` — subset of `["policy_transaction", "policy", "claim", "invoice", "activity"]`. Defaults to all five.
 - `changed_by_type` — `"staff"`, `"system"`, or `"any"` (default). See classification below.
 - `custid` / `polid` — scope to one customer or one policy.
+- `csr_code` — scope to customers assigned to one CSR (exact match against `afw_customer.csrcode`). This is the customer's CSR, not the policy's — a policy-level `csrcode` (`afw_basicpolinfo`) can differ but isn't checked here. **`csr_code` is a raw, opaque AMS360 employee code (e.g. `!!C`) — it's for querying only.** It doesn't come back in the tool's output, but you'll typically need to resolve a name to a code first (e.g. via `employee_lookup`) to build the filter; when you do, refer to that person by name in your answer, never by the code you queried with.
 
 `group_by` (default `"none"`) adds a `breakdown` array alongside `results`, grouped by `"domain"` or `"changed_by_type"` — a separate count query over the same filters, not a client-side tally. `limit` (default 25, max 200) + `offset` paginate; response includes `has_more`.
 
@@ -63,3 +64,4 @@ The `lastname` list is a maintained set of AMS360's known built-in/vendor accoun
 - "Break down last week's activity by type" → `since: "7d"`, `group_by: "domain"`
 - "What has staff (not the download) touched recently?" → `changed_by_type: "staff"`
 - "Show me claim activity in the last quarter" → `since: "90d"`, `domains: ["claim"]`
+- "What recent activity impacts Kimbra's customers?" → `since: "7d"` (or whatever window), `csr_code: "<Kimbra's empcode>"` (look it up via `employee_lookup` if you only have her name)

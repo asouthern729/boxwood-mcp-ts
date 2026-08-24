@@ -25,7 +25,7 @@ const FEED_SUBQUERY = `
     SELECT
       pt.changeddate AS changed_at, pt.changedby AS changed_by,
       ${ changedByTypeExpr("pt.changedby") } AS changed_by_type,
-      'policy_transaction' AS domain, bp.custid, pt.polid,
+      'policy_transaction' AS domain, bp.custid, pt.polid, c.csrcode,
       ${ CUSTOMER_NAME_EXPR } AS customer_name,
       bp.polno AS policy_no,
       pt.trantype || ': ' || pt.description AS summary,
@@ -41,7 +41,7 @@ const FEED_SUBQUERY = `
     SELECT
       bp.changeddate, bp.changedby,
       ${ changedByTypeExpr("bp.changedby") },
-      'policy', bp.custid, bp.polid,
+      'policy', bp.custid, bp.polid, c.csrcode,
       ${ CUSTOMER_NAME_EXPR },
       bp.polno,
       'Policy status: ' || bp.status,
@@ -55,7 +55,7 @@ const FEED_SUBQUERY = `
     SELECT
       cl.changeddate, cl.changedby,
       ${ changedByTypeExpr("cl.changedby") },
-      'claim', bp.custid, cl.polid,
+      'claim', bp.custid, cl.polid, c.csrcode,
       ${ CUSTOMER_NAME_EXPR },
       bp.polno,
       'Claim ' || COALESCE(cl.claimno, cl.claimid::text) || ' (' || cl.claimstatus || ')',
@@ -70,7 +70,7 @@ const FEED_SUBQUERY = `
     SELECT
       inv.changeddate, inv.changedby,
       ${ changedByTypeExpr("inv.changedby") },
-      'invoice', inv.custid, inv.polid,
+      'invoice', inv.custid, inv.polid, c.csrcode,
       ${ CUSTOMER_NAME_EXPR },
       inv.polno,
       'Invoice #' || inv.invno || CASE WHEN inv.iscancelled = 'Y' THEN ' (voided)' ELSE '' END,
@@ -86,7 +86,7 @@ const FEED_SUBQUERY = `
       ${ changedByTypeExpr("tr.changedby") },
       'activity',
       COALESCE(bp.custid, CASE WHEN tr.entitytype = 4 THEN tr.entityid::uuid END),
-      tr.polid,
+      tr.polid, c.csrcode,
       ${ CUSTOMER_NAME_EXPR },
       tr.polno,
       tr.commenttran,
@@ -103,6 +103,7 @@ const FEED_FILTER = `
   AND ($4::text IS NULL OR changed_by_type = $4)
   AND ($5::uuid IS NULL OR custid = $5)
   AND ($6::uuid IS NULL OR polid = $6)
+  AND ($7::text IS NULL OR csrcode = $7)
 `
 
 const DETAIL_QUERY = `
@@ -110,7 +111,7 @@ const DETAIL_QUERY = `
   FROM ${ FEED_SUBQUERY }
   WHERE ${ FEED_FILTER }
   ORDER BY changed_at DESC
-  LIMIT $7 OFFSET $8
+  LIMIT $8 OFFSET $9
 `
 
 const BREAKDOWN_QUERIES = {
@@ -136,7 +137,7 @@ export function registerActivityFeedTool(server: McpServer) {
   server.registerTool(
     "activity_feed",
     {
-      description: "Answer \"what's changed lately\" by querying changeddate/changedby across policy transactions, policy term changes, claims, invoices, and staff activity notes, joined back to customer/policy context. Accepts a required time window (ISO timestamp or relative shorthand like \"24h\"/\"7d\"/\"30d\"), with optional domain/changed-by-type/customer/policy scoping and pagination. Optionally group counts by domain or changed-by-type.",
+      description: "Answer \"what's changed lately\" by querying changeddate/changedby across policy transactions, policy term changes, claims, invoices, and staff activity notes, joined back to customer/policy context. Accepts a required time window (ISO timestamp or relative shorthand like \"24h\"/\"7d\"/\"30d\"), with optional domain/changed-by-type/customer/policy/CSR scoping and pagination. Optionally group counts by domain or changed-by-type.",
       inputSchema: {
         since: z.string().describe('Start of window: ISO timestamp or relative shorthand ("1h", "24h", "7d", "30d")'),
         until: z.string().describe("End of window, ISO timestamp. Defaults to now").optional(),
@@ -144,18 +145,19 @@ export function registerActivityFeedTool(server: McpServer) {
         changed_by_type: z.enum(["system", "staff", "any"]).default("any").describe("Filter to system-driven or staff-driven changes"),
         custid: z.string().uuid().describe("Scope to one customer").optional(),
         polid: z.string().uuid().describe("Scope to one policy").optional(),
+        csr_code: z.string().describe("Scope to customers assigned to one CSR (exact match against afw_customer.csrcode)").optional(),
         group_by: z.enum(["domain", "changed_by_type", "none"]).default("none").describe("Include a breakdown summary grouped by domain or changed-by-type"),
         limit: z.number().int().min(1).max(200).default(25).describe("Max results to return per page"),
         offset: z.number().int().min(0).default(0).describe("Number of results to skip")
       }
     },
-    async ({ since, until, domains, changed_by_type, custid, polid, group_by, limit, offset }) => {
+    async ({ since, until, domains, changed_by_type, custid, polid, csr_code, group_by, limit, offset }) => {
       try {
         const sinceDate = resolveSince(since)
         const untilDate = resolveUntil(until)
         const domainsParam = domains && domains.length > 0 ? domains : null
         const changedByTypeParam = changed_by_type === "any" ? null : changed_by_type
-        const filterParams = [sinceDate, untilDate, domainsParam, changedByTypeParam, custid ?? null, polid ?? null]
+        const filterParams = [sinceDate, untilDate, domainsParam, changedByTypeParam, custid ?? null, polid ?? null, csr_code ?? null]
 
         let rows = await runReadOnlyQuery(DETAIL_QUERY, [...filterParams, limit + 1, offset])
 
@@ -180,7 +182,7 @@ export function registerActivityFeedTool(server: McpServer) {
 
         return textResult(response)
       } catch(error) {
-        logger.error({ err: error, since, until, domains, changed_by_type, custid, polid, group_by, limit, offset }, "activity_feed failed")
+        logger.error({ err: error, since, until, domains, changed_by_type, custid, polid, csr_code, group_by, limit, offset }, "activity_feed failed")
         return errorResult(error)
       }
     }
