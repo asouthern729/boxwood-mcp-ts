@@ -2,7 +2,7 @@
 // Conversion Service, Administrator, third-party integrations flagged status='S', etc.), so
 // a code matching an empcode doesn't by itself mean a human — these known non-human accounts
 // have to be excluded explicitly wherever a code is being reported/labeled as a person.
-export const SYSTEM_EMPLOYEE_LASTNAMES = ["dbo", "api services", "conversion service", "administrator", "login", "vertafore", "test", "testuser"]
+export const SYSTEM_EMPLOYEE_LASTNAMES = ["dbo", "api services", "conversion service", "administrator", "login", "vertafore", "test", "testuser", "house account"]
 
 // Raw boolean predicate (not wrapped in EXISTS) against an already-joined afw_employee alias.
 export function systemEmployeeCondition(employeeAlias: string): string {

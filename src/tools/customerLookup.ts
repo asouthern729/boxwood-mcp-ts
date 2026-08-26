@@ -81,7 +81,7 @@ const INCLUDE_QUERIES: Record<Include, string> = {
 
 const CORE_QUERY = `
   SELECT
-    c.custid, c.custno, c.lastname, c.firstname, c.dba, c.typecust, c.typeentity, c.active,
+    c.custid, c.custno, c.lastname, c.firstname, c.dba, c.firmnamecust, c.typecust, c.typeentity, c.active,
     c.addr1, c.addr2, c.city, c.state, c.zipcode, c.country,
     c.resareacode, c.resphone, c.busareacode, c.busphone, c.email,
     c.mastersubtype, c.mastercustid,
@@ -120,7 +120,7 @@ export function registerCustomerLookupTool(server: McpServer) {
   server.registerTool(
     "customer_lookup",
     {
-      description: "Look up customer(s) by ID or customer number, or browse/search customers by name and coarse filters (active, city, state, producer, CSR), with sorting and pagination. With no filters at all, returns a paginated list of all customers. Resolves producer/CSR/broker/GL names inline. Optionally include related records (contacts, dependents, loss history, attributes, relationships, cross-references, expiring outside business, service team).",
+      description: "Look up customer(s) by ID or customer number, or browse/search customers by name and coarse filters (active, city, state, producer, CSR), with sorting and pagination. With no filters at all, returns a paginated list of all customers. Resolves producer/CSR/broker/GL names inline. Optionally include related records (contacts, dependents, loss history, attributes, relationships, cross-references, expiring outside business, service team). IMPORTANT: for a commercial/business customer, `lastname`/`firstname`/`dba` are often all null — use `firmnamecust` (the business name) as the display name in that case; the `name` filter already searches it alongside lastname/firstname/dba.",
       inputSchema: {
         custid: z.string().uuid().describe("Exact customer ID (afw_customer.custid)").optional(),
         custno: z.number().int().describe("Exact customer number (afw_customer.custno)").optional(),
@@ -152,7 +152,7 @@ export function registerCustomerLookupTool(server: McpServer) {
 
           if(name) {
             params.push(`%${ name }%`)
-            conditions.push(`(c.lastname ILIKE $${ params.length } OR c.firstname ILIKE $${ params.length } OR c.dba ILIKE $${ params.length })`)
+            conditions.push(`(c.lastname ILIKE $${ params.length } OR c.firstname ILIKE $${ params.length } OR c.dba ILIKE $${ params.length } OR c.firmnamecust ILIKE $${ params.length })`)
           }
           if(active) {
             params.push(active)

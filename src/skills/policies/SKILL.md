@@ -14,7 +14,8 @@ Two modes:
 - **Browse/search** — no filters returns a paginated list of *all* policy terms. Narrow with any combination of:
   - `polno` — partial match against policy number or short policy number
   - `custid` — policies belonging to one customer (use this to get a customer's full book, current + expired terms)
-  - `status` — exact match, single raw AMS360 status char (e.g. `A` active, `X` expired/renewed-over — passthrough, not a fixed enum)
+  - `status` — exact match, single raw AMS360 status char. Only `A`/`C`/`D` appear in this data (no `X`) — and despite the name, `status` does **not** track renewal-chain lifecycle: most currently in-force terms carry `status='C'`, not `'A'`. Don't use it to mean "active/current."
+  - `renewalrptflag` — exact match, single char. This is the field that actually identifies the currently in-force term in a renewal chain — pass `"A"` to get only current terms. Other observed values: `R` (renewed-over), `C`, `E`, `N`, `Q`, `T`, `W` (rarer, less thoroughly verified).
   - `typeofbus` — exact match, integer code. `1` (personal) and `2` (commercial) dominate the book (10,308 and 5,947 policies respectively); `0`/`3`/`4`/`5`/`6`/`7` also appear in small numbers and aren't decoded anywhere (no `afw_constant` lookup built) — don't assume it's strictly binary
   - `carrier_code` — exact match against `afw_basicpolinfo.cocode`
   - `csr_code` — exact match
@@ -36,8 +37,8 @@ Every result already has carrier name, writing-carrier name, exec/CSR name, brok
 
 ## Domain gotchas
 
-- **Renewal chains are `priorpolid`/`sourcepolid`, not a "policy history" table.** Each policy *term* is its own `afw_basicpolinfo` row; a renewed policy shows up as a separate `polid` with `priorpolid` pointing back at the prior term's `polid`. To show a customer's multi-year history for one risk, browse `custid` + walk the `priorpolid` chain (or filter `status` to see current vs. expired terms) rather than expecting one row to carry multi-year data.
-- **`status`/`typeofbus`/`poltype`/`polsubtype` are raw AMS360 passthrough codes**, not validated enums — filter with the exact character/int the data uses, don't assume a fixed code list.
+- **Renewal chains are `priorpolid`/`sourcepolid`, not a "policy history" table.** Each policy *term* is its own `afw_basicpolinfo` row; a renewed policy shows up as a separate `polid` with `priorpolid` pointing back at the prior term's `polid`. To show a customer's multi-year history for one risk, browse `custid` + walk the `priorpolid` chain (or filter `renewalrptflag: "A"` to see just the current term) rather than expecting one row to carry multi-year data.
+- **`status` looks like it should mean "active vs. cancelled/expired" but doesn't — use `renewalrptflag` for that instead.** This is a confirmed, previously-shipped mistake (it undercounted the active book by ~8x in `book_summary`/`upcoming_renewals` before being fixed there). `typeofbus`/`poltype`/`polsubtype` are raw AMS360 passthrough codes too, not validated enums — filter with the exact character/int the data uses, don't assume a fixed code list.
 - **`underwriter`, `masteragent`, `ticomid`, `istid` exist on `afw_basicpolinfo` but don't resolve to names.** Their lookup tables (`afw_underwriter`, `afw_masteragent`, `afw_defaulttieredcommission`, `afw_invoicesplittemplate`) aren't built yet — these come back as raw text/ids if selected via `run_query`, and `policy_query`'s core result doesn't surface them at all.
 - **`coverage`'s `attachid`/`attachtype` polymorphic pair doesn't resolve** — the `afw_logicaltable` code-to-table lookup behind it is incomplete, so don't try to chase what `attachid` "points to" beyond the coverage row itself.
 - **Endorsements live in `transactions`, not as edits to the policy row** — `afw_basicpolinfo.fulltermpremium` is the term total; a mid-term premium change shows up as a new `afw_policytransaction` row (`trantype = 'E'`) with its own `premoneffdate`, not a mutation of the original figure.
@@ -56,9 +57,9 @@ Every result already has carrier name, writing-carrier name, exec/CSR name, brok
 ## Common questions → calls
 
 - "Show me policy BOP-TN-1001" → `polno: "BOP-TN-1001"` (or `polid` if known)
-- "What policies does this customer have, including expired ones?" → `custid`, no `status` filter (add `status: "A"` to see only current terms)
+- "What policies does this customer have, including expired ones?" → `custid`, no filter (add `renewalrptflag: "A"` to see only the current term)
 - "What's this policy's endorsement history?" → `include: ["transactions"]`, read `trantype`/`description`/`premoneffdate` per row
 - "What lines of business are on this commercial account's policy?" → `include: ["lines_of_business"]`
 - "Who gets commission on this policy and how is it split?" → `include: ["personnel"]`
-- "Show all active WC policies" → `typeofbus: 2` + `status: "A"`, filter results client-side by LOB or check `include: ["lines_of_business"]`
+- "Show all active WC policies" → `typeofbus: 2` + `renewalrptflag: "A"`, filter results client-side by LOB or check `include: ["lines_of_business"]`
 - "Trace this policy's renewal history" → look up the current term, note `priorpolid`, then `polid` lookup on that id, repeating until `priorpolid` is null

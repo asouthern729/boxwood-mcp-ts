@@ -26,7 +26,7 @@ Narrow with any combination of:
 | domain | table | row = | notes |
 |---|---|---|---|
 | `policy_transaction` | `afw_policytransaction` | An endorsement/renewal/cancellation/new-business transaction | Richest signal — `summary` is `trantype: description`. PK is `(polid, effdate)`, so `source_id` is `polid:effdate`, not just `polid` — a policy can have several transactions in the same window. |
-| `policy` | `afw_basicpolinfo` | A policy term header change | Catches status/term changes not captured as their own transaction row. `summary` is the raw status code, not decoded (no status lookup exists yet — same as `policy_query`). |
+| `policy` | `afw_basicpolinfo` | A policy term header change | Catches status/term changes not captured as their own transaction row. `summary` reports whether the changed term is currently in force, via `renewalrptflag='A'` — deliberately *not* the raw `status` code, which doesn't track renewal-chain lifecycle in this data (see the `policies` skill) and would mislead (e.g. `'C'` reads as cancelled but usually isn't). |
 | `claim` | `afw_claim` | A claim record change | `source_id` is the `claimid` — pass it to `claim_lookup` (see the `claims` skill) for full claim detail (cause, loss location, report chain), which this feed doesn't surface beyond the `summary` string. |
 | `invoice` | `afw_invoice` | An invoice/billing change | Uses `changeddate`, not `invdate`/`inveffdate` — an invoice can show up here without being newly issued, e.g. a void. |
 | `activity` | `afw_transaction` | A staff-logged communication/note | `commenttran` is the summary. The only domain where `changed_by` is regularly a real staff member rather than a system code. |

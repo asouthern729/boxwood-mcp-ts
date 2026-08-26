@@ -74,7 +74,7 @@ const INCLUDE_QUERIES: Record<Include, string> = {
 
 const CORE_QUERY = `
   SELECT
-    p.polid, p.polno, p.shortpolno, p.status, p.typeofbus, p.poltype, p.polsubtype,
+    p.polid, p.polno, p.shortpolno, p.status, p.renewalrptflag, p.typeofbus, p.poltype, p.polsubtype,
     p.poleffdate, p.polexpdate, p.iscontinuous, p.billmethod, p.fulltermpremium,
     p.custid, cust.lastname AS customer_lastname, cust.firstname AS customer_firstname, cust.dba AS customer_dba,
     p.cocode, co.name AS carrier_name,
@@ -120,12 +120,13 @@ export function registerPolicyQueryTool(server: McpServer) {
   server.registerTool(
     "policy_query",
     {
-      description: "Look up policy/policies by ID, or browse/search policies by policy number, owning customer, and coarse filters (status, type of business, carrier, CSR), with sorting and pagination. With no filters at all, returns a paginated list of all policies. Resolves carrier/producer/CSR/broker/GL names inline. Optionally include related records (transactions, lines of business, coverage, personnel, submissions, attributes, policy-level contacts).",
+      description: "Look up policy/policies by ID, or browse/search policies by policy number, owning customer, and coarse filters (status, type of business, carrier, CSR), with sorting and pagination. With no filters at all, returns a paginated list of all policies. Resolves carrier/producer/CSR/broker/GL names inline. Optionally include related records (transactions, lines of business, coverage, personnel, submissions, attributes, policy-level contacts). IMPORTANT: to find the currently in-force term (of a customer's book, a renewal chain, etc.), filter on `renewalrptflag: \"A\"`, not `status: \"A\"` — `status` does not track renewal-chain lifecycle in this data (most currently in-force terms carry `status='C'`); `renewalrptflag='A'` is the field that actually identifies the live term.",
       inputSchema: {
         polid: z.string().uuid().describe("Exact policy ID (afw_basicpolinfo.polid)").optional(),
         polno: z.string().describe("Partial match against policy number or short policy number").optional(),
         custid: z.string().uuid().describe("Filter to policies belonging to this customer").optional(),
-        status: z.string().length(1).describe("Exact match against raw AMS360 status code (afw_basicpolinfo.status)").optional(),
+        status: z.string().length(1).describe("Exact match against raw AMS360 status code (afw_basicpolinfo.status). NOT a reliable signal for \"current/active\" — despite the name, it doesn't track renewal-chain lifecycle in this data. Use renewalrptflag for that instead.").optional(),
+        renewalrptflag: z.string().length(1).describe("Exact match against the renewal-chain lifecycle flag (afw_basicpolinfo.renewalrptflag). Pass \"A\" to get only the currently in-force term of each policy/renewal chain — this is the correct filter for \"current\"/\"active\" policies, not status.").optional(),
         typeofbus: z.number().int().describe("Exact match against type-of-business code (afw_basicpolinfo.typeofbus)").optional(),
         carrier_code: z.string().describe("Exact match against carrier code (afw_basicpolinfo.cocode)").optional(),
         csr_code: z.string().describe("Exact match against CSR employee code (afw_basicpolinfo.csrcode)").optional(),
@@ -135,7 +136,7 @@ export function registerPolicyQueryTool(server: McpServer) {
         limit: z.number().int().min(1).max(50).default(10).describe("Max policies to return per page")
       }
     },
-    async ({ polid, polno, custid, status, typeofbus, carrier_code, csr_code, sort, offset, include, limit }) => {
+    async ({ polid, polno, custid, status, renewalrptflag, typeofbus, carrier_code, csr_code, sort, offset, include, limit }) => {
       try {
         let sql: string
         let params: unknown[]
@@ -159,6 +160,10 @@ export function registerPolicyQueryTool(server: McpServer) {
           if(status) {
             params.push(status)
             conditions.push(`p.status = $${ params.length }`)
+          }
+          if(renewalrptflag) {
+            params.push(renewalrptflag)
+            conditions.push(`p.renewalrptflag = $${ params.length }`)
           }
           if(typeofbus !== undefined) {
             params.push(typeofbus)
@@ -210,7 +215,7 @@ export function registerPolicyQueryTool(server: McpServer) {
 
         return textResult({ policies: results, has_more: hasMore })
       } catch(error) {
-        logger.error({ err: error, polid, polno, custid, status, typeofbus, carrier_code, csr_code, sort, offset, include }, "policy_query failed")
+        logger.error({ err: error, polid, polno, custid, status, renewalrptflag, typeofbus, carrier_code, csr_code, sort, offset, include }, "policy_query failed")
         return errorResult(error)
       }
     }

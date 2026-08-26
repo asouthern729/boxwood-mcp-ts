@@ -1,6 +1,6 @@
 ---
 name: invoices
-description: Domain knowledge for the invoice_lookup MCP tool in boxwood-mcp-ts — Boxwood Insurance's AMS360 billing/AR data (invoices, void/correction chains, installment billing, related policy activity log). Use when answering questions about billing, invoice history, or outstanding balances for a customer or policy.
+description: Domain knowledge for the invoice_lookup MCP tool in boxwood-mcp-ts — Boxwood Insurance's AMS360 billing/AR data (invoices, void/correction chains, installment billing, related policy activity log). Use when answering questions about invoice history for a customer or policy. Does NOT cover outstanding balances/dollar amounts — afw_invoice has no such column.
 ---
 
 # Boxwood invoices
@@ -15,7 +15,7 @@ Two modes:
   - `custid` — invoices for a customer (across all their policies)
   - `polid` — invoices for one specific policy term
   - `iscancelled` — exact `"Y"`/`"N"`
-  - `closedstatus` — exact `"Y"`/`"N"` — `"N"` is the closest thing to "outstanding/unpaid"
+  - `closedstatus` — exact match, but NOT `"Y"`/`"N"` despite how that reads — real values are `"A"` (the overwhelming majority) and `"X"` (rare, ~2 rows in 55k). What `"X"` actually signifies isn't confirmed yet, so don't treat this as an "outstanding balance" filter (see gotcha below — this tool has no dollar amounts at all).
   - `invtype` — exact match, integer code (raw AMS360 passthrough, no fixed enum resolved yet — `afw_constant` isn't built)
 
   `sort` (default `inveffdate_desc`): `inveffdate_asc/desc`, `invno_asc/desc`, `duedate_asc/desc`. `limit` (default 10, max 50) + `offset` paginate; response includes `has_more`.
@@ -33,7 +33,8 @@ Only one include exists today. It attaches to the invoice's `polid` — invoices
 ## Domain gotchas
 
 - **`originalinvidinv`/`voidinvidinv` are the correction-tracking pair.** When an invoice gets corrected, the original is marked `iscancelled = "Y"` with `voidinvidinv` pointing at its replacement; the replacement carries `originalinvidinv` pointing back. Both directions resolve to an invoice number in the core query (`original_invno`/`void_invno`) — always check these before treating a cancelled invoice's amount as real.
-- **`closedstatus`/`arclosedstatus` are separate concepts** — `closedstatus` tracks the invoice's own workflow state, `arclosedstatus` tracks whether it's closed on the AR (accounts-receivable) side. A `"N"` on `closedstatus` is the practical proxy for "still outstanding," not `arclosedstatus`.
+- **`afw_invoice` has no dollar-amount column at all — this tool cannot answer "outstanding balance" questions.** There's no premium/fee/tax/total/balance field on the invoice row, and `CORE_QUERY` doesn't select one because none exists. Real premium figures live on `afw_policytranpremium`, keyed by `polid`/`poltpid`/`effdate` — not by `invid` — so there's currently no schema path from an invoice to a dollar figure. If asked about outstanding balances, say this tool can't answer that rather than guessing from `closedstatus`.
+- **`closedstatus`/`arclosedstatus` are separate concepts, and neither is a Y/N flag** — `closedstatus` tracks the invoice's own workflow state, `arclosedstatus` tracks whether it's closed on the AR (accounts-receivable) side. Real values are `"A"`/`"X"`, not `"Y"`/`"N"`; `"X"` is rare enough (~2 of 55k rows) that its exact meaning isn't confirmed. Don't treat either as a reliable "still outstanding" proxy.
 - **`polrelation` tells you whether an invoice is policy-specific or customer-level** — don't assume every invoice ties to one policy; a customer-level invoice (fees, adjustments) can have `polid IS NULL`.
 - **The `activity` include is scoped by `polid`, not the raw entity/activity link.** `afw_transaction` actually has a separate polymorphic `entityid`/`entitytype` pair that can attach an activity to non-policy entities (a bank, broker, company, employee, vendor) too — this tool deliberately joins on `polid` instead, because `entitytype`'s code-to-table lookup (`afw_logicaltable`) is still incomplete and can't reliably resolve back to a customer. So `activity` only ever shows policy-tied entries, not every logged interaction with the customer.
 - **`invtype` is a raw int code, not resolved to a label** — `afw_constant` (the general constants/enum table it points to) isn't built yet, so filter by the exact numeric value the data uses rather than a name.
@@ -53,7 +54,7 @@ Only one include exists today. It attaches to the invoice's `polid` — invoices
 
 - "Show invoice #5012" → `invno: 5012`
 - "What's this customer's billing history?" → `custid`, default sort (`inveffdate_desc`) shows most recent first
-- "What invoices are still outstanding for this policy?" → `polid` + `closedstatus: "N"`
+- "What invoices are still outstanding for this policy?" → not answerable by this tool — `afw_invoice` has no dollar-amount/balance column, and `closedstatus` isn't a reliable outstanding-balance proxy (see gotcha above). Say so rather than filtering on `closedstatus`.
 - "Was this invoice corrected?" → look up by `invid`/`invno`, check `original_invno`/`void_invno` and `iscancelled` in the result
 - "What's the activity log around this policy's billing?" → `polid` lookup with `include: ["activity"]`
 - "Any cancelled/voided invoices for this account this year?" → `custid` + `iscancelled: "Y"`

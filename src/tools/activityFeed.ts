@@ -44,7 +44,11 @@ const FEED_SUBQUERY = `
       'policy', bp.custid, bp.polid, c.csrcode,
       ${ CUSTOMER_NAME_EXPR },
       bp.polno,
-      'Policy status: ' || bp.status,
+      -- afw_basicpolinfo.status does not track renewal-chain lifecycle (confirmed against real
+      -- data — most currently in-force terms carry status='C') — surfacing it as "status" would
+      -- mislead a reader into thinking e.g. 'C' means cancelled. renewalrptflag='A' is what
+      -- actually identifies the current term, so that's what's reported here instead.
+      'Policy term changed (' || CASE WHEN bp.renewalrptflag = 'A' THEN 'current term' ELSE 'not current term' END || ')',
       'afw_basicpolinfo', bp.polid::text
     FROM afw_basicpolinfo bp
     LEFT JOIN afw_customer c ON c.custid = bp.custid

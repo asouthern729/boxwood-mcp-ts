@@ -12,7 +12,7 @@ description: Domain knowledge for the customer_lookup MCP tool in boxwood-mcp-ts
 Two modes:
 - **Exact lookup** — pass `custid` (uuid) or `custno` (int). Returns at most one customer; `sort`/`offset`/`limit` are ignored.
 - **Browse/search** — no filters returns a paginated list of *all* customers. Narrow with any combination of:
-  - `name` — partial match (ILIKE) against last name, first name, or DBA
+  - `name` — partial match (ILIKE) against last name, first name, DBA, or firm/business name
   - `active` — exact `"Y"`/`"N"`
   - `city` — partial match
   - `state` — exact 2-letter code
@@ -39,6 +39,7 @@ Pass an array of any of these to attach related record sets to each customer:
 
 ## Domain gotchas
 
+- **`lastname`/`firstname`/`dba` are all null for ~39% of customers (1,170 of 3,011) — use `firmnamecust` as the name in that case.** This is common for commercial accounts recorded under a business name rather than a person/DBA. `firmnamecust` is selected in the core result and included in the `name` filter's search, but it's easy to miss if you only look at `lastname`/`firstname`/`dba` and conclude the customer has no name on file.
 - **PII is excluded at the database grant level, not just left out of the query.** `afw_customer.ssn`/`driverslicense`/`fedidno` and `afw_dependent.ssn`/`driverslicense` are not selectable by the role this tool runs as — a direct `run_query` against those columns returns `permission denied`, it isn't just omitted from `customer_lookup`'s output. Don't imply they could be fetched another way.
 - **`mastersubtype`/`mastercustid`** encode Multiple Entity setups — `mastersubtype` is `M` (master) or `S` (sub), and a sub-customer's `mastercustid` points back to the master. Useful for "who are the related entities on this commercial account."
 - **`active`, `typecust`, and other single-char fields are raw AMS360 passthrough codes, not enums** — e.g. `typecust` is `C` (commercial, 1,780 of 3,004) or `P` (personal, 1,224) in the current book, but treat any single-char field as "whatever the source system sent," not a fixed list to validate against.

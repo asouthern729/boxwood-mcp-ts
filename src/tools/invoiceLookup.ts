@@ -69,7 +69,7 @@ export function registerInvoiceLookupTool(server: McpServer) {
         custid: z.string().uuid().describe("Filter to invoices for this customer").optional(),
         polid: z.string().uuid().describe("Filter to invoices for this policy").optional(),
         iscancelled: z.enum(["Y", "N"]).describe("Filter by cancelled status").optional(),
-        closedstatus: z.enum(["Y", "N"]).describe("Filter by closed status").optional(),
+        closedstatus: z.enum(["A", "X"]).describe("Exact match against afw_invoice.closedstatus. Real values are 'A' and 'X' (not 'Y'/'N' despite how that might read) — 'A' is the overwhelming majority; 'X' is rare and its precise meaning against arclosedstatus hasn't been confirmed, so don't treat this as a reliable \"outstanding balance\" proxy").optional(),
         invtype: z.number().int().describe("Exact match against invoice type code (afw_invoice.invtype)").optional(),
         sort: z.enum(Object.keys(SORT_OPTIONS) as [Sort, ...Sort[]]).default("inveffdate_desc").describe("Sort order, ignored when invid/invno is given"),
         offset: z.number().int().min(0).default(0).describe("Number of invoices to skip, ignored when invid/invno is given"),
