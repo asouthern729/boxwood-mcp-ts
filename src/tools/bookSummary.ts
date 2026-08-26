@@ -53,7 +53,7 @@ export function registerBookSummaryTool(server: McpServer) {
   server.registerTool(
     "book_summary",
     {
-      description: "Roll up the current active book (afw_basicpolinfo, renewalrptflag='A', excluding marketing/submission shells) by producer, CSR, carrier, or line of business: policy count, customer count, premium sum/average, and all-time claim count/paid total. Premium is not available when grouping by line of business, since a package policy's premium can't be safely split across its multiple LOB lines without double-counting revenue. Claims figures are all-time, not a rolling window. Optionally scope to one producer, CSR, carrier, or type of business before grouping. IMPORTANT: when grouping by producer or CSR, each row's `code` is a raw, opaque AMS360 employee code (e.g. \"!!C\") with no meaning to an end user — always report `label` (the resolved name) instead; never surface `code` in an answer, even as a fallback when `label` happens to equal it (a blank name in the source data).",
+      description: "Roll up the current active book (afw_basicpolinfo, renewalrptflag='A', excluding marketing/submission shells) by producer, CSR, carrier, or line of business: policy count, customer count, premium sum/average, and all-time claim count/paid total. Premium is not available when grouping by line of business, since a package policy's premium can't be safely split across its multiple LOB lines without double-counting revenue. Claims figures are all-time, not a rolling window, and are attributed to whoever currently owns the account today (not whoever was producer/CSR/carrier back when the claim happened) — an account that's fully lapsed with no current term drops its claims from every group. Optionally scope to one producer, CSR, carrier, or type of business before grouping. IMPORTANT: when grouping by producer or CSR, each row's `code` is a raw, opaque AMS360 employee code (e.g. \"!!C\") with no meaning to an end user — always report `label` (the resolved name) instead; never surface `code` in an answer, even as a fallback when `label` happens to equal it (a blank name in the source data).",
       inputSchema: {
         group_by: z.enum(Object.keys(DIMENSIONS) as [GroupBy, ...GroupBy[]]).describe("Dimension to roll the book up by"),
         producer_code: z.string().describe("Scope to one producer/exec employee code before grouping").optional(),
@@ -104,11 +104,7 @@ export function registerBookSummaryTool(server: McpServer) {
           GROUP BY 1, 2
         `
 
-        // Same "current active book" scope as the book query — without this, claims tied to
-        // expired/cancelled/renewed-over policies or marketing shells surface as phantom
-        // groups (policy_count: 0, claim_count > 0) for a producer/CSR/carrier who no longer
-        // — or never really did — service that policy as part of the current book.
-        const claimsConditions: string[] = ["pol.renewalrptflag = 'A'", "pol.polsubtype != 'S'"]
+        const claimsConditions: string[] = []
         const claimsParams: unknown[] = []
 
         if(producer_code) {
@@ -131,17 +127,50 @@ export function registerBookSummaryTool(server: McpServer) {
           claimsConditions.push(`NOT EXISTS (SELECT 1 FROM afw_employee e WHERE e.empcode = pol.${ dim.employeeCodeColumn } AND ${ systemEmployeeCondition("e") })`)
         }
 
-        const claimsWhereClause = `WHERE ${ claimsConditions.join(" AND ") }`
+        const claimsWhereClause = claimsConditions.length ? `WHERE ${ claimsConditions.join(" AND ") }` : ""
 
         // afw_custlosshist.claimid is never null (confirmed against real data), so the inner
         // joins here don't drop any loss-history rows.
+        //
+        // A claim is tied to whichever specific policy *term* was in force when it happened,
+        // but a term is superseded every renewal (a new afw_basicpolinfo row, linked back via
+        // priorpolid) — so attributing a claim to that exact term's producer/CSR/carrier would
+        // mean an old claim drops out of "the current book" the moment the policy renews, even
+        // though the same account is still very much on the book. Instead, claims are attributed
+        // to whoever currently owns the account: walk priorpolid forward (there's no direct
+        // "next term" pointer, only "prior term", so this has to be a recursive search) from the
+        // claim's own term to the chain's live (renewalrptflag='A', polsubtype != 'S') term, and
+        // group by that term's codes instead. An account with no live term left in its chain
+        // (fully lapsed, never renewed further) drops its claims entirely — same "no phantom
+        // claims for accounts no longer serviced" intent as the original per-term scoping, just
+        // evaluated over the whole chain instead of the exact term the claim happened on.
+        //
+        // A small number of chains fork at renewal (e.g. remarketed to two carriers, one bound
+        // and one declined) and in ~1% of cases both branches are still independently live today
+        // — DISTINCT keeps each (claim, live-term) pair to exactly one row, so those claims count
+        // once per live branch rather than being arbitrarily assigned to just one.
         const claimsSql = `
+          WITH RECURSIVE claim_chain AS (
+            SELECT cl.polid AS claim_polid, cl.polid AS cur_polid
+            FROM afw_claim cl
+            UNION ALL
+            SELECT cc.claim_polid, bp.polid
+            FROM claim_chain cc
+            JOIN afw_basicpolinfo bp ON bp.priorpolid = cc.cur_polid
+          ),
+          claim_termini AS (
+            SELECT DISTINCT cc.claim_polid, cc.cur_polid AS terminus_polid
+            FROM claim_chain cc
+            JOIN afw_basicpolinfo bp ON bp.polid = cc.cur_polid
+            WHERE bp.renewalrptflag = 'A' AND bp.polsubtype != 'S'
+          )
           SELECT ${ dim.claimsSelect },
             COUNT(*)::int AS claim_count,
             SUM(h.amountpaid) AS claims_paid_total
           FROM afw_custlosshist h
           JOIN afw_claim cl ON h.claimid = cl.claimid
-          JOIN afw_basicpolinfo pol ON cl.polid = pol.polid
+          JOIN claim_termini ct ON ct.claim_polid = cl.polid
+          JOIN afw_basicpolinfo pol ON pol.polid = ct.terminus_polid
           ${ dim.claimsJoin }
           ${ claimsWhereClause }
           GROUP BY 1, 2
