@@ -4,7 +4,7 @@ import { runReadOnlyQuery } from "../db.js"
 import { logger } from "../utils/logger.js"
 import { errorResult, groupByKey, textResult } from "../utils/mcpHelpers.js"
 
-const INCLUDE_OPTIONS = ["loss_history"] as const
+const INCLUDE_OPTIONS = ["loss_history", "payments", "contacts", "injured", "property_damage", "remarks", "risk_info"] as const
 
 type Include = typeof INCLUDE_OPTIONS[number]
 
@@ -16,6 +16,48 @@ const INCLUDE_QUERIES: Record<Include, string> = {
     FROM afw_custlosshist
     WHERE claimid = ANY($1::uuid[])
     ORDER BY dateofloss DESC
+  `,
+  payments: `
+    SELECT claimid, cpayid, coveragecode, amount, paymenttype, paidby, draftno, checkdate,
+      claiment, misc, entereddate
+    FROM afw_claimpayment
+    WHERE claimid = ANY($1::uuid[])
+    ORDER BY entereddate DESC
+  `,
+  contacts: `
+    SELECT claimid, clcntid, nameclcnt, contacttypeclcnt, primarynumber,
+      resareacodeclcnt, resphoneclcnt, busareacodeclcnt, busphoneclcnt,
+      mobileareacodeclcnt, mobilephoneclcnt, emailclcnt
+    FROM afw_claimcontact
+    WHERE claimid = ANY($1::uuid[])
+    ORDER BY nameclcnt
+  `,
+  injured: `
+    SELECT claimid, cliid, injnamecli, injagecli, injgendercli, injoccupationcli,
+      isfatalitycli, isinsvehcli, isothvehcli, ispedcli, injdescriptioncli
+    FROM afw_claiminjured
+    WHERE claimid = ANY($1::uuid[])
+    ORDER BY injnamecli
+  `,
+  property_damage: `
+    SELECT claimid, clpdid, compnameclpd, polnoclpd, ownnameclpd, drvnameclpd,
+      isdrvsameownclpd, descdamageclpd, estamtclpd, whendamageseenclpd, wheredamageseenclpd
+    FROM afw_claimpropdamage
+    WHERE claimid = ANY($1::uuid[])
+    ORDER BY estamtclpd DESC
+  `,
+  remarks: `
+    SELECT claimid, clrmkid, remarkclrmk, entereddate
+    FROM afw_claimremark
+    WHERE claimid = ANY($1::uuid[])
+    ORDER BY entereddate DESC
+  `,
+  risk_info: `
+    SELECT claimid, claimrid, polid, lobid, effdate, type, description,
+      riskdescdamage, riskestamt, riskwhereseen, riskwhenseen, riskotheins
+    FROM afw_claimriskinfo
+    WHERE claimid = ANY($1::uuid[])
+    ORDER BY effdate DESC
   `
 }
 
@@ -53,7 +95,7 @@ export function registerClaimLookupTool(server: McpServer) {
   server.registerTool(
     "claim_lookup",
     {
-      description: "Look up claim(s) by ID, or browse/search claims by owning policy, owning customer, and coarse filters (claim number, claim status, cause of loss), with sorting and pagination. With no filters at all, returns a paginated list of all claims. Resolves customer/policy/line-of-business names inline. Optionally include the matching afw_custlosshist summary row.",
+      description: "Look up claim(s) by ID, or browse/search claims by owning policy, owning customer, and coarse filters (claim number, claim status, cause of loss), with sorting and pagination. With no filters at all, returns a paginated list of all claims. Resolves customer/policy/line-of-business names inline. Optionally include the matching afw_custlosshist summary row, actual payment/reserve line items, claim contacts, injured-party detail, auto property damage detail, adjuster remarks, and risk-info attachments. For real dollar amounts paid on a claim, use the `payments` include (or `book_summary`'s `claims_paid_total`) — `loss_history`'s `amountpaid` is sparse and unreliable, see the claims skill.",
       inputSchema: {
         claimid: z.string().uuid().describe("Exact claim ID (afw_claim.claimid)").optional(),
         polid: z.string().uuid().describe("Filter to claims on this policy").optional(),

@@ -53,7 +53,7 @@ export function registerBookSummaryTool(server: McpServer) {
   server.registerTool(
     "book_summary",
     {
-      description: "Roll up the current active book (afw_basicpolinfo, renewalrptflag='A', excluding marketing/submission shells) by producer, CSR, carrier, or line of business: policy count, customer count, premium sum/average, and all-time claim count/paid total. Premium is not available when grouping by line of business, since a package policy's premium can't be safely split across its multiple LOB lines without double-counting revenue. Claims figures are all-time, not a rolling window, and are attributed to whoever currently owns the account today (not whoever was producer/CSR/carrier back when the claim happened) — an account that's fully lapsed with no current term drops its claims from every group. `claim_count` is trustworthy; `claims_paid_total` is NOT — the underlying paid-amount field is populated on only ~1% of claims (a sync-coverage gap, not real zero-cost claims), so never report it as a real dollar figure or imply a low/zero total means low claims cost. Optionally scope to one producer, CSR, carrier, or type of business before grouping. IMPORTANT: when grouping by producer or CSR, each row's `code` is a raw, opaque AMS360 employee code (e.g. \"!!C\") with no meaning to an end user — always report `label` (the resolved name) instead; never surface `code` in an answer, even as a fallback when `label` happens to equal it (a blank name in the source data).",
+      description: "Roll up the current active book (afw_basicpolinfo, renewalrptflag='A', excluding marketing/submission shells) by producer, CSR, carrier, or line of business: policy count, customer count, premium sum/average, and all-time claim count/paid total. Premium is not available when grouping by line of business, since a package policy's premium can't be safely split across its multiple LOB lines without double-counting revenue. Claims figures are all-time, not a rolling window, and are attributed to whoever currently owns the account today (not whoever was producer/CSR/carrier back when the claim happened) — an account that's fully lapsed with no current term drops its claims from every group. `claims_paid_total` is a real disbursement figure sourced from afw_claimpayment (actual payments + adjustment expense; excludes reserves, voided/stopped payments, and subrogation recovery, which aren't money paid to the claimant) — a claim can have zero rows here (nothing paid out yet, e.g. still open) without that being a data gap. Optionally scope to one producer, CSR, carrier, or type of business before grouping. IMPORTANT: when grouping by producer or CSR, each row's `code` is a raw, opaque AMS360 employee code (e.g. \"!!C\") with no meaning to an end user — always report `label` (the resolved name) instead; never surface `code` in an answer, even as a fallback when `label` happens to equal it (a blank name in the source data).",
       inputSchema: {
         group_by: z.enum(Object.keys(DIMENSIONS) as [GroupBy, ...GroupBy[]]).describe("Dimension to roll the book up by"),
         producer_code: z.string().describe("Scope to one producer/exec employee code before grouping").optional(),
@@ -163,14 +163,29 @@ export function registerBookSummaryTool(server: McpServer) {
             FROM claim_chain cc
             JOIN afw_basicpolinfo bp ON bp.polid = cc.cur_polid
             WHERE bp.renewalrptflag = 'A' AND bp.polsubtype != 'S'
+          ),
+          -- Only payment types that represent an actual disbursement count toward
+          -- claims_paid_total — "Loss reserve" is an estimate, not a real payment;
+          -- "Void"/"Stop payment" were cancelled; "Subrogation Recovery"/"Recovery"
+          -- are money coming back in, not going out. "Adjustment expense" (paid to
+          -- an adjuster, not the claimant) is included — it's still a real
+          -- disbursement caused by the claim, standard "loss + LAE" accounting.
+          -- Pre-aggregated per claim (not joined raw) so a claim with several
+          -- payment rows doesn't fan out claim_count below.
+          paid_totals AS (
+            SELECT claimid, SUM(amount) AS paid_total
+            FROM afw_claimpayment
+            WHERE paymenttype IN ('Payment', 'Final payment', 'Claim payment', 'Adjustment expense')
+            GROUP BY claimid
           )
           SELECT ${ dim.claimsSelect },
             COUNT(*)::int AS claim_count,
-            SUM(h.amountpaid) AS claims_paid_total
+            SUM(pt.paid_total) AS claims_paid_total
           FROM afw_custlosshist h
           JOIN afw_claim cl ON h.claimid = cl.claimid
           JOIN claim_termini ct ON ct.claim_polid = cl.polid
           JOIN afw_basicpolinfo pol ON pol.polid = ct.terminus_polid
+          LEFT JOIN paid_totals pt ON pt.claimid = cl.claimid
           ${ dim.claimsJoin }
           ${ claimsWhereClause }
           GROUP BY 1, 2
