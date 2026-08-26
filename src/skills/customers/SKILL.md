@@ -30,7 +30,7 @@ Pass an array of any of these to attach related record sets to each customer:
 |---|---|---|
 | `contacts` | `afw_custcontact` | Named contacts at the account (officers, directors, other) — name, title, officer/director flags, email/phone |
 | `dependents` | `afw_dependent` | Spouse/children/other household members — name, DOB, relationship, marital status |
-| `loss_history` | `afw_custlosshist` | Claim/loss summary rows — carrier, policy #, cause, dates, amount paid, status, description |
+| `loss_history` | `afw_custlosshist` | Claim/loss summary rows — carrier, policy #, cause, dates, status, description. `amount paid` is also selected but is NOT reliable — see the `claims` skill's gotcha on this before quoting it |
 | `attributes` | `afw_customerattribute` + `afw_customerattributetype` | Custom EAV fields the agency defined (name + typed value), e.g. "Referral Source" |
 | `relationships` | `afw_customerrelationship` + `afw_relationship` + `afw_relationshiptype` | Household/business relationship links (e.g. spousal, multi-entity groupings) with role (Primary/Secondary/Member) |
 | `xrefs` | `afw_custxref` + `afw_agencyxreftype` | Cross-reference IDs to other systems (e.g. legacy AMS ID), with the reference type label |
