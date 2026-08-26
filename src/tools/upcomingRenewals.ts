@@ -7,8 +7,10 @@ import { errorResult, textResult } from "../utils/mcpHelpers.js"
 // polsubtype = 'S' is a marketing/submission shell, not a real bound term (see policies SKILL.md).
 // A term with a successor (another row's priorpolid pointing back at it) has already been renewed —
 // without this exclusion ~80% of a naive "expiring soon" result in test data is already-handled noise.
+// renewalrptflag (not status) is the field that actually tracks renewal-chain lifecycle here —
+// status='A' undercounts the true in-force book by roughly 8x (confirmed against real data).
 const BASE_CONDITIONS = [
-  "p.status = 'A'",
+  "p.renewalrptflag = 'A'",
   "p.polsubtype != 'S'",
   "p.polexpdate BETWEEN now() AND now() + make_interval(days => $1::int)",
   "NOT EXISTS (SELECT 1 FROM afw_basicpolinfo bp2 WHERE bp2.priorpolid = p.polid)"
