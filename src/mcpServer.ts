@@ -7,6 +7,7 @@ import { registerUpcomingRenewalsTool } from "./tools/upcomingRenewals.js"
 import { registerClaimLookupTool } from "./tools/claimLookup.js"
 import { registerBookSummaryTool } from "./tools/bookSummary.js"
 import { registerEmployeeLookupTool } from "./tools/employeeLookup.js"
+import { registerCertificateLookupTool } from "./tools/certificateLookup.js"
 
 export function createServer() {
   const server = new McpServer({
@@ -22,6 +23,7 @@ export function createServer() {
   registerClaimLookupTool(server)
   registerBookSummaryTool(server)
   registerEmployeeLookupTool(server)
+  registerCertificateLookupTool(server)
 
   return server
 }

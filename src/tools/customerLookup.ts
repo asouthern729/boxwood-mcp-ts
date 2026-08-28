@@ -12,7 +12,8 @@ const INCLUDE_OPTIONS = [
   "relationships",
   "xrefs",
   "expiring_business",
-  "service_team"
+  "service_team",
+  "certificates"
 ] as const
 
 type Include = typeof INCLUDE_OPTIONS[number]
@@ -76,6 +77,25 @@ const INCLUDE_QUERIES: Record<Include, string> = {
     FROM afw_custaddpersonnel p
     LEFT JOIN afw_employee e ON p.empcode = e.empcode
     WHERE p.custid = ANY($1::uuid[])
+  `,
+  // Lightweight per-customer view of certificate_lookup's core result — current holder only (via
+  // the same LATERAL "latest afw_certholderinfo row" pattern), not the full reissue history. Use
+  // certificate_lookup directly (with include: ["holder_history"]) for that or for the up-to-9
+  // covered-policies detail this include intentionally omits to stay a quick related-record list.
+  certificates: `
+    SELECT clp.custid, clp.crtid, clp.crtno, clp.certformtype, clp.descofopslocs,
+      ch.name1crth AS current_holder_name, ch.citycrth AS current_holder_city, ch.statecrth AS current_holder_state,
+      ch.certissuedatecrth AS current_holder_cert_issue_date,
+      clp.entereddate
+    FROM afw_certliabprop clp
+    LEFT JOIN LATERAL (
+      SELECT * FROM afw_certholderinfo chi
+      WHERE chi.crtid = clp.crtid
+      ORDER BY chi.certissuedatecrth DESC NULLS LAST, chi.entereddate DESC
+      LIMIT 1
+    ) ch ON true
+    WHERE clp.custid = ANY($1::uuid[])
+    ORDER BY clp.entereddate DESC
   `
 }
 
@@ -120,7 +140,7 @@ export function registerCustomerLookupTool(server: McpServer) {
   server.registerTool(
     "customer_lookup",
     {
-      description: "Look up customer(s) by ID or customer number, or browse/search customers by name and coarse filters (active, city, state, producer, CSR), with sorting and pagination. With no filters at all, returns a paginated list of all customers. Resolves producer/CSR/broker/GL names inline. Optionally include related records (contacts, dependents, loss history, attributes, relationships, cross-references, expiring outside business, service team). IMPORTANT: for a commercial/business customer, `lastname`/`firstname`/`dba` are often all null — use `firmnamecust` (the business name) as the display name in that case; the `name` filter already searches it alongside lastname/firstname/dba.",
+      description: "Look up customer(s) by ID or customer number, or browse/search customers by name and coarse filters (active, city, state, producer, CSR), with sorting and pagination. With no filters at all, returns a paginated list of all customers. Resolves producer/CSR/broker/GL names inline. Optionally include related records (contacts, dependents, loss history, attributes, relationships, cross-references, expiring outside business, service team, certificates of insurance). The `certificates` include is a lightweight view (current holder only, per certificate) — use the dedicated `certificate_lookup` tool for full reissue history or the up-to-9 covered-policies detail. IMPORTANT: for a commercial/business customer, `lastname`/`firstname`/`dba` are often all null — use `firmnamecust` (the business name) as the display name in that case; the `name` filter already searches it alongside lastname/firstname/dba.",
       inputSchema: {
         custid: z.string().uuid().describe("Exact customer ID (afw_customer.custid)").optional(),
         custno: z.number().int().describe("Exact customer number (afw_customer.custno)").optional(),
