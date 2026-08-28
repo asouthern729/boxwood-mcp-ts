@@ -120,13 +120,13 @@ export function registerPolicyQueryTool(server: McpServer) {
   server.registerTool(
     "policy_query",
     {
-      description: "Look up policy/policies by ID, or browse/search policies by policy number, owning customer, and coarse filters (status, type of business, carrier, CSR), with sorting and pagination. With no filters at all, returns a paginated list of all policies. Resolves carrier/producer/CSR/broker/GL names inline. Optionally include related records (transactions, lines of business, coverage, personnel, submissions, attributes, policy-level contacts). IMPORTANT: to find the currently in-force term (of a customer's book, a renewal chain, etc.), filter on `renewalrptflag: \"A\"`, not `status: \"A\"` — `status` does not track renewal-chain lifecycle in this data (most currently in-force terms carry `status='C'`); `renewalrptflag='A'` is the field that actually identifies the live term.",
+      description: "Look up policy/policies by ID, or browse/search policies by policy number, owning customer, and coarse filters (status, type of business, carrier, CSR), with sorting and pagination. With no filters at all, returns a paginated list of all policies. Resolves carrier/producer/CSR/broker/GL names inline. Optionally include related records (transactions, lines of business, coverage, personnel, submissions, attributes, policy-level contacts). IMPORTANT: to find the currently in-force term (of a customer's book, a renewal chain, etc.), filter on `renewalrptflag: \"A\"`, not `status: \"A\"` — `status` does not track renewal-chain lifecycle in this data (most currently in-force terms carry `status='C'`); `renewalrptflag='A'` is the field that actually identifies the live term. Passing `renewalrptflag: \"A\"` also automatically excludes marketing/submission shells, deleted (status='D') rows, and — client-confirmed as of 2026-08-27 — any bound renewal whose effective date is still in the future or whose term has already expired, so the result is genuinely 'in force today,' matching `book_summary`'s definition of current. To see a future-dated renewal that's already bound but hasn't started yet, use `upcoming_renewals` instead — that tool is specifically for renewals with a future effective date and intentionally does not apply this restriction.",
       inputSchema: {
         polid: z.string().uuid().describe("Exact policy ID (afw_basicpolinfo.polid)").optional(),
         polno: z.string().describe("Partial match against policy number or short policy number").optional(),
         custid: z.string().uuid().describe("Filter to policies belonging to this customer").optional(),
         status: z.string().length(1).describe("Exact match against raw AMS360 status code (afw_basicpolinfo.status). NOT a reliable signal for \"current/active\" — despite the name, it doesn't track renewal-chain lifecycle in this data. Use renewalrptflag for that instead.").optional(),
-        renewalrptflag: z.string().length(1).describe("Exact match against the renewal-chain lifecycle flag (afw_basicpolinfo.renewalrptflag). Pass \"A\" to get only the currently in-force term of each policy/renewal chain — this is the correct filter for \"current\"/\"active\" policies, not status.").optional(),
+        renewalrptflag: z.string().length(1).describe("Exact match against the renewal-chain lifecycle flag (afw_basicpolinfo.renewalrptflag). Pass \"A\" to get only the currently in-force term of each policy/renewal chain — this is the correct filter for \"current\"/\"active\" policies, not status. Passing \"A\" also excludes submission shells, status='D' rows, and future-dated/already-expired terms (see tool description) — passing any other value does not apply those extra exclusions.").optional(),
         typeofbus: z.number().int().describe("Exact match against type-of-business code (afw_basicpolinfo.typeofbus)").optional(),
         carrier_code: z.string().describe("Exact match against carrier code (afw_basicpolinfo.cocode)").optional(),
         csr_code: z.string().describe("Exact match against CSR employee code (afw_basicpolinfo.csrcode)").optional(),
@@ -164,6 +164,22 @@ export function registerPolicyQueryTool(server: McpServer) {
           if(renewalrptflag) {
             params.push(renewalrptflag)
             conditions.push(`p.renewalrptflag = $${ params.length }`)
+
+            // "A" is specifically a request for "the current/active term" (see tool description)
+            // — client-confirmed 2026-08-27 that this must mean genuinely in force today, not just
+            // flagged as the latest bound term. Mirrors book_summary's current_policies definition
+            // exactly (a bound renewal with a future poleffdate, or a term whose polexpdate has
+            // already passed, doesn't count as current even though renewalrptflag='A' alone doesn't
+            // distinguish either case). A caller filtering on any other renewalrptflag value is
+            // asking a different, non-"current" question, so these extra exclusions don't apply.
+            if(renewalrptflag === "A") {
+              conditions.push(
+                `p.polsubtype != 'S'`,
+                `p.status != 'D'`,
+                `p.poleffdate <= now()`,
+                `p.polexpdate >= now()`
+              )
+            }
           }
           if(typeofbus !== undefined) {
             params.push(typeofbus)

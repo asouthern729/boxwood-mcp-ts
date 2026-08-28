@@ -80,10 +80,30 @@ function attachRoles(
   return map
 }
 
+// "Current" (in force today, not just the latest bound term) — client-confirmed 2026-08-27, same
+// definition as book_summary/policy_query: renewalrptflag='A', not a submission shell, not
+// status='D', and poleffdate <= today <= polexpdate. Applied here too (both to the "policies"
+// include and, via EXISTS, to which customers even qualify for the "customers" include) so an
+// employee's book means the same thing regardless of which tool a caller reaches for — a customer
+// whose only policies are lapsed or a future-dated renewal that hasn't started yet doesn't count
+// as "belonging to" this employee's current book, matching book_summary's customer_count exactly.
+const CURRENT_POLICY_EXISTS = `
+  EXISTS (
+    SELECT 1 FROM afw_basicpolinfo cp
+    WHERE cp.custid = c.custid AND cp.renewalrptflag = 'A' AND cp.polsubtype != 'S' AND cp.status != 'D'
+      AND cp.poleffdate <= now() AND cp.polexpdate >= now()
+  )
+`
+
+const CURRENT_POLICY_CONDITIONS = `
+  p.renewalrptflag = 'A' AND p.polsubtype != 'S' AND p.status != 'D'
+  AND p.poleffdate <= now() AND p.polexpdate >= now()
+`
+
 const CUSTOMER_HEADER_QUERY = `
   SELECT custid, custno, lastname, firstname, dba, active, prod1code, csrcode, entereddate
-  FROM afw_customer
-  WHERE prod1code = ANY($1::varchar[]) OR csrcode = ANY($1::varchar[])
+  FROM afw_customer c
+  WHERE (prod1code = ANY($1::varchar[]) OR csrcode = ANY($1::varchar[])) AND ${ CURRENT_POLICY_EXISTS }
 `
 
 const CUSTOMER_PERSONNEL_QUERY = `
@@ -91,7 +111,7 @@ const CUSTOMER_PERSONNEL_QUERY = `
     c.custid, c.custno, c.lastname, c.firstname, c.dba, c.active, c.entereddate
   FROM afw_custaddpersonnel cap
   JOIN afw_customer c ON cap.custid = c.custid
-  WHERE cap.empcode = ANY($1::varchar[])
+  WHERE cap.empcode = ANY($1::varchar[]) AND ${ CURRENT_POLICY_EXISTS }
 `
 
 const POLICY_HEADER_QUERY = `
@@ -100,7 +120,7 @@ const POLICY_HEADER_QUERY = `
     p.custid, cust.lastname AS customer_lastname, cust.firstname AS customer_firstname, cust.dba AS customer_dba
   FROM afw_basicpolinfo p
   LEFT JOIN afw_customer cust ON p.custid = cust.custid
-  WHERE p.execcode = ANY($1::varchar[]) OR p.csrcode = ANY($1::varchar[])
+  WHERE (p.execcode = ANY($1::varchar[]) OR p.csrcode = ANY($1::varchar[])) AND ${ CURRENT_POLICY_CONDITIONS }
 `
 
 const POLICY_PERSONNEL_QUERY = `
@@ -110,7 +130,7 @@ const POLICY_PERSONNEL_QUERY = `
   FROM afw_policypersonnel pp
   JOIN afw_basicpolinfo p ON pp.polid = p.polid
   LEFT JOIN afw_customer cust ON p.custid = cust.custid
-  WHERE pp.empcode = ANY($1::varchar[])
+  WHERE pp.empcode = ANY($1::varchar[]) AND ${ CURRENT_POLICY_CONDITIONS }
 `
 
 // Merges the header-field match (prod1code/csrcode) with afw_custaddpersonnel's *additional*
@@ -268,7 +288,7 @@ export function registerEmployeeLookupTool(server: McpServer) {
   server.registerTool(
     "employee_lookup",
     {
-      description: "Look up employee(s) by code, or browse/search by name and coarse filters (status, is-producer, is-CSR), with sorting and pagination. With no filters at all, returns a paginated list of all employees. Resolves supervisor name inline. Optionally include the customers, policies, claims, and invoices this employee is tied to (e.g. \"show me Patrick's customers\" or \"Patrick's claims history\") — customers/policies reflect every producer/CSR assignment (the customer/policy header field plus afw_custaddpersonnel/afw_policypersonnel's additional assignments), not just the single header field, and policies include commission split (percentage/flat amount) when sourced from afw_policypersonnel. Each include is capped at include_limit (default 20, max 100) rows, most-recent-first. For the complete, paginated list beyond that cap, use customer_lookup/policy_query/claim_lookup/invoice_lookup directly with producer_code/csr_code. IMPORTANT: `empcode` (and any execcode/csrcode/repcode/prod1code on the customers/policies/claims/invoices includes) is a raw, opaque AMS360 identifier (e.g. \"!!C\") with no meaning to an end user. It's only useful for querying — e.g. as the producer_code/csr_code filter on other tools. Never quote it in an answer; always refer to the employee by their resolved lastname/firstname instead, even when this is the tool you used to look that code up in the first place.",
+      description: "Look up employee(s) by code, or browse/search by name and coarse filters (status, is-producer, is-CSR), with sorting and pagination. With no filters at all, returns a paginated list of all employees. Resolves supervisor name inline. Optionally include the customers, policies, claims, and invoices this employee is tied to (e.g. \"show me Patrick's customers\" or \"Patrick's claims history\") — customers/policies reflect every producer/CSR assignment (the customer/policy header field plus afw_custaddpersonnel/afw_policypersonnel's additional assignments), not just the single header field, and policies include commission split (percentage/flat amount) when sourced from afw_policypersonnel. The `customers`/`policies` includes only reflect the current book — client-confirmed 2026-08-27, matching book_summary/policy_query exactly: a policy must be in force today (not a submission shell, not status='D', and not a bound renewal whose effective date is still in the future or whose term has already expired) to count, and a customer with no current policy at all doesn't show up under this employee even if their header producer/CSR field still points here. `claims`/`invoices` are historical and unaffected by this — they reflect whatever policy term was in force when that claim/invoice happened, not the current one. Each include is capped at include_limit (default 20, max 100) rows, most-recent-first. For the complete, paginated list beyond that cap, use customer_lookup/policy_query/claim_lookup/invoice_lookup directly with producer_code/csr_code. IMPORTANT: `empcode` (and any execcode/csrcode/repcode/prod1code on the customers/policies/claims/invoices includes) is a raw, opaque AMS360 identifier (e.g. \"!!C\") with no meaning to an end user. It's only useful for querying — e.g. as the producer_code/csr_code filter on other tools. Never quote it in an answer; always refer to the employee by their resolved lastname/firstname instead, even when this is the tool you used to look that code up in the first place.",
       inputSchema: {
         empcode: z.string().describe("Exact employee code (afw_employee.empcode)").optional(),
         name: z.string().describe("Partial match against last name, first name, or short name").optional(),
