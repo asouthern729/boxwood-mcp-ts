@@ -24,13 +24,16 @@ const INCLUDE_QUERIES: Record<Include, string> = {
     WHERE claimid = ANY($1::uuid[])
     ORDER BY entereddate DESC
   `,
+  // contacttypeclcnt resolves via afw_prcode (AttrCode='CCT') — attrcode comes back space-padded
+  // from the AMS360 API (e.g. 'CCT'), so the join must rtrim it; code itself is not padded.
   contacts: `
-    SELECT claimid, clcntid, nameclcnt, contacttypeclcnt, primarynumber,
-      resareacodeclcnt, resphoneclcnt, busareacodeclcnt, busphoneclcnt,
-      mobileareacodeclcnt, mobilephoneclcnt, emailclcnt
-    FROM afw_claimcontact
-    WHERE claimid = ANY($1::uuid[])
-    ORDER BY nameclcnt
+    SELECT c.claimid, c.clcntid, c.nameclcnt, c.contacttypeclcnt, cct.description AS contact_type_description,
+      c.primarynumber, c.resareacodeclcnt, c.resphoneclcnt, c.busareacodeclcnt, c.busphoneclcnt,
+      c.mobileareacodeclcnt, c.mobilephoneclcnt, c.emailclcnt
+    FROM afw_claimcontact c
+    LEFT JOIN afw_prcode cct ON rtrim(cct.attrcode) = 'CCT' AND cct.code = c.contacttypeclcnt
+    WHERE c.claimid = ANY($1::uuid[])
+    ORDER BY c.nameclcnt
   `,
   injured: `
     SELECT claimid, cliid, injnamecli, injagecli, injgendercli, injoccupationcli,
@@ -95,7 +98,7 @@ export function registerClaimLookupTool(server: McpServer) {
   server.registerTool(
     "claim_lookup",
     {
-      description: "Look up claim(s) by ID, or browse/search claims by owning policy, owning customer, and coarse filters (claim number, claim status, cause of loss), with sorting and pagination. With no filters at all, returns a paginated list of all claims. Resolves customer/policy/line-of-business names inline. Optionally include the matching afw_custlosshist summary row, actual payment/reserve line items, claim contacts, injured-party detail, auto property damage detail, adjuster remarks, and risk-info attachments. For real dollar amounts paid on a claim, use the `payments` include (or `book_summary`'s `claims_paid_total`) — `loss_history`'s `amountpaid` is sparse and unreliable, see the claims skill.",
+      description: "Look up claim(s) by ID, or browse/search claims by owning policy, owning customer, and coarse filters (claim number, claim status, cause of loss), with sorting and pagination. With no filters at all, returns a paginated list of all claims. Resolves customer/policy/line-of-business names inline. Optionally include the matching afw_custlosshist summary row, actual payment/reserve line items, claim contacts, injured-party detail, auto property damage detail, adjuster remarks, and risk-info attachments. For real dollar amounts paid on a claim, use the `payments` include (or `book_summary`'s `claims_paid_total`) — `loss_history`'s `amountpaid` is sparse and unreliable, see the claims skill. IMPORTANT: `claimid`/`polid`/`custid`/`lobid` (and every other `*id` field returned, including within includes — `closshistid`, `cpayid`, `clcntid`, `cliid`, `clpdid`, `clrmkid`, `claimrid`) are internal AMS360 identifiers (UUIDs) with no meaning to an end user — never surface them in an answer. They exist only to chain to other tool calls (e.g. pass `polid` to `policy_query`, `custid` to `customer_lookup`); always report `claimno`, the resolved customer/policy name or number, or another human-readable field instead. The same applies to `changedby`, a raw employee code — resolve it via `employee_lookup` if the user needs to know who made a change.",
       inputSchema: {
         claimid: z.string().uuid().describe("Exact claim ID (afw_claim.claimid)").optional(),
         polid: z.string().uuid().describe("Filter to claims on this policy").optional(),

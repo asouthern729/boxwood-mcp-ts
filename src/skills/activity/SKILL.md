@@ -25,7 +25,7 @@ Narrow with any combination of:
 
 | domain | table | row = | notes |
 |---|---|---|---|
-| `policy_transaction` | `afw_policytransaction` | An endorsement/renewal/cancellation/new-business transaction | Richest signal — `summary` is `trantype: description`. PK is `(polid, effdate)`, so `source_id` is `polid:effdate`, not just `polid` — a policy can have several transactions in the same window. |
+| `policy_transaction` | `afw_policytransaction` | An endorsement/renewal/cancellation/new-business transaction | Richest signal — `summary` is `trantype description: description` (e.g. "Policy change: ..."), resolved via `afw_prcode` (`AttrCode='TT'`) as of 2026-09-01, falling back to the raw `trantype` code if a value is somehow missing from `afw_prcode`. PK is `(polid, effdate)`, so `source_id` is `polid:effdate`, not just `polid` — a policy can have several transactions in the same window. |
 | `policy` | `afw_basicpolinfo` | A policy term header change | Catches status/term changes not captured as their own transaction row. `summary` reports whether the changed term is currently in force, via `renewalrptflag='A'` — deliberately *not* the raw `status` code, which doesn't track renewal-chain lifecycle in this data (see the `policies` skill) and would mislead (e.g. `'C'` reads as cancelled but usually isn't). |
 | `claim` | `afw_claim` | A claim record change | `source_id` is the `claimid` — pass it to `claim_lookup` (see the `claims` skill) for full claim detail (cause, loss location, report chain), which this feed doesn't surface beyond the `summary` string. |
 | `invoice` | `afw_invoice` | An invoice/billing change | Uses `changeddate`, not `invdate`/`inveffdate` — an invoice can show up here without being newly issued, e.g. a void. |

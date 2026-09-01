@@ -1,0 +1,307 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+<meta charset="UTF-8">
+<meta name="viewport" content="width=device-width, initial-scale=1.0">
+<link rel="icon" href="./assets/boxwood-favicon.ico">
+<title>Boxwood MCP Tools</title>
+<link rel="preconnect" href="https://fonts.googleapis.com">
+<link rel="preconnect" href="https://fonts.gstatic.com" crossorigin>
+<link href="https://fonts.googleapis.com/css2?family=Play:wght@400;700&display=swap" rel="stylesheet">
+<style>
+  :root {
+    --bg: #ffffff;
+    --text: #0a0a0a;
+    --muted: #6b6b6b;
+    --border: #e2e2e2;
+    --tag-bg: #0a0a0a;
+    --tag-fg: #ffffff;
+    --footer-neutral: oklch(20% 0 0);
+    --footer-base-200: oklch(95% .0081 61.42);
+    --footer-neutral-content: oklch(80% .0081 61.42);
+  }
+
+  @media (prefers-color-scheme: dark) {
+    :root:not([data-theme="light"]) {
+      --bg: #000000;
+      --text: #f2f2f2;
+      --muted: #9a9a9a;
+      --border: #262626;
+      --tag-bg: #f2f2f2;
+      --tag-fg: #000000;
+      --footer-neutral: oklch(35% 0 0);
+      --footer-base-200: oklch(19% 0 0);
+      --footer-neutral-content: oklch(100% 0 0);
+    }
+  }
+
+  :root[data-theme="dark"] {
+    --bg: #000000;
+    --text: #f2f2f2;
+    --muted: #9a9a9a;
+    --border: #262626;
+    --tag-bg: #f2f2f2;
+    --tag-fg: #000000;
+    --footer-neutral: oklch(35% 0 0);
+    --footer-base-200: oklch(19% 0 0);
+    --footer-neutral-content: oklch(100% 0 0);
+  }
+
+  * { box-sizing: border-box; }
+
+  html, body {
+    height: 100%;
+  }
+
+  body {
+    margin: 0;
+    min-height: 100dvh;
+    display: flex;
+    flex-direction: column;
+    background: var(--bg);
+    color: var(--text);
+    font-family: "Play", ui-sans-serif, system-ui, -apple-system, "Segoe UI", sans-serif;
+    line-height: 1.5;
+    -webkit-font-smoothing: antialiased;
+  }
+
+  .page {
+    flex: 1 0 auto;
+    max-width: 720px;
+    width: 100%;
+    margin: 0 auto;
+    padding: 4.5rem 1.5rem 4rem;
+  }
+
+  .boxwood-brand {
+    display: flex;
+    align-items: center;
+    gap: 1.25rem;
+  }
+
+  .boxwood-brand img {
+    height: 3.5rem;
+    width: auto;
+    display: block;
+    flex-shrink: 0;
+  }
+
+  .boxwood-brand .heading {
+    min-width: 0;
+  }
+
+  .kicker {
+    font-family: ui-monospace, SFMono-Regular, Menlo, Consolas, monospace;
+    font-size: 0.72rem;
+    letter-spacing: 0.14em;
+    text-transform: uppercase;
+    color: var(--muted);
+    margin: 0 0 0.9rem;
+  }
+
+  h1 {
+    font-size: clamp(1.9rem, 4.5vw, 2.5rem);
+    font-weight: 700;
+    letter-spacing: -0.02em;
+    margin: 0 0 0.75rem;
+    text-wrap: balance;
+  }
+
+  .lede {
+    color: var(--muted);
+    font-size: 1rem;
+    max-width: 56ch;
+    margin: 0 0 3rem;
+  }
+
+  h2 {
+    font-family: ui-monospace, SFMono-Regular, Menlo, Consolas, monospace;
+    font-size: 0.72rem;
+    letter-spacing: 0.14em;
+    text-transform: uppercase;
+    color: var(--muted);
+    margin: 0 0 0.25rem;
+    padding-top: 0.5rem;
+    border-top: 1px solid var(--border);
+  }
+
+  section.group {
+    margin-top: 2.5rem;
+  }
+
+  section.group:first-of-type {
+    margin-top: 0;
+  }
+
+  .tool {
+    display: flex;
+    gap: 1.25rem;
+    align-items: baseline;
+    padding: 1rem 0;
+    border-bottom: 1px solid var(--border);
+  }
+
+  .tool:last-child {
+    border-bottom: none;
+  }
+
+  .tool-name {
+    font-family: ui-monospace, SFMono-Regular, Menlo, Consolas, monospace;
+    font-size: 0.78rem;
+    font-weight: 600;
+    background: var(--tag-bg);
+    color: var(--tag-fg);
+    padding: 0.2rem 0.5rem;
+    border-radius: 4px;
+    white-space: nowrap;
+    flex-shrink: 0;
+  }
+
+  .tool-desc {
+    font-size: 0.95rem;
+    margin: 0;
+  }
+
+  .tool-desc span {
+    color: var(--muted);
+  }
+
+  footer {
+    margin-top: 3rem;
+    padding-top: 1.25rem;
+    border-top: 1px solid var(--border);
+    font-family: ui-monospace, SFMono-Regular, Menlo, Consolas, monospace;
+    font-size: 0.72rem;
+    color: var(--muted);
+    letter-spacing: 0.02em;
+  }
+
+  @media (max-width: 560px) {
+    .page { padding: 3rem 1.25rem 3rem; }
+    .tool { flex-direction: column; gap: 0.35rem; }
+  }
+
+  .brand-footer {
+    position: relative;
+    flex-shrink: 0;
+    height: 10rem;
+    background: linear-gradient(to right, var(--footer-neutral), var(--footer-base-200));
+    overflow: hidden;
+  }
+
+  .brand-footer-link {
+    position: absolute;
+    inset: 0;
+    z-index: 2;
+    display: flex;
+    flex-direction: column;
+    align-items: center;
+    justify-content: center;
+    text-decoration: none;
+    color: var(--footer-neutral-content);
+    font-family: ui-sans-serif, system-ui, -apple-system, "Segoe UI", Roboto, Helvetica, Arial, sans-serif;
+  }
+
+  .brand-footer-link .primary {
+    font-size: 1.125rem;
+    font-weight: 800;
+    letter-spacing: 10px;
+    text-transform: uppercase;
+  }
+
+  .brand-footer-link .secondary {
+    font-size: 1rem;
+    letter-spacing: 8px;
+    text-transform: uppercase;
+    margin-top: 0.25rem;
+  }
+
+  .brand-footer-link img {
+    position: absolute;
+    right: 0;
+    bottom: 0;
+    z-index: 1;
+    height: 9rem;
+    width: auto;
+    opacity: 0.25;
+  }
+
+  @media (prefers-color-scheme: dark) {
+    :root:not([data-theme="light"]) .brand-footer-link img { filter: invert(1); }
+  }
+
+  :root[data-theme="dark"] .brand-footer-link img { filter: invert(1); }
+
+  @media (max-width: 600px) {
+    .brand-footer-link img { display: none; }
+    .brand-footer-link .primary { font-size: 0.95rem; letter-spacing: 6px; }
+    .brand-footer-link .secondary { font-size: 0.8rem; letter-spacing: 4px; }
+  }
+</style>
+</head>
+<body>
+<div class="page">
+
+  <div class="boxwood-brand">
+    <img src="./assets/boxwood-logo.png" alt="Boxwood Insurance Group">
+    <div class="heading">
+      <p class="kicker">Boxwood &middot; Agency Assistant</p>
+      <h1>Boxwood MCP Tools</h1>
+    </div>
+  </div>
+
+  <section class="group">
+    <h2>Customers</h2>
+    <div class="tool"><span class="tool-name">customer_lookup</span><p class="tool-desc">Find a customer &mdash; <span>contact info, policies, claims, certificates, service team.</span></p></div>
+  </section>
+
+  <section class="group">
+    <h2>Policies</h2>
+    <div class="tool"><span class="tool-name">policy_query</span><p class="tool-desc">Find a policy &mdash; <span>transactions, coverages, lines of business, coverage-line pricing, vehicles, workers' comp, forms, applicant detail.</span></p></div>
+    <div class="tool"><span class="tool-name">upcoming_renewals</span><p class="tool-desc">What's renewing soon &mdash; <span>premium totals, renewal progress.</span></p></div>
+  </section>
+
+  <section class="group">
+    <h2>Claims</h2>
+    <div class="tool"><span class="tool-name">claim_lookup</span><p class="tool-desc">Find a claim &mdash; <span>payments, injuries, damage, adjuster notes.</span></p></div>
+  </section>
+
+  <section class="group">
+    <h2>Billing</h2>
+    <div class="tool"><span class="tool-name">invoice_lookup</span><p class="tool-desc">Find an invoice &mdash; <span>billing detail, cancellations, related activity.</span></p></div>
+  </section>
+
+  <section class="group">
+    <h2>Certificates</h2>
+    <div class="tool"><span class="tool-name">certificate_lookup</span><p class="tool-desc">Find a certificate of insurance &mdash; <span>holder, coverage, reissue history.</span></p></div>
+  </section>
+
+  <section class="group">
+    <h2>Staff</h2>
+    <div class="tool"><span class="tool-name">employee_lookup</span><p class="tool-desc">Find a staff member &mdash; <span>their full book of customers, policies, claims.</span></p></div>
+  </section>
+
+  <section class="group">
+    <h2>Agency-wide</h2>
+    <div class="tool"><span class="tool-name">book_summary</span><p class="tool-desc">Current book by producer, CSR, carrier, or line &mdash; <span>premium, counts, claims paid.</span></p></div>
+    <div class="tool"><span class="tool-name">activity_feed</span><p class="tool-desc">What's changed lately &mdash; <span>new policies, endorsements, claims, invoices.</span></p></div>
+  </section>
+
+  <section class="group">
+    <h2>Downloads</h2>
+    <div class="tool"><span class="tool-name">download_report</span><p class="tool-desc">Morning download review &mdash; <span>overnight carrier policy transactions and claims, normalized into action items and grouped by rep.</span></p></div>
+    <div class="tool"><span class="tool-name">download_report_workbook</span><p class="tool-desc">Build the download review workbook &mdash; <span>the finished .xlsx from a download_report run, with flagged rows and accuracy verdicts, one tab per rep.</span></p></div>
+  </section>
+
+  <footer>Boxwood Agency Assistant &middot; connected to AMS360</footer>
+
+</div>
+<footer class="brand-footer">
+  <a class="brand-footer-link" href="https://tyneside.io" target="_blank" rel="noopener noreferrer">
+    <img src="./assets/magpie.png" alt="" width="164" height="144">
+    <span class="primary">Tyneside Innovations</span>
+    <span class="secondary">Madison, Tennessee</span>
+  </a>
+</footer>
+</body>
+</html>

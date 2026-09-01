@@ -28,7 +28,7 @@ Every result already has policy number, customer name/DBA, and line-of-business 
 |---|---|---|
 | `loss_history` | `afw_custlosshist` | The matching summary row(s) from the customer's loss history for this claim — confirmed 1:1 with `afw_claim` in the current book (every claim has exactly one summary row and vice versa). This is the same data `customer_lookup`'s `loss_history` include shows from the other direction. Its `amountpaid` is sparse and unreliable — use `payments` instead for real dollar figures. |
 | `payments` | `afw_claimpayment` | Actual payment/reserve/expense line items — `amount`, `paymenttype` ("Payment", "Final payment", "Claim payment", "Adjustment expense", "Loss reserve", "Void", "Stop payment", "Subrogation Recovery", "Recovery"), who it was paid by, check date. This is the real source behind `book_summary`'s `claims_paid_total` — see the gotcha below on which payment types count as actually "paid." |
-| `contacts` | `afw_claimcontact` | People tied to the claim (claimant, witness, etc.) — name, contact type, phone/email, whether they're the primary contact. |
+| `contacts` | `afw_claimcontact` | People tied to the claim (claimant, adjuster, carrier contact, insured, driver, employer, witness, etc.) — name, `contacttypeclcnt` + resolved `contact_type_description` (via `afw_prcode`, `AttrCode='CCT'`, as of 2026-09-01), phone/email, whether they're the primary contact. |
 | `injured` | `afw_claiminjured` | Injured-party detail — name, age, gender, occupation, fatality flag, description. |
 | `property_damage` | `afw_claimpropdamage` | Auto property damage detail — owner/driver info, damage description, estimated amount. |
 | `remarks` | `afw_claimremark` | Free-text adjuster/staff notes on the claim. |

@@ -9,17 +9,29 @@ const INCLUDE_OPTIONS = ["activity"] as const
 type Include = typeof INCLUDE_OPTIONS[number]
 
 const INCLUDE_QUERIES: Record<Include, string> = {
+  // trantype resolves via afw_prcode (AttrCode='TT') — attrcode comes back space-padded from the
+  // AMS360 API (e.g. 'TT '), so the join must rtrim it; code itself is not padded.
   activity: `
-    SELECT polid, tranid, trantype, trandate, commenttran, empcode, execcode, csrcode
-    FROM afw_transaction
-    WHERE polid = ANY($1::uuid[])
-    ORDER BY polid, trandate DESC
+    SELECT t.polid, t.tranid, t.trantype, tt.description AS trantype_description, t.trandate,
+      t.commenttran, t.empcode, t.execcode, t.csrcode
+    FROM afw_transaction t
+    LEFT JOIN afw_prcode tt ON rtrim(tt.attrcode) = 'TT' AND tt.code = t.trantype
+    WHERE t.polid = ANY($1::uuid[])
+    ORDER BY t.polid, t.trandate DESC
   `
 }
 
+// invtype and billmethod are NOT afw_prcode-backed — invtype is AMS360's afw_constant table
+// (ConstantName LIKE '%INV_TYPE%'/'%INV_TYPE_OA%', no description column of its own) and
+// billmethod is hardcoded in the Guide's prose (same A/P convention as afw_basicpolinfo.billmethod)
+// — both resolve via `_code_lookup` instead (see policy_query's polsubtype/cotype for the same
+// pattern). Confirmed against real data that invtype's two underlying constant groups (1-4/17 vs
+// 101-108) don't numerically collide, so a plain code match is safe without also filtering by group.
 const CORE_QUERY = `
   SELECT
-    i.invid, i.invno, i.invtype, i.inveffdate, i.invdate, i.duedate, i.billmethod,
+    i.invid, i.invno, i.invtype, invt.description AS invtype_description,
+    i.inveffdate, i.invdate, i.duedate,
+    i.billmethod, bm.description AS billmethod_description,
     i.polrelation, i.isinstallment, i.iscancelled, i.closedstatus, i.arclosedstatus,
     i.custid, cust.lastname AS customer_lastname, cust.firstname AS customer_firstname, cust.dba AS customer_dba,
     i.polid, pol.polno,
@@ -34,6 +46,8 @@ const CORE_QUERY = `
     i.glgrpcode, glg.name AS glgroup_name,
     i.changedby, i.changeddate, i.entereddate
   FROM afw_invoice i
+  LEFT JOIN _code_lookup invt ON invt.category = 'invtype' AND invt.code = i.invtype::text
+  LEFT JOIN _code_lookup bm ON bm.category = 'billmethod' AND bm.code = i.billmethod
   LEFT JOIN afw_customer cust ON i.custid = cust.custid
   LEFT JOIN afw_basicpolinfo pol ON i.polid = pol.polid
   LEFT JOIN afw_broker br ON i.brokercode = br.brokercode
@@ -62,7 +76,7 @@ export function registerInvoiceLookupTool(server: McpServer) {
   server.registerTool(
     "invoice_lookup",
     {
-      description: "Look up invoice(s) by ID or invoice number, or browse/search invoices by owning customer, policy, and coarse filters (cancelled, closed status, invoice type), with sorting and pagination. With no filters at all, returns a paginated list of all invoices. Resolves customer/policy/broker/rep/GL names inline. Optionally include related policy activity log entries.",
+      description: "Look up invoice(s) by ID or invoice number, or browse/search invoices by owning customer, policy, and coarse filters (cancelled, closed status, invoice type), with sorting and pagination. With no filters at all, returns a paginated list of all invoices. Resolves customer/policy/broker/rep/GL names inline. Optionally include related policy activity log entries. IMPORTANT: `invid`/`custid`/`polid`/`originalinvidinv`/`voidinvidinv` are internal AMS360 identifiers (UUIDs) with no meaning to an end user — never surface them in an answer; use `invno` or the resolved customer/policy name instead. `execcode`/`repcode`/`brokercode` come back raw alongside their resolved name fields (`exec_lastname`/`rep_lastname`/`broker_lastname` etc.) — always use the resolved name, never the code. The `activity` include's `empcode`/`execcode`/`csrcode` are NOT resolved by this tool at all — resolve via `employee_lookup` if the user needs a name.",
       inputSchema: {
         invid: z.string().uuid().describe("Exact invoice ID (afw_invoice.invid)").optional(),
         invno: z.number().int().describe("Exact invoice number (afw_invoice.invno)").optional(),

@@ -39,3 +39,4 @@ tsconfig.tsbuildinfo
 .env.*.local
 
 *.zip
+scripts/output/

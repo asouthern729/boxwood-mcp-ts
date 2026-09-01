@@ -1,6 +1,7 @@
 import { McpServer } from "@modelcontextprotocol/sdk/server/mcp.js"
 import * as z from "zod"
 import { runReadOnlyQuery } from "../db.js"
+import { realCertHolderCondition } from "../utils/certificateDataQuality.js"
 import { logger } from "../utils/logger.js"
 import { errorResult, groupByKey, textResult } from "../utils/mcpHelpers.js"
 
@@ -13,7 +14,8 @@ const INCLUDE_OPTIONS = [
   "xrefs",
   "expiring_business",
   "service_team",
-  "certificates"
+  "certificates",
+  "policies"
 ] as const
 
 type Include = typeof INCLUDE_OPTIONS[number]
@@ -90,21 +92,55 @@ const INCLUDE_QUERIES: Record<Include, string> = {
     FROM afw_certliabprop clp
     LEFT JOIN LATERAL (
       SELECT * FROM afw_certholderinfo chi
-      WHERE chi.crtid = clp.crtid
+      WHERE chi.crtid = clp.crtid AND ${ realCertHolderCondition("chi") }
       ORDER BY chi.certissuedatecrth DESC NULLS LAST, chi.entereddate DESC
       LIMIT 1
     ) ch ON true
     WHERE clp.custid = ANY($1::uuid[])
     ORDER BY clp.entereddate DESC
+  `,
+  // Lightweight view of the customer's current book — same "in force today" definition as
+  // policy_query's renewalrptflag='A' filter and book_summary's current_policies (excludes
+  // submission shells, status='D' rows, and bound-but-not-yet-started/already-expired terms).
+  // `premium` mirrors book_summary's COALESCE logic: afw_cprem's coverage-line premium sum where
+  // that detail exists (commercial, written through AMS360's detailed rating workflow), falling
+  // back to fulltermpremium otherwise. Use policy_query directly (with include: ["premiums"]) for
+  // the underlying coverage-line breakdown or to see expired/prior terms — this is current-only.
+  policies: `
+    SELECT p.custid, p.polid, p.polno, p.status, p.poltype, p.polsubtype, p.typeofbus,
+      p.poleffdate, p.polexpdate, p.cocode, co.name AS carrier_name,
+      COALESCE(
+        (
+          SELECT SUM(c.premium) FROM (
+            SELECT cp.premium, cp.status,
+              ROW_NUMBER() OVER (PARTITION BY cp.lobid, cp.cpremid ORDER BY cp.effdate DESC) AS rn
+            FROM afw_cprem cp WHERE cp.polid = p.polid
+          ) c WHERE c.rn = 1 AND c.status != 'D'
+        ),
+        p.fulltermpremium
+      ) AS premium
+    FROM afw_basicpolinfo p
+    LEFT JOIN afw_company co ON p.cocode = co.cocode
+    WHERE p.custid = ANY($1::uuid[])
+      AND p.renewalrptflag = 'A' AND p.polsubtype != 'S' AND p.status != 'D'
+      AND p.poleffdate <= now() AND p.polexpdate >= now()
+    ORDER BY p.custid, p.poleffdate DESC
   `
 }
 
+// typecust is NOT afw_prcode-backed — the AMS360 Database Design Guide hardcodes this small,
+// fixed value set directly in prose rather than delegating to afw_prcode (confirmed with
+// postgres-mcp-9f against the Guide text) — resolves via `_code_lookup`, a small hand-maintained
+// table (not synced from AMS360, deliberately not `afw_`-prefixed) built for exactly this category
+// of column (see policy_query's polsubtype/cotype for the other members of this category).
 const CORE_QUERY = `
   SELECT
-    c.custid, c.custno, c.lastname, c.firstname, c.dba, c.firmnamecust, c.typecust, c.typeentity, c.active,
+    c.custid, c.custno, c.lastname, c.firstname, c.dba, c.firmnamecust,
+    c.typecust, tcust.description AS typecust_description,
+    c.typeentity, c.active,
     c.addr1, c.addr2, c.city, c.state, c.zipcode, c.country,
     c.resareacode, c.resphone, c.busareacode, c.busphone, c.email,
-    c.mastersubtype, c.mastercustid,
+    c.mastersubtype, ms.description AS mastersubtype_description, c.mastercustid,
     c.prod1code, prod.lastname AS producer_lastname, prod.firstname AS producer_firstname,
     c.csrcode, csr.lastname AS csr_lastname, csr.firstname AS csr_firstname,
     c.brokercode, br.lastname AS broker_lastname, br.firstname AS broker_firstname, br.shortname AS broker_shortname,
@@ -115,6 +151,8 @@ const CORE_QUERY = `
     c.glgrpcode, glg.name AS glgroup_name,
     c.changedby, c.changeddate, c.entereddate
   FROM afw_customer c
+  LEFT JOIN _code_lookup tcust ON tcust.category = 'typecust' AND tcust.code = c.typecust
+  LEFT JOIN afw_prcode ms ON rtrim(ms.attrcode) = 'ME' AND ms.code = c.mastersubtype
   LEFT JOIN afw_employee prod ON c.prod1code = prod.empcode
   LEFT JOIN afw_employee csr ON c.csrcode = csr.empcode
   LEFT JOIN afw_broker br ON c.brokercode = br.brokercode
@@ -140,7 +178,7 @@ export function registerCustomerLookupTool(server: McpServer) {
   server.registerTool(
     "customer_lookup",
     {
-      description: "Look up customer(s) by ID or customer number, or browse/search customers by name and coarse filters (active, city, state, producer, CSR), with sorting and pagination. With no filters at all, returns a paginated list of all customers. Resolves producer/CSR/broker/GL names inline. Optionally include related records (contacts, dependents, loss history, attributes, relationships, cross-references, expiring outside business, service team, certificates of insurance). The `certificates` include is a lightweight view (current holder only, per certificate) — use the dedicated `certificate_lookup` tool for full reissue history or the up-to-9 covered-policies detail. IMPORTANT: for a commercial/business customer, `lastname`/`firstname`/`dba` are often all null — use `firmnamecust` (the business name) as the display name in that case; the `name` filter already searches it alongside lastname/firstname/dba.",
+      description: "Look up customer(s) by ID or customer number, or browse/search customers by name and coarse filters (active, city, state, producer, CSR), with sorting and pagination. With no filters at all, returns a paginated list of all customers. Resolves producer/CSR/broker/GL names inline. Optionally include related records (contacts, dependents, loss history, attributes, relationships, cross-references, expiring outside business, service team, certificates of insurance, current policies). The `certificates` include is a lightweight view (current holder only, per certificate) — use the dedicated `certificate_lookup` tool for full reissue history or the up-to-9 covered-policies detail. The `policies` include is likewise a lightweight, current-only view (policy number, carrier, dates, premium) of the customer's in-force book — use `policy_query` directly (`custid` filter, or `include: [\"premiums\"]`) for expired/prior terms or coverage-line-level pricing detail. IMPORTANT: for a commercial/business customer, `lastname`/`firstname`/`dba` are often all null — use `firmnamecust` (the business name) as the display name in that case; the `name` filter already searches it alongside lastname/firstname/dba. IMPORTANT: `custid` (and every other `*id` field this tool or its includes return — `ccntid`, `depdid`, `closshistid`, `claimid`, `crtid`, `anotid`) is an internal AMS360 identifier (UUID) with no meaning to an end user — never surface it in an answer. Use the resolved name, `custno`, or another human-readable field instead; these ids exist only to chain to other tool calls (e.g. pass `custid` to `policy_query`).",
       inputSchema: {
         custid: z.string().uuid().describe("Exact customer ID (afw_customer.custid)").optional(),
         custno: z.number().int().describe("Exact customer number (afw_customer.custno)").optional(),

@@ -28,12 +28,15 @@ const FEED_SUBQUERY = `
       'policy_transaction' AS domain, bp.custid, pt.polid, c.csrcode,
       ${ CUSTOMER_NAME_EXPR } AS customer_name,
       bp.polno AS policy_no,
-      pt.trantype || ': ' || pt.description AS summary,
+      COALESCE(tt.description, pt.trantype) || ': ' || pt.description AS summary,
       'afw_policytransaction' AS source_table,
       pt.polid::text || ':' || pt.effdate::text AS source_id
     FROM afw_policytransaction pt
     JOIN afw_basicpolinfo bp ON bp.polid = pt.polid
     LEFT JOIN afw_customer c ON c.custid = bp.custid
+    -- trantype resolves via afw_prcode (AttrCode='TT'); attrcode is space-padded by the AMS360
+    -- API, so rtrim it, falling back to the raw code if a value is somehow missing from PrCode.
+    LEFT JOIN afw_prcode tt ON rtrim(tt.attrcode) = 'TT' AND tt.code = pt.trantype
     WHERE pt.changeddate BETWEEN $1 AND $2
 
     UNION ALL
@@ -141,7 +144,7 @@ export function registerActivityFeedTool(server: McpServer) {
   server.registerTool(
     "activity_feed",
     {
-      description: "Answer \"what's changed lately\" by querying changeddate/changedby across policy transactions, policy term changes, claims, invoices, and staff activity notes, joined back to customer/policy context. Accepts a required time window (ISO timestamp or relative shorthand like \"24h\"/\"7d\"/\"30d\"), with optional domain/changed-by-type/customer/policy/CSR scoping and pagination. Optionally group counts by domain or changed-by-type.",
+      description: "Answer \"what's changed lately\" by querying changeddate/changedby across policy transactions, policy term changes, claims, invoices, and staff activity notes, joined back to customer/policy context. Accepts a required time window (ISO timestamp or relative shorthand like \"24h\"/\"7d\"/\"30d\"), with optional domain/changed-by-type/customer/policy/CSR scoping and pagination. Optionally group counts by domain or changed-by-type. IMPORTANT: `changed_by` is a raw AMS360 employee code with no meaning to an end user — resolve via `employee_lookup` if the user needs to know who made a change; `changed_by_type` (staff/system) already tells you whether that's even worth doing. `source_id` is an internal reference (a raw UUID, or a composite key embedding one) meant for cross-referencing the underlying record, not for display — never surface it in an answer.",
       inputSchema: {
         since: z.string().describe('Start of window: ISO timestamp or relative shorthand ("1h", "24h", "7d", "30d")'),
         until: z.string().describe("End of window, ISO timestamp. Defaults to now").optional(),
