@@ -8,7 +8,8 @@
     "dev": "tsx watch src/app.ts",
     "build": "tsc -b",
     "start": "node dist/app.js",
-    "deploy": "pm2 kill && pm2 reload ecosystem.config.cjs"
+    "deploy": "pm2 kill && pm2 reload ecosystem.config.cjs",
+    "deploy:docs": "rsync -a --delete docs/ /var/www/mcp-tools/"
   },
   "dependencies": {
     "@anthropic-ai/claude-agent-sdk": "^0.3.251",

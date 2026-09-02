@@ -4,7 +4,7 @@
 <meta charset="UTF-8">
 <meta name="viewport" content="width=device-width, initial-scale=1.0">
 <link rel="icon" href="./assets/boxwood-favicon.ico">
-<title>Boxwood MCP Tools</title>
+<title>Boxwood MCP Tools & Skills</title>
 <link rel="preconnect" href="https://fonts.googleapis.com">
 <link rel="preconnect" href="https://fonts.gstatic.com" crossorigin>
 <link href="https://fonts.googleapis.com/css2?family=Play:wght@400;700&display=swap" rel="stylesheet">
@@ -14,8 +14,7 @@
     --text: #0a0a0a;
     --muted: #6b6b6b;
     --border: #e2e2e2;
-    --tag-bg: #0a0a0a;
-    --tag-fg: #ffffff;
+    --section-border: #ededed;
     --footer-neutral: oklch(20% 0 0);
     --footer-base-200: oklch(95% .0081 61.42);
     --footer-neutral-content: oklch(80% .0081 61.42);
@@ -27,8 +26,7 @@
       --text: #f2f2f2;
       --muted: #9a9a9a;
       --border: #262626;
-      --tag-bg: #f2f2f2;
-      --tag-fg: #000000;
+      --section-border: #1c1c1c;
       --footer-neutral: oklch(35% 0 0);
       --footer-base-200: oklch(19% 0 0);
       --footer-neutral-content: oklch(100% 0 0);
@@ -40,8 +38,7 @@
     --text: #f2f2f2;
     --muted: #9a9a9a;
     --border: #262626;
-    --tag-bg: #f2f2f2;
-    --tag-fg: #000000;
+    --section-border: #1c1c1c;
     --footer-neutral: oklch(35% 0 0);
     --footer-base-200: oklch(19% 0 0);
     --footer-neutral-content: oklch(100% 0 0);
@@ -73,10 +70,34 @@
     padding: 4.5rem 1.5rem 4rem;
   }
 
+  .legend {
+    display: flex;
+    gap: 2.5rem;
+    margin: 0 0 3rem;
+  }
+
+  .legend-item {
+    display: flex;
+    flex-direction: column;
+    align-items: flex-start;
+    gap: 0.5rem;
+  }
+
+  .legend-desc {
+    font-size: 0.85rem;
+    color: var(--muted);
+    margin: 0;
+  }
+
+  .pink-text {
+    color: #f28cb1;
+  }
+
   .boxwood-brand {
     display: flex;
     align-items: center;
     gap: 1.25rem;
+    margin-bottom: 3rem;
   }
 
   .boxwood-brand img {
@@ -116,13 +137,14 @@
 
   h2 {
     font-family: ui-monospace, SFMono-Regular, Menlo, Consolas, monospace;
-    font-size: 0.72rem;
+    font-size: 0.85rem;
+    font-weight: 700;
     letter-spacing: 0.14em;
     text-transform: uppercase;
-    color: var(--muted);
+    color: #ffffff;
     margin: 0 0 0.25rem;
     padding-top: 0.5rem;
-    border-top: 1px solid var(--border);
+    border-top: 1px solid var(--section-border);
   }
 
   section.group {
@@ -135,8 +157,8 @@
 
   .tool {
     display: flex;
-    gap: 1.25rem;
-    align-items: baseline;
+    flex-direction: column;
+    gap: 0.85rem;
     padding: 1rem 0;
     border-bottom: 1px solid var(--border);
   }
@@ -145,25 +167,44 @@
     border-bottom: none;
   }
 
-  .tool-name {
+  .tags {
+    display: flex;
+    flex-wrap: wrap;
+    gap: 0.4rem;
+    flex-shrink: 0;
+  }
+
+  .tool-name,
+  .skill-name {
     font-family: ui-monospace, SFMono-Regular, Menlo, Consolas, monospace;
     font-size: 0.78rem;
     font-weight: 600;
-    background: var(--tag-bg);
-    color: var(--tag-fg);
+    color: #ffffff;
     padding: 0.2rem 0.5rem;
     border-radius: 4px;
     white-space: nowrap;
     flex-shrink: 0;
   }
 
+  .tool-name { background: #2596be; }
+  .skill-name { background: #f28cb1; }
+
   .tool-desc {
     font-size: 0.95rem;
     margin: 0;
+    padding-left: 50px;
   }
 
   .tool-desc span {
     color: var(--muted);
+  }
+
+  .tool-hint {
+    font-size: 0.85rem;
+    font-style: italic;
+    color: var(--muted);
+    margin: 0;
+    padding-left: 50px;
   }
 
   footer {
@@ -178,7 +219,8 @@
 
   @media (max-width: 560px) {
     .page { padding: 3rem 1.25rem 3rem; }
-    .tool { flex-direction: column; gap: 0.35rem; }
+    .tool-desc, .tool-hint { padding-left: 0; }
+    .legend { flex-direction: column; gap: 1rem; }
   }
 
   .brand-footer {
@@ -246,51 +288,62 @@
     <img src="./assets/boxwood-logo.png" alt="Boxwood Insurance Group">
     <div class="heading">
       <p class="kicker">Boxwood &middot; Agency Assistant</p>
-      <h1>Boxwood MCP Tools</h1>
+      <h1>Boxwood MCP Tools &amp; Skills</h1>
+    </div>
+  </div>
+
+  <div class="legend">
+    <div class="legend-item">
+      <span class="skill-name">Skill</span>
+      <p class="legend-desc">Domain knowledge invoked in Claude.ai by typing the <span class="pink-text">/skill-name</span>.</p>
+    </div>
+    <div class="legend-item">
+      <span class="tool-name">MCP Tool</span>
+      <p class="legend-desc">Runs behind the scenes to fetch data &mdash; not called directly in Claude.ai.</p>
     </div>
   </div>
 
   <section class="group">
     <h2>Customers</h2>
-    <div class="tool"><span class="tool-name">customer_lookup</span><p class="tool-desc">Find a customer &mdash; <span>contact info, policies, claims, certificates, service team.</span></p></div>
+    <div class="tool"><span class="tags"><span class="skill-name">/customers</span><span class="tool-name">customer_lookup</span></span><p class="tool-desc">Find a customer &mdash; <span>contact info, policies, claims, certificates, service team &mdash; browsable across the whole book.</span></p><p class="tool-hint">The starting point for any question about a specific customer.</p></div>
   </section>
 
   <section class="group">
     <h2>Policies</h2>
-    <div class="tool"><span class="tool-name">policy_query</span><p class="tool-desc">Find a policy &mdash; <span>transactions, coverages, lines of business, coverage-line pricing, vehicles, workers' comp, forms, applicant detail.</span></p></div>
-    <div class="tool"><span class="tool-name">upcoming_renewals</span><p class="tool-desc">What's renewing soon &mdash; <span>premium totals, renewal progress.</span></p></div>
+    <div class="tool"><span class="tags"><span class="skill-name">/policies</span><span class="tool-name">policy_query</span></span><p class="tool-desc">Find a policy &mdash; <span>transactions, coverages, lines of business, coverage-line pricing, vehicles, workers' comp, forms, applicant detail, renewal-chain history.</span></p><p class="tool-hint">For any policy-specific question &mdash; coverage detail, an endorsement, or how a term compares to its renewal.</p></div>
+    <div class="tool"><span class="tags"><span class="skill-name">/renewals</span><span class="tool-name">upcoming_renewals</span></span><p class="tool-desc">What's renewing soon and still needs outreach &mdash; <span>premium totals, renewal progress, with marketing shells and already-renewed terms filtered out.</span></p><p class="tool-hint">Use for renewal outreach planning, check what renewals are coming in the future up to 1-year out.</p></div>
   </section>
 
   <section class="group">
     <h2>Claims</h2>
-    <div class="tool"><span class="tool-name">claim_lookup</span><p class="tool-desc">Find a claim &mdash; <span>payments, injuries, damage, adjuster notes.</span></p></div>
+    <div class="tool"><span class="tags"><span class="skill-name">/claims</span><span class="tool-name">claim_lookup</span></span><p class="tool-desc">Find a claim &mdash; <span>payments, injuries, damage, adjuster notes, including how much has actually been paid out.</span></p><p class="tool-hint">Use when a customer or adjuster question needs claim-level detail.</p></div>
   </section>
 
   <section class="group">
     <h2>Billing</h2>
-    <div class="tool"><span class="tool-name">invoice_lookup</span><p class="tool-desc">Find an invoice &mdash; <span>billing detail, cancellations, related activity.</span></p></div>
+    <div class="tool"><span class="tags"><span class="skill-name">/invoices</span><span class="tool-name">invoice_lookup</span></span><p class="tool-desc">Find an invoice &mdash; <span>billing detail, cancellations, related activity &mdash; not outstanding balances, which AMS360 doesn't track here.</span></p><p class="tool-hint">Helpful for tracing billing history or a cancellation, not for checking what's currently outstanding.</p></div>
   </section>
 
   <section class="group">
     <h2>Certificates</h2>
-    <div class="tool"><span class="tool-name">certificate_lookup</span><p class="tool-desc">Find a certificate of insurance &mdash; <span>holder, coverage, reissue history.</span></p></div>
+    <div class="tool"><span class="tags"><span class="skill-name">/certificates</span><span class="tool-name">certificate_lookup</span></span><p class="tool-desc">Find a certificate of insurance &mdash; <span>holder, coverage, reissue history, and what a COI actually does or doesn't cover.</span></p><p class="tool-hint">Use to check current certificate holders on an account, or issue/reissue counts for a customer.</p></div>
   </section>
 
   <section class="group">
     <h2>Staff</h2>
-    <div class="tool"><span class="tool-name">employee_lookup</span><p class="tool-desc">Find a staff member &mdash; <span>their full book of customers, policies, claims.</span></p></div>
+    <div class="tool"><span class="tags"><span class="tool-name">employee_lookup</span></span><p class="tool-desc">Find a staff member &mdash; <span>their full book of customers, policies, claims.</span></p><p class="tool-hint">Use when reviewing one producer's or CSR's full book of business.</p></div>
   </section>
 
   <section class="group">
     <h2>Agency-wide</h2>
-    <div class="tool"><span class="tool-name">book_summary</span><p class="tool-desc">Current book by producer, CSR, carrier, or line &mdash; <span>premium, counts, claims paid.</span></p></div>
-    <div class="tool"><span class="tool-name">activity_feed</span><p class="tool-desc">What's changed lately &mdash; <span>new policies, endorsements, claims, invoices.</span></p></div>
+    <div class="tool"><span class="tags"><span class="tool-name">book_summary</span></span><p class="tool-desc">Current book broken out by producer, CSR, carrier, or line &mdash; <span>premium, counts, claims paid, agency-wide by default or scoped to one segment.</span></p><p class="tool-hint">Use for agency-wide totals or a full breakdown by producer, CSR, carrier, or line.</p></div>
+    <div class="tool"><span class="tags"><span class="skill-name">/activity</span><span class="tool-name">activity_feed</span></span><p class="tool-desc">What's changed lately &mdash; <span>new policies, endorsements, claims, invoices, unified into one audit-trail timeline.</span></p><p class="tool-hint">Good for catching up after time away, or spot-checking recent activity on an account.</p></div>
   </section>
 
   <section class="group">
     <h2>Downloads</h2>
-    <div class="tool"><span class="tool-name">download_report</span><p class="tool-desc">Morning download review &mdash; <span>overnight carrier policy transactions and claims, normalized into action items and grouped by rep.</span></p></div>
-    <div class="tool"><span class="tool-name">download_report_workbook</span><p class="tool-desc">Build the download review workbook &mdash; <span>the finished .xlsx from a download_report run, with flagged rows and accuracy verdicts, one tab per rep.</span></p></div>
+    <div class="tool"><span class="tags"><span class="skill-name">/downloads</span><span class="tool-name">download_report</span></span><p class="tool-desc">Morning download review &mdash; <span>overnight carrier policy transactions and claims, normalized into action items and grouped by rep, rebuilt from synced data instead of AMS360's raw download log.</span></p><p class="tool-hint">Run this first thing each morning to see what came down overnight.</p></div>
+    <div class="tool"><span class="tags"><span class="skill-name">/downloads</span><span class="tool-name">download_report_workbook</span></span><p class="tool-desc">Stage 2 of the download review &mdash; <span>the finished .xlsx built from download_report, with flagged rows and accuracy verdicts, one tab per rep.</span></p><p class="tool-hint">Use once the review's done and it's time to hand reps their action list.</p></div>
   </section>
 
   <footer>Boxwood Agency Assistant &middot; connected to AMS360</footer>
