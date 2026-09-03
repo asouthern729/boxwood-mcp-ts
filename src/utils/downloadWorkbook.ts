@@ -88,6 +88,15 @@ function formatDateLabel(isoLike: string): string {
   return new Date(Date.UTC(y, m - 1, d)).toLocaleDateString("en-US", { month: "long", day: "numeric", year: "numeric", timeZone: "UTC" })
 }
 
+// Same YYYY-MM-DD-slicing approach as formatDateLabel, but numeric/short — a repeated per-row cell
+// value reads better compact than formatDateLabel's "Month Day, Year" long form (that's reserved
+// for the one-off title/subtitle text).
+function formatShortDate(isoLike: string): string {
+  const [y, m, d] = isoLike.slice(0, 10).split("-").map(Number)
+
+  return new Date(Date.UTC(y, m - 1, d)).toLocaleDateString("en-US", { month: "2-digit", day: "2-digit", year: "numeric", timeZone: "UTC" })
+}
+
 const VERDICT_STYLE: Record<AccuracyVerdict["status"], { label: string; color: string; bg: string }> = {
   matches: { label: "✓ MATCHES", color: COLORS.brandGreenDark, bg: COLORS.greenBg },
   no_match: { label: "✗ NO MATCH FOUND", color: COLORS.red, bg: COLORS.redBg },
@@ -130,7 +139,9 @@ function itemRowValues(item: WorkbookItem): string[] {
     item.carrier_name ?? "",
     item.line_of_business ?? "",
     item.what_happened,
+    item.effective_date ? formatShortDate(item.effective_date) : "",
     item.detail ?? "",
+    item.change_detail ?? "",
     item.next_step,
     accuracy.text
   ]
@@ -143,16 +154,16 @@ function styleItemRow(sheet: ExcelJS.Worksheet, rowNumber: number, item: Workboo
   const row = sheet.getRow(rowNumber)
   const rowFill = item.flagged ? COLORS.cream : undefined
 
-  for(let col = 1; col <= 7; col++) {
+  for(let col = 1; col <= 9; col++) {
     styleBodyCell(row.getCell(col), { bold: col === 1, fill: rowFill })
   }
 
   const accuracy = accuracyCellFor(item)
-  styleBodyCell(row.getCell(8), { bold: true, color: accuracy.color, fill: accuracy.bg })
+  styleBodyCell(row.getCell(10), { bold: true, color: accuracy.color, fill: accuracy.bg })
 }
 
-const REP_SHEET_COLUMN_WIDTHS = [24, 15, 26, 20, 20, 40, 36, 46]
-const REP_SHEET_HEADERS = ["Customer", "Policy #", "Carrier", "Line of Business", "What Happened", "Detail", "Next Step", "Check for Accuracy"]
+const REP_SHEET_COLUMN_WIDTHS = [24, 15, 26, 20, 20, 18, 40, 40, 36, 46]
+const REP_SHEET_HEADERS = ["Customer", "Policy #", "Carrier", "Line of Business", "What Happened", "Transaction Effective Date", "Detail", "Policy Changes", "Next Step", "Check for Accuracy"]
 
 // No banding/theme colors from the table style — every cell here gets its own explicit brand
 // fill/font from styleHeaderCell/styleBodyCell right after the table is created, and those direct
@@ -168,7 +179,7 @@ function buildRepSheet(workbook: ExcelJS.Workbook, sheetName: string, tableName:
 
   addTitleBlock(
     sheet,
-    "H",
+    "J",
     "Boxwood Insurance Group — Morning Download Action List",
     `${ repName }  •  Overnight download for ${ dateLabel }  •  ${ items.length } item(s), ${ flaggedCount } flagged for review`
   )

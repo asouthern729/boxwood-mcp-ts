@@ -36,7 +36,13 @@ const PROMPT = `Run Boxwood's morning download review end to end.
    "verify" (plausible but not confidently confirmed). Base every verdict strictly on what the
    notes actually say — if candidate_prior_activity is empty or doesn't clearly support a
    confident call, use "verify" rather than guessing. Write a one-to-two sentence note citing what
-   you found (or didn't).
+   you found (or didn't) — this note is shown to reps verbatim in the finished workbook, so write
+   it in plain language a rep would understand, never referencing an item_id or any other internal
+   identifier. Cross-referencing another item on this report is still valuable and you should still
+   do it whenever it's genuinely true (e.g. noticing the same change is documented on a different
+   transaction for this policy) — just identify that other item by its content instead of its
+   number (the customer, the policy number, the date, or what it actually says). Don't drop a real
+   cross-reference just to avoid an item_id — rephrase it, don't omit it.
 3. Call download_report_workbook, passing the exact report_token download_report returned, and a
    verdicts array with one {item_id, accuracy} entry for every flagged item you judged.
 4. Reply with nothing but a one-line confirmation of what you built (rep count, item count,

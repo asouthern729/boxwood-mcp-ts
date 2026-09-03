@@ -205,6 +205,7 @@ const CORE_QUERY = `
     p.poleffdate, p.polexpdate, p.iscontinuous,
     p.billmethod, bm.description AS billmethod_description,
     p.fulltermpremium,
+    lastpremtx.annualizedpremium AS last_written_premium,
     p.custid, cust.lastname AS customer_lastname, cust.firstname AS customer_firstname, cust.dba AS customer_dba,
     p.cocode, co.name AS carrier_name,
     p.writingcocode, wco.name AS writing_carrier_name,
@@ -237,6 +238,19 @@ const CORE_QUERY = `
   LEFT JOIN afw_generalledgerbranch glb ON p.glbrnchcode = glb.glbrnchcode
   LEFT JOIN afw_generalledgerdepartment gldep ON p.gldeptcode = gldep.gldeptcode
   LEFT JOIN afw_generalledgergroup glg ON p.glgrpcode = glg.glgrpcode
+  -- A term that cancels before ever being invoiced nets fulltermpremium down to 0.00, which
+  -- reads as "never priced" — confirmed against real data (ENP 0655902: RWL transaction with
+  -- annualizedpremium 4125.00, immediately followed by an XLC cancellation, fulltermpremium left
+  -- at 0.00). This pulls the last transaction that actually carried a premium figure (XLC/XLN
+  -- cancellation rows always have annualizedpremium NULL, so they're skipped automatically) so
+  -- the JS layer below can surface it as last_written_premium when renewalrptflag = 'C'.
+  LEFT JOIN LATERAL (
+    SELECT pt.annualizedpremium
+    FROM afw_policytransaction pt
+    WHERE pt.polid = p.polid AND pt.annualizedpremium IS NOT NULL
+    ORDER BY pt.effdate DESC, pt.changeddate DESC
+    LIMIT 1
+  ) lastpremtx ON true
 `
 
 const SORT_OPTIONS = {
@@ -254,7 +268,7 @@ export function registerPolicyQueryTool(server: McpServer) {
   server.registerTool(
     "policy_query",
     {
-      description: "Look up policy/policies by ID, or browse/search policies by policy number, owning customer, and coarse filters (status, type of business, carrier, CSR), with sorting and pagination. With no filters at all, returns a paginated list of all policies. Resolves carrier/producer/CSR/broker/GL names inline. Optionally include related records (transactions, lines of business, coverage, coverage-line premium/pricing detail, vehicles, workers' comp detail, forms, personnel, submissions, attributes, policy-level contacts). The `premiums` include (afw_cprem) is coverage-line-level rating/pricing detail for commercial policies written through AMS360's detailed rating workflow — limits, deductibles, rate, and premium per coverage line, deduped to each line's current (latest non-deleted) state; it's empty for personal lines and for commercial policies not written through that workflow, in which case `fulltermpremium` on the core result is the only premium figure available. `vehicles` (Personal Auto vehicle schedule — make/model/VIN/usage/territory/premium), `workers_comp` (WC rating detail — state, employer/NCCI numbers, participating-plan flags), and `forms` (form numbers/descriptions/edition dates attached to the policy, primarily Homeowner/Personal Umbrella) are each empty unless the policy carries that specific line of business — don't read an empty array as a data gap, it usually just means the LOB doesn't apply. Beyond those, `include` also accepts ~190 additional AMS360 §4.4.3 per-LOB detail tables (GL hazard/coverage schedules, commercial property/building detail, inland marine equipment schedules, farm/boat/flood/life/health detail, and more) — the full list is in the `include` parameter's enum; each one is named after its underlying AMS360 table with the `afw_` prefix stripped (e.g. `126shazard` for the GL schedule of hazards, `cbuilding` for commercial building detail). Nearly all of these are empty unless the policy carries that specific, often uncommon, line of business — same 'not a data gap' caveat as vehicles/workers_comp/forms above, just far more pronounced since most are thin or unused for a given agency's book. Don't guess at one of these from the name alone if unsure what it returns; a wrong guess wastes a call, so when the LOB is unclear prefer `lines_of_business` or `coverage` first and only reach for a specific §4.4.3 include once the relevant LOB is confirmed. IMPORTANT: to find the currently in-force term (of a customer's book, a renewal chain, etc.), filter on `renewalrptflag: \"A\"`, not `status: \"A\"` — `status` does not track renewal-chain lifecycle in this data (most currently in-force terms carry `status='C'`); `renewalrptflag='A'` is the field that actually identifies the live term. Passing `renewalrptflag: \"A\"` also automatically excludes marketing/submission shells, deleted (status='D') rows, and — client-confirmed as of 2026-08-27 — any bound renewal whose effective date is still in the future or whose term has already expired, so the result is genuinely 'in force today,' matching `book_summary`'s definition of current. To see a future-dated renewal that's already bound but hasn't started yet, use `upcoming_renewals` instead — that tool is specifically for renewals with a future effective date and intentionally does not apply this restriction. IMPORTANT: `polid`/`custid`/`priorpolid`/`sourcepolid`/`anotid`/`paypid` are internal AMS360 identifiers (UUIDs) with no meaning to an end user — never surface them in an answer. `execcode`/`csrcode`/`brokercode`/the GL codes come back raw alongside their resolved name fields (`exec_lastname`/`csr_lastname`/`broker_lastname`, GL division/branch/department/group names) — always use the resolved name/description instead, never the raw code or id.",
+      description: "Look up policy/policies by ID, or browse/search policies by policy number, owning customer, and coarse filters (status, type of business, carrier, CSR), with sorting and pagination. With no filters at all, returns a paginated list of all policies. Resolves carrier/producer/CSR/broker/GL names inline. Optionally include related records (transactions, lines of business, coverage, coverage-line premium/pricing detail, vehicles, workers' comp detail, forms, personnel, submissions, attributes, policy-level contacts). The `premiums` include (afw_cprem) is coverage-line-level rating/pricing detail for commercial policies written through AMS360's detailed rating workflow — limits, deductibles, rate, and premium per coverage line, deduped to each line's current (latest non-deleted) state; it's empty for personal lines and for commercial policies not written through that workflow, in which case `fulltermpremium` on the core result is the only premium figure available. `vehicles` (Personal Auto vehicle schedule — make/model/VIN/usage/territory/premium), `workers_comp` (WC rating detail — state, employer/NCCI numbers, participating-plan flags), and `forms` (form numbers/descriptions/edition dates attached to the policy, primarily Homeowner/Personal Umbrella) are each empty unless the policy carries that specific line of business — don't read an empty array as a data gap, it usually just means the LOB doesn't apply. Beyond those, `include` also accepts ~190 additional AMS360 §4.4.3 per-LOB detail tables (GL hazard/coverage schedules, commercial property/building detail, inland marine equipment schedules, farm/boat/flood/life/health detail, and more) — the full list is in the `include` parameter's enum; each one is named after its underlying AMS360 table with the `afw_` prefix stripped (e.g. `126shazard` for the GL schedule of hazards, `cbuilding` for commercial building detail). Nearly all of these are empty unless the policy carries that specific, often uncommon, line of business — same 'not a data gap' caveat as vehicles/workers_comp/forms above, just far more pronounced since most are thin or unused for a given agency's book. Don't guess at one of these from the name alone if unsure what it returns; a wrong guess wastes a call, so when the LOB is unclear prefer `lines_of_business` or `coverage` first and only reach for a specific §4.4.3 include once the relevant LOB is confirmed. IMPORTANT: to find the currently in-force term (of a customer's book, a renewal chain, etc.), filter on `renewalrptflag: \"A\"`, not `status: \"A\"` — `status` does not track renewal-chain lifecycle in this data (most currently in-force terms carry `status='C'`); `renewalrptflag='A'` is the field that actually identifies the live term. Passing `renewalrptflag: \"A\"` also automatically excludes marketing/submission shells, deleted (status='D') rows, and — client-confirmed as of 2026-08-27 — any bound renewal whose effective date is still in the future or whose term has already expired, so the result is genuinely 'in force today,' matching `book_summary`'s definition of current. To see a future-dated renewal that's already bound but hasn't started yet, use `upcoming_renewals` instead — that tool is specifically for renewals with a future effective date and intentionally does not apply this restriction. IMPORTANT: a term with `renewalrptflag: \"C\"` (cancelled) that shows `fulltermpremium: \"0.00\"` was not necessarily unpriced — a term cancelled before ever being invoiced nets fulltermpremium down to 0.00, which looks identical to a term that was genuinely never priced. On these rows the core result also includes `written_premium` (the real, last-written premium pulled from the term's transaction history) and a `premium_note` explaining the discrepancy — always check these before reporting a cancelled term as \"$0 premium\" or \"never priced.\" These two fields are omitted on non-cancelled rows. IMPORTANT: `polid`/`custid`/`priorpolid`/`sourcepolid`/`anotid`/`paypid` are internal AMS360 identifiers (UUIDs) with no meaning to an end user — never surface them in an answer. `execcode`/`csrcode`/`brokercode`/the GL codes come back raw alongside their resolved name fields (`exec_lastname`/`csr_lastname`/`broker_lastname`, GL division/branch/department/group names) — always use the resolved name/description instead, never the raw code or id.",
       inputSchema: {
         polid: z.string().uuid().describe("Exact policy ID (afw_basicpolinfo.polid)").optional(),
         polno: z.string().describe("Partial match against policy number or short policy number").optional(),
@@ -360,7 +374,21 @@ export function registerPolicyQueryTool(server: McpServer) {
             included[key] = includedData[key]?.get(String(policy.polid)) ?? []
           }
 
-          return include?.length ? { ...policy, included } : policy
+          // last_written_premium is only meaningful context for a cancelled term (see the
+          // lastpremtx comment on CORE_QUERY) — drop it from the ~99% of rows that aren't
+          // cancelled rather than surface a redundant duplicate of fulltermpremium everywhere.
+          const { last_written_premium, ...rest } = policy as Record<string, unknown>
+          const base = include?.length ? { ...rest, included } : rest
+
+          if(policy.renewalrptflag === "C") {
+            return {
+              ...base,
+              written_premium: last_written_premium,
+              premium_note: "This term was cancelled. fulltermpremium reflects the net premium after cancellation (0.00 when the term cancelled before ever being invoiced), not what was actually written/priced — written_premium is the last non-null premium figure from the term's transaction history and reflects the real written amount."
+            }
+          }
+
+          return base
         })
 
         return textResult({ policies: results, has_more: hasMore })
