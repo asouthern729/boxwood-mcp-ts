@@ -174,7 +174,10 @@ description says so explicitly rather than silently dropping them:
   agency-local today" window (the Boxwood ETL sync pulls overnight AMS360 carrier activity starting
   7:30am agency-local and typically finishes within minutes, and the report script itself doesn't
   run until 8am — the window's upper bound anchors to that fixed cutoff, not to "now," so the same
-  "today" question returns the same window regardless of what time of day it's asked). Unlike `activity_feed`'s
+  "today" question returns the same window regardless of what time of day it's asked). On a Monday
+  the lower bound reaches back to Friday 8am instead of Sunday 8am, since no report runs Sat/Sun
+  (`morningDownload.ts`'s cron is Mon-Fri only) but the ETL sync keeps pulling weekend activity.
+  Unlike `activity_feed`'s
   `since`/`until` (which bind a true UTC instant against these same naive-local columns — a known
   ~5-6 hour boundary bug), this tool resolves its window through `src/utils/localTime.ts`'s
   `agencyWallClockParts`/`bindableAgencyDate`/`mostRecentAgencySyncWindow` to anchor correctly in

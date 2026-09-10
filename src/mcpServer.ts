@@ -1,15 +1,21 @@
 import { McpServer } from "@modelcontextprotocol/sdk/server/mcp.js"
-import { registerCustomerLookupTool } from "./tools/customerLookup.js"
-import { registerPolicyQueryTool } from "./tools/policyQuery.js"
-import { registerInvoiceLookupTool } from "./tools/invoiceLookup.js"
-import { registerActivityFeedTool } from "./tools/activityFeed.js"
-import { registerUpcomingRenewalsTool } from "./tools/upcomingRenewals.js"
-import { registerClaimLookupTool } from "./tools/claimLookup.js"
+import { registerCustomerLookupTool } from "./tools/customers/customerLookup.js"
+import { registerPolicyQueryTool } from "./tools/policies/policyQuery.js"
+import { registerInvoiceLookupTool } from "./tools/invoices/invoiceLookup.js"
+import { registerActivityFeedTool } from "./tools/activity/activityFeed.js"
+import { registerUpcomingRenewalsTool } from "./tools/renewals/upcomingRenewals.js"
+import { registerClaimLookupTool } from "./tools/claims/claimLookup.js"
 import { registerBookSummaryTool } from "./tools/bookSummary.js"
 import { registerEmployeeLookupTool } from "./tools/employeeLookup.js"
-import { registerCertificateLookupTool } from "./tools/certificateLookup.js"
-import { registerDownloadReportTool } from "./tools/downloadReport.js"
-import { registerDownloadReportWorkbookTool } from "./tools/downloadReportWorkbook.js"
+import { registerCertificateLookupTool } from "./tools/certificates/certificateLookup.js"
+import { registerDownloadReportTool } from "./tools/downloads/downloadReport.js"
+import { registerDownloadReportWorkbookTool } from "./tools/downloads/downloadReportWorkbook.js"
+import { registerCommercialRenewalSummaryTool } from "./tools/policies/commercialRenewalSummary.js"
+import { registerBoardSummaryTool } from "./tools/board/boardSummary.js"
+import { registerBoardUpdateItemTool } from "./tools/board/boardUpdateItem.js"
+import { registerBoardCommentTool } from "./tools/board/boardComment.js"
+import { registerBoardCreateItemTool } from "./tools/board/boardCreateItem.js"
+import { registerBoardDeleteItemTool } from "./tools/board/boardDeleteItem.js"
 
 export function createServer() {
   const server = new McpServer({
@@ -28,6 +34,12 @@ export function createServer() {
   registerCertificateLookupTool(server)
   registerDownloadReportTool(server)
   registerDownloadReportWorkbookTool(server)
+  registerCommercialRenewalSummaryTool(server)
+  registerBoardSummaryTool(server)
+  registerBoardUpdateItemTool(server)
+  registerBoardCommentTool(server)
+  registerBoardCreateItemTool(server)
+  registerBoardDeleteItemTool(server)
 
   return server
 }

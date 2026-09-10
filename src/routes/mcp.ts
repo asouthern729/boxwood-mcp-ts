@@ -22,7 +22,7 @@ router.use("/mcp", async (req, res, next) => {
   }
 
   try {
-    await verifyAccessToken(token)
+    req.auth0 = await verifyAccessToken(token)
     next()
   } catch(error) {
     logger.warn({ err: error }, "Rejected invalid bearer token")

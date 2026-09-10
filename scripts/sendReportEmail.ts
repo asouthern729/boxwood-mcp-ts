@@ -1,23 +1,24 @@
-// Emails an already-built download report workbook (from scripts/output/, produced by
+// Emails an already-built download report workbook (from scripts/output/download-report/, produced by
 // scripts/morningDownload.ts) as an attachment, without re-running the whole Claude Agent SDK flow.
 // This is the production sender the daily cron job (see scripts/dailyMorningDownload.sh) calls —
 // also handy standalone for an ad hoc resend of a specific day's report.
 //
 // Usage: npx tsx scripts/sendReportEmail.ts [to] [filePath]
-//   to       defaults to andrew@tyneside.io
-//   filePath defaults to the most recently modified .xlsx in scripts/output/
+//   to       comma-separated recipient list, defaults to andrew@tyneside.io,patrick@boxwoodins.com
+//   filePath defaults to the most recently modified .xlsx in scripts/output/download-report/
 
 import "dotenv/config"
 import { readFileSync, readdirSync, statSync } from "node:fs"
 import path from "node:path"
 import { sendMailWithAttachment } from "../src/utils/mailer.js"
 
-const OUTPUT_DIR = path.join(import.meta.dirname, "output")
+const OUTPUT_DIR = path.join(import.meta.dirname, "output", "download-report")
 const XLSX_MIME_TYPE = "application/vnd.openxmlformats-officedocument.spreadsheetml.sheet"
 const DATE_PATTERN = /\d{4}-\d{2}-\d{2}/
+const DEFAULT_RECIPIENTS = ["andrew@tyneside.io", "patrick@boxwoodins.com"]
 
 const [toArg, filePathArg] = process.argv.slice(2)
-const to = toArg ?? "andrew@tyneside.io"
+const to = toArg ? toArg.split(",").map((address) => address.trim()) : DEFAULT_RECIPIENTS
 
 function findLatestWorkbook(): string {
   const candidates = readdirSync(OUTPUT_DIR)

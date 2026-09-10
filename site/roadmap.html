@@ -1,0 +1,959 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+<meta charset="UTF-8">
+<meta name="viewport" content="width=device-width, initial-scale=1.0">
+<link rel="icon" href="./assets/boxwood-favicon.ico">
+<title>Boxwood Tool Roadmap</title>
+<link rel="preconnect" href="https://fonts.googleapis.com">
+<link rel="preconnect" href="https://fonts.gstatic.com" crossorigin>
+<link href="https://fonts.googleapis.com/css2?family=Play:wght@400;700&display=swap" rel="stylesheet">
+<link rel="stylesheet" href="./assets/styles.css">
+<style>
+  .category-group {
+    margin-top: 2.5rem;
+  }
+
+  .category-group:first-of-type {
+    margin-top: 0;
+  }
+
+  .category-group h2 {
+    font-family: ui-monospace, SFMono-Regular, Menlo, Consolas, monospace;
+    font-size: 0.85rem;
+    font-weight: 700;
+    letter-spacing: 0.14em;
+    text-transform: uppercase;
+    color: var(--text);
+    margin: 0 0 0.75rem;
+    padding-top: 0.5rem;
+    border-top: 1px solid var(--section-border);
+  }
+
+  .item {
+    background: var(--card);
+    border: 1px solid var(--border);
+    border-radius: 10px;
+    padding: 1rem 1.1rem;
+    margin-bottom: 0.9rem;
+  }
+
+  .item-head {
+    display: flex;
+    flex-wrap: wrap;
+    align-items: center;
+    gap: 0.5rem 0.9rem;
+  }
+
+  .item-name {
+    font-weight: 600;
+    margin-right: auto;
+  }
+
+  .badge {
+    display: inline-flex;
+    align-items: center;
+    font-size: 0.78rem;
+    font-weight: 600;
+    letter-spacing: 0.02em;
+  }
+
+  .status-select {
+    font: inherit;
+    font-size: 0.78rem;
+    font-weight: 600;
+    letter-spacing: 0.02em;
+    border-radius: 999px;
+    padding: 0.2rem 0.55rem;
+    border: 1px solid var(--border);
+    background: transparent;
+    color: var(--muted);
+    cursor: pointer;
+  }
+
+  .status-select[data-status="in_progress"] {
+    color: #ffffff;
+    background: var(--accent-blue);
+    border-color: transparent;
+  }
+
+  .status-select[data-status="completed"] {
+    color: var(--accent-blue);
+    background: var(--accent-blue-bg);
+    border-color: transparent;
+  }
+
+  /* The dropdown list itself always renders on a plain light background regardless of the
+     select's own closed-state color (e.g. white text for "in_progress") — force legible
+     option text so every choice stays readable when the list is open. */
+  .status-select option,
+  .priority-select option {
+    color: #000000;
+    background: #ffffff;
+  }
+
+  .priority-group {
+    display: inline-flex;
+  }
+
+  .priority-label {
+    display: inline-flex;
+    align-items: center;
+    gap: 0.35rem;
+    font-size: 0.75rem;
+    color: var(--muted);
+  }
+
+  .priority-select {
+    font: inherit;
+    font-size: 0.82rem;
+    padding: 0.15rem 0.35rem;
+    border-radius: 6px;
+    border: 1px solid var(--border);
+    background: transparent;
+    color: var(--text);
+    cursor: pointer;
+  }
+
+  .item-meta {
+    color: var(--muted);
+    font-size: 0.85rem;
+    margin: 0.5rem 0 0;
+  }
+
+  .item-notes {
+    font-size: 0.9rem;
+    margin: 0.5rem 0 0;
+  }
+
+  .item-notes a {
+    color: var(--accent-blue);
+  }
+
+  .comments {
+    margin-top: 0.9rem;
+    padding-top: 0.75rem;
+    border-top: 1px solid var(--section-border);
+  }
+
+  .comment-row {
+    display: flex;
+    margin-bottom: 0.5rem;
+  }
+
+  .comment-row.mine {
+    justify-content: flex-end;
+  }
+
+  .comment-row.theirs {
+    justify-content: flex-start;
+  }
+
+  .comment-row.claude {
+    justify-content: center;
+  }
+
+  .comment-bubble {
+    max-width: 80%;
+    padding: 0.5rem 0.75rem;
+    border-radius: 14px;
+    font-size: 0.85rem;
+  }
+
+  .comment-row.mine .comment-bubble {
+    background: var(--accent-blue-bg);
+    border-bottom-right-radius: 4px;
+  }
+
+  .comment-row.theirs .comment-bubble {
+    background: color-mix(in oklch, #f28cb1 20%, transparent);
+    border-bottom-left-radius: 4px;
+  }
+
+  .comment-row.claude .comment-bubble {
+    background: color-mix(in oklch, #d97757 20%, transparent);
+  }
+
+  .comment-meta {
+    display: flex;
+    align-items: baseline;
+    gap: 0.4rem;
+    margin-bottom: 0.15rem;
+  }
+
+  .comment-meta .author {
+    font-weight: 600;
+    font-size: 0.8rem;
+  }
+
+  .comment-row.mine .comment-meta .author {
+    color: var(--accent-blue);
+  }
+
+  .comment-row.theirs .comment-meta .author {
+    color: #f28cb1;
+  }
+
+  .comment-row.claude .comment-meta .author {
+    color: #d97757;
+  }
+
+  .comment-meta .when {
+    color: var(--muted);
+    font-size: 0.72rem;
+  }
+
+  .comment-bubble .body {
+    margin: 0;
+  }
+
+  .comment-bubble .delete-btn {
+    display: block;
+    text-align: left;
+    margin-top: 0.35rem;
+    color: var(--muted);
+    font-size: 0.72rem;
+    background: none;
+    border: none;
+    padding: 0;
+    cursor: pointer;
+    text-decoration: underline;
+  }
+
+  .comment-bubble .delete-btn:hover {
+    color: var(--fail);
+  }
+
+  .comment-form {
+    display: flex;
+    flex-wrap: wrap;
+    gap: 0.4rem;
+    margin-top: 0.6rem;
+  }
+
+  .comment-form textarea {
+    flex: 1 1 14rem;
+    resize: vertical;
+    min-height: 4rem;
+    font: inherit;
+    font-size: 0.85rem;
+    padding: 0.4rem 0.55rem;
+    border-radius: 6px;
+    border: 1px solid var(--border);
+    background: transparent;
+    color: var(--text);
+  }
+
+  .comment-form button {
+    font: inherit;
+    font-size: 1rem;
+    font-weight: 700;
+    text-transform: uppercase;
+    letter-spacing: 0.03em;
+    color: var(--bg);
+    background: var(--text);
+    border: none;
+    border-radius: 6px;
+    padding: 0.4rem 0.9rem;
+    min-width: 6rem;
+    cursor: pointer;
+  }
+
+  .comment-form button:hover:not(:disabled) {
+    background: var(--accent-blue);
+    color: #ffffff;
+  }
+
+  .comment-form button:disabled {
+    opacity: 0.6;
+    cursor: default;
+  }
+
+  .empty, .error, .loading {
+    color: var(--muted);
+    font-size: 0.9rem;
+    padding: 1rem 0;
+  }
+
+  .error { color: var(--fail); }
+
+  .chat-panel {
+    background: var(--card);
+    border: 1px solid var(--border);
+    border-radius: 10px;
+    padding: 1rem 1.1rem;
+    margin-bottom: 2rem;
+  }
+
+  .chat-panel h2 {
+    display: flex;
+    align-items: center;
+    gap: 0.45rem;
+    font-family: ui-monospace, SFMono-Regular, Menlo, Consolas, monospace;
+    font-size: 0.78rem;
+    font-weight: 700;
+    letter-spacing: 0.14em;
+    text-transform: uppercase;
+    color: #d97757;
+    margin: 0 0 0.75rem;
+  }
+
+  .chat-panel h2 img {
+    height: 1.25rem;
+    width: 1.25rem;
+    display: block;
+  }
+
+  .chat-messages {
+    max-height: 18rem;
+    overflow-y: auto;
+    margin-bottom: 0.75rem;
+    scrollbar-width: thin;
+    scrollbar-color: var(--border) transparent;
+  }
+
+  .chat-messages::-webkit-scrollbar {
+    width: 8px;
+  }
+
+  .chat-messages::-webkit-scrollbar-track {
+    background: transparent;
+  }
+
+  .chat-messages::-webkit-scrollbar-thumb {
+    background: var(--border);
+    border-radius: 4px;
+  }
+
+  .chat-messages::-webkit-scrollbar-thumb:hover {
+    background: var(--muted);
+  }
+
+  .chat-messages:empty {
+    display: none;
+  }
+
+  .chat-message {
+    max-width: 85%;
+    padding: 0.45rem 0.7rem;
+    border-radius: 12px;
+    font-size: 0.85rem;
+    margin-bottom: 0.5rem;
+  }
+
+  .chat-message.user {
+    margin-left: auto;
+    background: var(--border);
+    border-bottom-right-radius: 4px;
+  }
+
+  .chat-message.assistant {
+    background: color-mix(in oklch, #d97757 20%, transparent);
+    border-bottom-left-radius: 4px;
+  }
+
+  .chat-message-label {
+    display: block;
+    font-weight: 600;
+    font-size: 0.72rem;
+    margin-bottom: 0.1rem;
+  }
+
+  .chat-message.assistant .chat-message-label {
+    color: #d97757;
+  }
+
+  .chat-message.user .chat-message-label {
+    color: var(--muted);
+  }
+
+  .chat-message-body {
+    margin: 0;
+    white-space: pre-wrap;
+  }
+
+  .chat-form {
+    display: flex;
+    flex-wrap: wrap;
+    gap: 0.4rem;
+  }
+
+  .chat-form textarea {
+    flex: 1 1 14rem;
+    resize: vertical;
+    min-height: 3rem;
+    font: inherit;
+    font-size: 0.85rem;
+    padding: 0.4rem 0.55rem;
+    border-radius: 6px;
+    border: 1px solid var(--border);
+    background: transparent;
+    color: var(--text);
+  }
+
+  .chat-form button {
+    font: inherit;
+    font-size: 1rem;
+    font-weight: 700;
+    text-transform: uppercase;
+    letter-spacing: 0.03em;
+    color: var(--bg);
+    background: var(--text);
+    border: none;
+    border-radius: 6px;
+    padding: 0.4rem 0.9rem;
+    min-width: 6rem;
+    cursor: pointer;
+  }
+
+  .chat-form button:hover:not(:disabled) {
+    background: #d97757;
+    color: #ffffff;
+  }
+
+  .chat-form button:disabled {
+    opacity: 0.6;
+    cursor: default;
+  }
+
+  @media (max-width: 560px) {
+    .item-name { width: 100%; margin-right: 0; }
+  }
+</style>
+</head>
+<body>
+<div class="page">
+
+  <div class="boxwood-brand">
+    <img src="./assets/boxwood-logo.png" alt="Boxwood Insurance Group">
+    <div class="heading">
+      <p class="kicker">Boxwood Insurance Group</p>
+      <h1>Tool Roadmap</h1>
+    </div>
+  </div>
+
+  <p class="lede">Tool ideas and progress, grouped by category and ranked by priority. Change a status, adjust priority, or leave a comment.</p>
+
+  <section class="chat-panel">
+    <h2><img src="./assets/claude.png" alt="">Claude</h2>
+    <div id="chat-messages" class="chat-messages"></div>
+    <div class="chat-form">
+      <textarea id="chat-input" rows="2" placeholder="Ask about the roadmap, or ask Claude to create or update an idea…"></textarea>
+      <button type="button" id="chat-send">Send</button>
+    </div>
+  </section>
+
+  <div id="board"><p class="loading">Loading&hellip;</p></div>
+
+  <footer>
+    <nav class="sitemap" aria-label="Site pages">
+      <a href="/mcp-tools/">Tools &amp; Skills</a>
+      <a href="/reports/">Download Reports</a>
+      <a href="/cl-renewal-summaries/">Renewal Summaries</a>
+      <a href="/ams360-sync/">AMS360 Sync</a>
+      <a href="/roadmap/" aria-current="page">Roadmap</a>
+    </nav>
+    Boxwood MCP &middot; AMS360
+  </footer>
+
+</div>
+<footer class="brand-footer">
+  <a class="brand-footer-link" href="https://tyneside.io" target="_blank" rel="noopener noreferrer">
+    <img src="./assets/magpie.png" alt="" width="164" height="144">
+    <span class="primary">Tyneside Innovations</span>
+    <span class="secondary">Madison, Tennessee</span>
+  </a>
+</footer>
+<script>
+(function () {
+  "use strict";
+
+  var ORIGIN = window.location.origin;
+  var REDIRECT_URI = window.location.origin + window.location.pathname;
+  var API_BASE = ORIGIN + "/api/v1/boxwood-mcp";
+
+  var TOKEN_KEY = "boxwood_roadmap_token";
+  var CLIENT_KEY = "boxwood_roadmap_client_id";
+  var VERIFIER_KEY = "boxwood_roadmap_code_verifier";
+  var STATE_KEY = "boxwood_roadmap_oauth_state";
+  var CHAT_SESSION_KEY = "boxwood_roadmap_chat_session";
+
+  // Fixed identity, not viewer-relative — Andrew's comments always render as the blue bubble,
+  // everyone else (the client) always renders as the pink bubble, regardless of who's viewing.
+  var ANDREW_EMAIL = "andrew@tyneside.io";
+
+  var STATUSES = ["idea", "in_progress", "completed"];
+  var STATUS_LABELS = { idea: "Idea", in_progress: "In Progress", completed: "✓ Completed" };
+  var PRIORITY_LEVELS = [1, 2, 3];
+  var CATEGORY_ORDER = ["Commercial Lines", "Personal Lines", "Claims", "Employee Benefits", "Management Dashboards"];
+
+  var container = document.getElementById("board");
+
+  function base64url(bytes) {
+    var binary = "";
+    for (var i = 0; i < bytes.length; i++) binary += String.fromCharCode(bytes[i]);
+    return btoa(binary).replace(/\+/g, "-").replace(/\//g, "_").replace(/=+$/, "");
+  }
+
+  function randomString(len) {
+    var arr = new Uint8Array(len);
+    crypto.getRandomValues(arr);
+    return base64url(arr);
+  }
+
+  function sha256Base64url(str) {
+    return crypto.subtle.digest("SHA-256", new TextEncoder().encode(str)).then(function (digest) {
+      return base64url(new Uint8Array(digest));
+    });
+  }
+
+  // Session is the access token plus the display name Auth0 resolved for this login (see
+  // completeLogin/POST /token's author_label) — kept together so a reload doesn't need to
+  // re-authenticate just to know who's posting comments.
+  function getStoredSession() {
+    try {
+      var raw = sessionStorage.getItem(TOKEN_KEY);
+      if (!raw) return null;
+      var parsed = JSON.parse(raw);
+      if (Date.now() >= parsed.expiresAt) return null;
+      return { accessToken: parsed.accessToken, authorLabel: parsed.authorLabel || "Someone", authorEmail: parsed.authorEmail || null };
+    } catch (e) {
+      return null;
+    }
+  }
+
+  function startLogin() {
+    return fetch(ORIGIN + "/register", {
+      method: "POST",
+      headers: { "Content-Type": "application/json" },
+      body: JSON.stringify({ redirect_uris: [REDIRECT_URI] })
+    })
+      .then(function (res) { return res.json(); })
+      .then(function (client) {
+        sessionStorage.setItem(CLIENT_KEY, client.client_id);
+
+        var verifier = randomString(32);
+        sessionStorage.setItem(VERIFIER_KEY, verifier);
+
+        var state = randomString(16);
+        sessionStorage.setItem(STATE_KEY, state);
+
+        return sha256Base64url(verifier).then(function (challenge) {
+          var url = new URL(ORIGIN + "/authorize");
+          url.searchParams.set("client_id", client.client_id);
+          url.searchParams.set("redirect_uri", REDIRECT_URI);
+          url.searchParams.set("response_type", "code");
+          url.searchParams.set("code_challenge", challenge);
+          url.searchParams.set("code_challenge_method", "S256");
+          url.searchParams.set("state", state);
+          window.location.href = url.toString();
+        });
+      });
+  }
+
+  function completeLogin(code, state) {
+    var expectedState = sessionStorage.getItem(STATE_KEY);
+    var verifier = sessionStorage.getItem(VERIFIER_KEY);
+    var clientId = sessionStorage.getItem(CLIENT_KEY);
+
+    if (state !== expectedState || !verifier || !clientId) return Promise.resolve(null);
+
+    return fetch(ORIGIN + "/token", {
+      method: "POST",
+      headers: { "Content-Type": "application/x-www-form-urlencoded" },
+      body: new URLSearchParams({
+        code: code,
+        code_verifier: verifier,
+        redirect_uri: REDIRECT_URI,
+        client_id: clientId
+      })
+    })
+      .then(function (res) { return res.ok ? res.json() : null; })
+      .then(function (data) {
+        if (!data) return null;
+        var expiresAt = Date.now() + data.expires_in * 1000 - 30000;
+        var session = { accessToken: data.access_token, expiresAt: expiresAt, authorLabel: data.author_label, authorEmail: data.author_email };
+        sessionStorage.setItem(TOKEN_KEY, JSON.stringify(session));
+        return { accessToken: session.accessToken, authorLabel: session.authorLabel || "Someone", authorEmail: session.authorEmail || null };
+      });
+  }
+
+  function formatWhen(iso) {
+    var d = new Date(iso);
+    return d.toLocaleDateString(undefined, { month: "short", day: "numeric" }) + " " +
+      d.toLocaleTimeString(undefined, { hour: "numeric", minute: "2-digit" });
+  }
+
+  function linkify(text) {
+    var escaped = text.replace(/&/g, "&amp;").replace(/</g, "&lt;").replace(/>/g, "&gt;");
+    return escaped.replace(/(https?:\/\/[^\s]+)/g, function (url) {
+      return '<a href="' + url + '" target="_blank" rel="noopener noreferrer">' + url + '</a>';
+    });
+  }
+
+  function groupByCategory(items) {
+    var byCategory = {};
+    items.forEach(function (item) {
+      if (!byCategory[item.category]) byCategory[item.category] = [];
+      byCategory[item.category].push(item);
+    });
+
+    var categories = Object.keys(byCategory).sort(function (a, b) {
+      var ia = CATEGORY_ORDER.indexOf(a);
+      var ib = CATEGORY_ORDER.indexOf(b);
+      if (ia === -1 && ib === -1) return a.localeCompare(b);
+      if (ia === -1) return 1;
+      if (ib === -1) return -1;
+      return ia - ib;
+    });
+
+    return categories.map(function (category) {
+      return { category: category, items: byCategory[category] };
+    });
+  }
+
+  function patchItem(id, body, accessToken) {
+    return fetch(API_BASE + "/board/items/" + id, {
+      method: "PATCH",
+      headers: { "Content-Type": "application/json", Authorization: "Bearer " + accessToken },
+      body: JSON.stringify(body)
+    }).then(function (res) {
+      if (!res.ok) throw new Error("HTTP " + res.status);
+      return res.json();
+    });
+  }
+
+  function postComment(itemId, authorLabel, authorEmail, commentBody, accessToken) {
+    return fetch(API_BASE + "/board/items/" + itemId + "/comments", {
+      method: "POST",
+      headers: { "Content-Type": "application/json", Authorization: "Bearer " + accessToken },
+      body: JSON.stringify({ author_label: authorLabel, author_email: authorEmail, body: commentBody })
+    }).then(function (res) {
+      if (!res.ok) throw new Error("HTTP " + res.status);
+      return res.json();
+    });
+  }
+
+  function deleteComment(itemId, commentId, accessToken) {
+    return fetch(API_BASE + "/board/items/" + itemId + "/comments/" + commentId, {
+      method: "DELETE",
+      headers: { Authorization: "Bearer " + accessToken }
+    }).then(function (res) {
+      if (!res.ok) throw new Error("HTTP " + res.status);
+    });
+  }
+
+  function buildCommentEl(item, comment, session) {
+    var isClaude = comment.author_sub === "mcp-tool" || comment.author_label === "Claude";
+    var isAndrew = !isClaude && (comment.author_email === ANDREW_EMAIL || comment.author_label === ANDREW_EMAIL);
+    var kind = isClaude ? "claude" : (isAndrew ? "mine" : "theirs");
+
+    var row = document.createElement("div");
+    row.className = "comment-row " + kind;
+
+    var bubble = document.createElement("div");
+    bubble.className = "comment-bubble";
+    bubble.innerHTML =
+      '<div class="comment-meta"><span class="author"></span><span class="when"></span></div><p class="body"></p>';
+    bubble.querySelector(".author").textContent = comment.author_label;
+    bubble.querySelector(".when").textContent = formatWhen(comment.created_at);
+    bubble.querySelector(".body").textContent = comment.body;
+
+    if (comment.author_label === session.authorLabel) {
+      var delBtn = document.createElement("button");
+      delBtn.type = "button";
+      delBtn.className = "delete-btn";
+      delBtn.textContent = "Delete";
+      delBtn.addEventListener("click", function () {
+        if (!confirm("Delete this comment?")) return;
+        delBtn.disabled = true;
+        deleteComment(item.id, comment.id, session.accessToken)
+          .then(function () { row.remove(); })
+          .catch(function () {
+            alert("Couldn't delete that comment — please try again.");
+            delBtn.disabled = false;
+          });
+      });
+      bubble.appendChild(delBtn);
+    }
+
+    row.appendChild(bubble);
+    return row;
+  }
+
+  function buildItem(item, session) {
+    var el = document.createElement("div");
+    el.className = "item";
+
+    var head = document.createElement("div");
+    head.className = "item-head";
+
+    var name = document.createElement("span");
+    name.className = "item-name";
+    name.textContent = item.name;
+    head.appendChild(name);
+
+    var priorityGroup = document.createElement("span");
+    priorityGroup.className = "priority-group";
+
+    var priorityLabel = document.createElement("label");
+    priorityLabel.className = "priority-label";
+    priorityLabel.textContent = "Priority Level";
+
+    var prioritySelect = document.createElement("select");
+    prioritySelect.className = "priority-select";
+
+    var blankOption = document.createElement("option");
+    blankOption.value = "";
+    blankOption.textContent = "—";
+    if (item.priority == null) blankOption.selected = true;
+    prioritySelect.appendChild(blankOption);
+
+    PRIORITY_LEVELS.forEach(function (level) {
+      var option = document.createElement("option");
+      option.value = level;
+      option.textContent = level;
+      if (item.priority === level) option.selected = true;
+      prioritySelect.appendChild(option);
+    });
+
+    prioritySelect.addEventListener("change", function () {
+      var val = prioritySelect.value === "" ? null : parseInt(prioritySelect.value, 10);
+      patchItem(item.id, { priority: val }, session.accessToken).catch(function () {
+        alert("Couldn't save priority — please try again.");
+        prioritySelect.value = item.priority == null ? "" : String(item.priority);
+      });
+    });
+
+    priorityLabel.appendChild(prioritySelect);
+    priorityGroup.appendChild(priorityLabel);
+    head.appendChild(priorityGroup);
+
+    var statusSelect = document.createElement("select");
+    statusSelect.className = "status-select";
+    statusSelect.setAttribute("data-status", item.status);
+    STATUSES.forEach(function (status) {
+      var option = document.createElement("option");
+      option.value = status;
+      option.textContent = STATUS_LABELS[status];
+      if (status === item.status) option.selected = true;
+      statusSelect.appendChild(option);
+    });
+    statusSelect.addEventListener("change", function () {
+      var newStatus = statusSelect.value;
+      patchItem(item.id, { status: newStatus }, session.accessToken)
+        .then(function () { statusSelect.setAttribute("data-status", newStatus); })
+        .catch(function () {
+          alert("Couldn't save status — please try again.");
+          statusSelect.value = item.status;
+        });
+    });
+    head.appendChild(statusSelect);
+
+    el.appendChild(head);
+
+    var metaParts = [item.use_type, item.process, item.output, item.trigger_desc, item.source_data].filter(Boolean);
+    if (metaParts.length) {
+      var meta = document.createElement("p");
+      meta.className = "item-meta";
+      meta.textContent = metaParts.join(" · ");
+      el.appendChild(meta);
+    }
+
+    if (item.notes) {
+      var notes = document.createElement("p");
+      notes.className = "item-notes";
+      notes.innerHTML = linkify(item.notes);
+      el.appendChild(notes);
+    }
+
+    var commentsWrap = document.createElement("div");
+    commentsWrap.className = "comments";
+
+    var comments = (item.comments || []).slice().sort(function (a, b) {
+      return a.created_at.localeCompare(b.created_at);
+    });
+
+    comments.forEach(function (comment) {
+      commentsWrap.appendChild(buildCommentEl(item, comment, session));
+    });
+
+    var form = document.createElement("div");
+    form.className = "comment-form";
+
+    var bodyInput = document.createElement("textarea");
+    bodyInput.placeholder = "Add a comment as " + session.authorLabel + "…";
+    bodyInput.rows = 2;
+
+    var submitBtn = document.createElement("button");
+    submitBtn.type = "button";
+    submitBtn.textContent = "Post";
+    submitBtn.addEventListener("click", function () {
+      var commentBody = bodyInput.value.trim();
+
+      if (!commentBody) return;
+
+      submitBtn.disabled = true;
+      postComment(item.id, session.authorLabel, session.authorEmail, commentBody, session.accessToken)
+        .then(function (res) {
+          commentsWrap.insertBefore(buildCommentEl(item, res.data, session), form);
+          bodyInput.value = "";
+        })
+        .catch(function () {
+          alert("Couldn't post that comment — please try again.");
+        })
+        .finally(function () {
+          submitBtn.disabled = false;
+        });
+    });
+
+    form.appendChild(bodyInput);
+    form.appendChild(submitBtn);
+    commentsWrap.appendChild(form);
+
+    el.appendChild(commentsWrap);
+
+    return el;
+  }
+
+  function render(items, session) {
+    if (!items.length) {
+      container.innerHTML = '<p class="empty">Nothing on the board yet.</p>';
+      return;
+    }
+
+    container.innerHTML = "";
+
+    groupByCategory(items).forEach(function (group) {
+      var section = document.createElement("div");
+      section.className = "category-group";
+
+      var heading = document.createElement("h2");
+      heading.textContent = group.category;
+      section.appendChild(heading);
+
+      group.items.forEach(function (item) {
+        section.appendChild(buildItem(item, session));
+      });
+
+      container.appendChild(section);
+    });
+  }
+
+  function getChatSessionId() {
+    try {
+      return sessionStorage.getItem(CHAT_SESSION_KEY) || undefined;
+    } catch (e) {
+      return undefined;
+    }
+  }
+
+  function storeChatSessionId(id) {
+    try {
+      sessionStorage.setItem(CHAT_SESSION_KEY, id);
+    } catch (e) { /* ignore */ }
+  }
+
+  function appendChatMessage(role, text) {
+    var chatMessages = document.getElementById("chat-messages");
+    var el = document.createElement("div");
+    el.className = "chat-message " + role;
+    el.innerHTML = '<span class="chat-message-label"></span><p class="chat-message-body"></p>';
+    el.querySelector(".chat-message-label").textContent = role === "user" ? "You" : "Claude";
+    el.querySelector(".chat-message-body").textContent = text;
+    chatMessages.appendChild(el);
+    chatMessages.scrollTop = chatMessages.scrollHeight;
+    return el;
+  }
+
+  function initChat(session) {
+    var chatInput = document.getElementById("chat-input");
+    var chatSend = document.getElementById("chat-send");
+
+    function send() {
+      var text = chatInput.value.trim();
+      if (!text) return;
+
+      chatInput.value = "";
+      chatSend.disabled = true;
+
+      appendChatMessage("user", text);
+      var pending = appendChatMessage("assistant", "…thinking…");
+
+      fetch(API_BASE + "/board/chat", {
+        method: "POST",
+        headers: { "Content-Type": "application/json", Authorization: "Bearer " + session.accessToken },
+        body: JSON.stringify({ message: text, session_id: getChatSessionId() })
+      })
+        .then(function (res) {
+          if (!res.ok) throw new Error("HTTP " + res.status);
+          return res.json();
+        })
+        .then(function (data) {
+          storeChatSessionId(data.session_id);
+          pending.querySelector(".chat-message-body").textContent = data.reply || "(no reply)";
+          return loadBoard(session);
+        })
+        .catch(function () {
+          pending.querySelector(".chat-message-body").textContent = "Sorry, something went wrong — please try again.";
+        })
+        .finally(function () {
+          chatSend.disabled = false;
+        });
+    }
+
+    chatSend.addEventListener("click", send);
+    chatInput.addEventListener("keydown", function (e) {
+      if (e.key === "Enter" && !e.shiftKey) {
+        e.preventDefault();
+        send();
+      }
+    });
+  }
+
+  function loadBoard(session) {
+    return fetch(API_BASE + "/board/items", { headers: { Authorization: "Bearer " + session.accessToken } })
+      .then(function (res) {
+        if (res.status === 401) {
+          sessionStorage.removeItem(TOKEN_KEY);
+          return startLogin();
+        }
+        if (!res.ok) throw new Error("HTTP " + res.status);
+        return res.json().then(function (data) { render(data.data, session); });
+      })
+      .catch(function () {
+        container.innerHTML = '<p class="error">Couldn\'t load the roadmap right now.</p>';
+      });
+  }
+
+  function main() {
+    var params = new URLSearchParams(window.location.search);
+    var code = params.get("code");
+    var state = params.get("state");
+
+    var sessionPromise;
+
+    var existingSession = getStoredSession();
+    if (existingSession) {
+      sessionPromise = Promise.resolve(existingSession);
+    } else if (code && state) {
+      sessionPromise = completeLogin(code, state).then(function (session) {
+        window.history.replaceState({}, "", window.location.pathname);
+        return session;
+      });
+    } else {
+      sessionPromise = Promise.resolve(null);
+    }
+
+    sessionPromise.then(function (session) {
+      if (!session) return startLogin();
+      initChat(session);
+      return loadBoard(session);
+    });
+  }
+
+  main();
+})();
+</script>
+</body>
+</html>

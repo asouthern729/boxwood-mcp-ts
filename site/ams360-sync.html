@@ -1,0 +1,169 @@
+<!doctype html>
+<html lang="en">
+<head>
+<meta charset="utf-8">
+<meta name="viewport" content="width=device-width, initial-scale=1">
+<link rel="icon" href="./assets/boxwood-favicon.ico">
+<title>Boxwood Insurance AMS360 Sync Reports</title>
+<link rel="preconnect" href="https://fonts.googleapis.com">
+<link rel="preconnect" href="https://fonts.gstatic.com" crossorigin>
+<link href="https://fonts.googleapis.com/css2?family=Play:wght@400;700&display=swap" rel="stylesheet">
+<link rel="stylesheet" href="./assets/styles.css">
+<style>
+  .card {
+    background: var(--card);
+    border: 1px solid var(--border);
+    border-radius: 10px;
+    padding: 0.9rem 1.1rem;
+    margin-bottom: 0.7rem;
+    display: flex;
+    flex-wrap: wrap;
+    align-items: center;
+    gap: 0.6rem 1.4rem;
+  }
+
+  .badge {
+    display: inline-flex;
+    align-items: center;
+    gap: 0.35rem;
+    font-size: 0.78rem;
+    font-weight: 600;
+    padding: 0.2rem 0.55rem;
+    border-radius: 999px;
+    text-transform: uppercase;
+    letter-spacing: 0.02em;
+  }
+
+  .badge.success { color: var(--accent-blue); background: var(--accent-blue-bg); }
+  .badge.failure { color: var(--fail); background: var(--fail-bg); }
+
+  .time {
+    font-weight: 600;
+    min-width: 11rem;
+  }
+
+  .meta {
+    color: var(--muted);
+    font-size: 0.88rem;
+  }
+
+  .stats {
+    display: flex;
+    gap: 1.1rem;
+    margin-left: auto;
+    font-size: 0.88rem;
+  }
+
+  .stats strong { color: var(--text); }
+
+  .empty, .error {
+    color: var(--muted);
+    font-size: 0.9rem;
+    padding: 1rem 0;
+  }
+
+  .error { color: var(--fail); }
+
+  #footer-status {
+    display: block;
+    margin-top: 0.6rem;
+  }
+
+  #footer-status .accent {
+    color: var(--accent-blue);
+    font-weight: 600;
+  }
+
+  @media (max-width: 560px) {
+    .stats { margin-left: 0; }
+  }
+</style>
+</head>
+<body>
+<div class="page">
+
+  <div class="boxwood-brand">
+    <img src="./assets/boxwood-logo.png" alt="Boxwood Insurance Group">
+    <div class="heading">
+      <p class="kicker">Boxwood Insurance Group</p>
+      <h1>AMS360 Sync Reports</h1>
+    </div>
+  </div>
+
+  <p class="lede">Last 7 days of sync runs.</p>
+
+  <div id="runs"><p class="empty">Loading&hellip;</p></div>
+
+  <footer>
+    <nav class="sitemap" aria-label="Site pages">
+      <a href="/mcp-tools/">Tools &amp; Skills</a>
+      <a href="/reports/">Download Reports</a>
+      <a href="/cl-renewal-summaries/">Renewal Summaries</a>
+      <a href="/ams360-sync/" aria-current="page">AMS360 Sync</a>
+      <a href="/roadmap/">Roadmap</a>
+    </nav>
+    <span id="footer-status"></span>
+  </footer>
+
+</div>
+<footer class="brand-footer">
+  <a class="brand-footer-link" href="https://tyneside.io" target="_blank" rel="noopener noreferrer">
+    <img src="./assets/magpie.png" alt="" width="164" height="144">
+    <span class="primary">Tyneside Innovations</span>
+    <span class="secondary">Madison, Tennessee</span>
+  </a>
+</footer>
+<script>
+(function () {
+  var container = document.getElementById("runs");
+  var footerStatus = document.getElementById("footer-status");
+
+  function fmtTime(iso) {
+    var d = new Date(iso);
+    return d.toLocaleString(undefined, {
+      month: "short", day: "numeric",
+      hour: "numeric", minute: "2-digit",
+    });
+  }
+
+  function render(runs) {
+    if (!runs.length) {
+      container.innerHTML = '<p class="empty">No sync runs recorded yet.</p>';
+      return;
+    }
+
+    runs.sort(function (a, b) { return b.finished_at.localeCompare(a.finished_at); });
+
+    container.innerHTML = runs.map(function (run) {
+      var badgeClass = run.status === "success" ? "success" : "failure";
+      return (
+        '<div class="card">' +
+          '<span class="time">' + fmtTime(run.finished_at) + '</span>' +
+          '<span class="badge ' + badgeClass + '">' + run.status + '</span>' +
+          '<span class="meta">' + run.mode + '</span>' +
+          '<span class="stats">' +
+            '<span><strong>' + run.tables_synced + '</strong> ok</span>' +
+            (run.tables_failed > 0 ? '<span><strong>' + run.tables_failed + '</strong> failed</span>' : '') +
+            '<span><strong>' + run.total_rows.toLocaleString() + '</strong> rows</span>' +
+            '<span>' + run.duration_seconds + 's</span>' +
+          '</span>' +
+        '</div>'
+      );
+    }).join("");
+
+    footerStatus.innerHTML = "Showing <span class=\"accent\">" + runs.length + " run(s)</span>, updated <span class=\"accent\">" + fmtTime(runs[0].finished_at) + "</span>.";
+  }
+
+  fetch("./summary.json", { cache: "no-store" })
+    .then(function (res) {
+      if (!res.ok) throw new Error("HTTP " + res.status);
+      return res.json();
+    })
+    .then(render)
+    .catch(function () {
+      container.innerHTML = '<p class="error">Couldn\'t load sync status right now.</p>';
+    });
+})();
+</script>
+</body>
+</html>

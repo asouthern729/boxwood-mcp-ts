@@ -32,7 +32,7 @@ function reinterpretAsLocal(date: Date): string {
   return `${ y }-${ mo }-${ d }T${ h }:${ mi }:${ s }.${ ms }${ offsetSuffixFor(date) }`
 }
 
-function convertUtcInstantToLocal(date: Date): string {
+export function convertUtcInstantToLocal(date: Date): string {
   const parts = new Intl.DateTimeFormat("en-US", {
     timeZone: AGENCY_TIMEZONE,
     year: "numeric",
@@ -124,7 +124,14 @@ export const SYNC_CUTOFF_HOUR = 8
 export function mostRecentAgencySyncWindow(): { since: Date; until: Date } {
   const until = mostRecentAgencyHour(SYNC_CUTOFF_HOUR)
   const since = new Date(until)
-  since.setUTCDate(since.getUTCDate() - 1)
+
+  // `until`'s UTC digits are agency-local wall-clock digits (see bindableAgencyDate), so
+  // getUTCDay() reads as the agency-local weekday directly. The AMS360 ETL sync still runs every
+  // day including weekends, but no report is generated Sat/Sun (morningDownload.ts's cron is
+  // Mon-Fri only) — so Monday's "last completed overnight sync" window needs to reach back to
+  // Friday's 8am cutoff to cover the weekend's activity, not just Sunday's.
+  const daysBack = until.getUTCDay() === 1 ? 3 : 1
+  since.setUTCDate(since.getUTCDate() - daysBack)
 
   return { since, until }
 }

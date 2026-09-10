@@ -1,0 +1,209 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+<meta charset="UTF-8">
+<meta name="viewport" content="width=device-width, initial-scale=1.0">
+<link rel="icon" href="./assets/boxwood-favicon.ico">
+<title>Boxwood MCP Tools & Skills</title>
+<link rel="preconnect" href="https://fonts.googleapis.com">
+<link rel="preconnect" href="https://fonts.gstatic.com" crossorigin>
+<link href="https://fonts.googleapis.com/css2?family=Play:wght@400;700&display=swap" rel="stylesheet">
+<link rel="stylesheet" href="./assets/styles.css">
+<style>
+  .legend {
+    display: flex;
+    gap: 2.5rem;
+    margin: 0 0 3rem;
+  }
+
+  .legend-item {
+    display: flex;
+    flex-direction: column;
+    align-items: flex-start;
+    gap: 0.5rem;
+  }
+
+  .legend-desc {
+    font-size: 0.85rem;
+    color: var(--muted);
+    margin: 0;
+  }
+
+  .pink-text {
+    color: #f28cb1;
+  }
+
+  h2 {
+    font-family: ui-monospace, SFMono-Regular, Menlo, Consolas, monospace;
+    font-size: 0.85rem;
+    font-weight: 700;
+    letter-spacing: 0.14em;
+    text-transform: uppercase;
+    color: #ffffff;
+    margin: 0 0 0.25rem;
+    padding-top: 0.5rem;
+    border-top: 1px solid var(--section-border);
+  }
+
+  section.group {
+    margin-top: 2.5rem;
+  }
+
+  section.group:first-of-type {
+    margin-top: 0;
+  }
+
+  .tool {
+    display: flex;
+    flex-direction: column;
+    gap: 0.85rem;
+    padding: 1rem 0;
+    border-bottom: 1px solid var(--border);
+  }
+
+  .tool:last-child {
+    border-bottom: none;
+  }
+
+  .tags {
+    display: flex;
+    flex-wrap: wrap;
+    gap: 0.4rem;
+    flex-shrink: 0;
+  }
+
+  .tool-name,
+  .skill-name {
+    font-family: ui-monospace, SFMono-Regular, Menlo, Consolas, monospace;
+    font-size: 0.78rem;
+    font-weight: 600;
+    color: #ffffff;
+    padding: 0.2rem 0.5rem;
+    border-radius: 4px;
+    white-space: nowrap;
+    flex-shrink: 0;
+  }
+
+  .tool-name { background: #2596be; }
+  .skill-name { background: #f28cb1; }
+
+  .tool-desc {
+    font-size: 0.95rem;
+    margin: 0;
+    padding-left: 50px;
+  }
+
+  .tool-desc span {
+    color: var(--muted);
+  }
+
+  .tool-hint {
+    font-size: 0.85rem;
+    font-style: italic;
+    color: var(--muted);
+    margin: 0;
+    padding-left: 50px;
+  }
+
+  @media (max-width: 560px) {
+    .tool-desc, .tool-hint { padding-left: 0; }
+    .legend { flex-direction: column; gap: 1rem; }
+  }
+</style>
+</head>
+<body>
+<div class="page">
+
+  <div class="boxwood-brand">
+    <img src="./assets/boxwood-logo.png" alt="Boxwood Insurance Group">
+    <div class="heading">
+      <p class="kicker">Boxwood Insurance Group</p>
+      <h1>Boxwood MCP Tools &amp; Skills</h1>
+    </div>
+  </div>
+
+  <div class="legend">
+    <div class="legend-item">
+      <span class="skill-name">/skill</span>
+      <p class="legend-desc">Domain knowledge invoked in Claude.ai by typing the <span class="pink-text">/skill-name</span>.</p>
+    </div>
+    <div class="legend-item">
+      <span class="tool-name">mcp_tool</span>
+      <p class="legend-desc">Runs behind the scenes to fetch data &mdash; not called directly in Claude.ai.</p>
+    </div>
+  </div>
+
+  <section class="group">
+    <h2>Customers</h2>
+    <div class="tool"><span class="tags"><span class="skill-name">/customers</span><span class="tool-name">customer_lookup</span></span><p class="tool-desc">Find a customer &mdash; <span>contact info, policies, claims, certificates, service team &mdash; browsable across the whole book.</span></p><p class="tool-hint">The starting point for any question about a specific customer.</p></div>
+  </section>
+
+  <section class="group">
+    <h2>Policies</h2>
+    <div class="tool"><span class="tags"><span class="skill-name">/policies</span><span class="tool-name">policy_query</span></span><p class="tool-desc">Find a policy &mdash; <span>transactions, coverages, lines of business, coverage-line pricing, vehicles, workers' comp, forms, applicant detail, renewal-chain history.</span></p><p class="tool-hint">For any policy-specific question &mdash; coverage detail, an endorsement, or how a term compares to its renewal.</p></div>
+    <div class="tool"><span class="tags"><span class="skill-name">/renewals</span><span class="tool-name">upcoming_renewals</span></span><p class="tool-desc">What's renewing soon and still needs outreach &mdash; <span>premium totals, renewal progress, with marketing shells and already-renewed terms filtered out.</span></p><p class="tool-hint">Use for renewal outreach planning, check what renewals are coming in the future up to 1-year out.</p></div>
+    <div class="tool"><span class="tags"><span class="tool-name">commercial_renewal_summary</span></span><p class="tool-desc">Branded Pre-Renewal Review .docx for one commercial policy &mdash; <span>named insureds, locations, property, GL and workers' comp exposure, equipment, vehicles, and drivers, pulled live from AMS360.</span></p><p class="tool-hint">Builds and emails the CSR a renewal-meeting packet ahead of a commercial client's renewal. Commercial lines only.</p></div>
+  </section>
+
+  <section class="group">
+    <h2>Claims</h2>
+    <div class="tool"><span class="tags"><span class="skill-name">/claims</span><span class="tool-name">claim_lookup</span></span><p class="tool-desc">Find a claim &mdash; <span>payments, injuries, damage, adjuster notes, including how much has actually been paid out.</span></p><p class="tool-hint">Use when a customer or adjuster question needs claim-level detail.</p></div>
+  </section>
+
+  <section class="group">
+    <h2>Billing</h2>
+    <div class="tool"><span class="tags"><span class="skill-name">/invoices</span><span class="tool-name">invoice_lookup</span></span><p class="tool-desc">Find an invoice &mdash; <span>billing detail, cancellations, related activity &mdash; not outstanding balances, which AMS360 doesn't track here.</span></p><p class="tool-hint">Helpful for tracing billing history or a cancellation, not for checking what's currently outstanding.</p></div>
+  </section>
+
+  <section class="group">
+    <h2>Certificates</h2>
+    <div class="tool"><span class="tags"><span class="skill-name">/certificates</span><span class="tool-name">certificate_lookup</span></span><p class="tool-desc">Find a certificate of insurance &mdash; <span>holder, coverage, reissue history, and what a COI actually does or doesn't cover.</span></p><p class="tool-hint">Use to check current certificate holders on an account, or issue/reissue counts for a customer.</p></div>
+  </section>
+
+  <section class="group">
+    <h2>Staff</h2>
+    <div class="tool"><span class="tags"><span class="tool-name">employee_lookup</span></span><p class="tool-desc">Find a staff member &mdash; <span>their full book of customers, policies, claims.</span></p><p class="tool-hint">Use when reviewing one producer's or CSR's full book of business.</p></div>
+  </section>
+
+  <section class="group">
+    <h2>Agency-wide</h2>
+    <div class="tool"><span class="tags"><span class="tool-name">book_summary</span></span><p class="tool-desc">Current book broken out by producer, CSR, carrier, or line &mdash; <span>premium, counts, claims paid, agency-wide by default or scoped to one segment.</span></p><p class="tool-hint">Use for agency-wide totals or a full breakdown by producer, CSR, carrier, or line.</p></div>
+    <div class="tool"><span class="tags"><span class="skill-name">/activity</span><span class="tool-name">activity_feed</span></span><p class="tool-desc">What's changed lately &mdash; <span>new policies, endorsements, claims, invoices, unified into one audit-trail timeline.</span></p><p class="tool-hint">Good for catching up after time away, or spot-checking recent activity on an account.</p></div>
+  </section>
+
+  <section class="group">
+    <h2>Downloads</h2>
+    <div class="tool"><span class="tags"><span class="skill-name">/downloads</span><span class="tool-name">download_report</span></span><p class="tool-desc">Morning download review &mdash; <span>overnight carrier policy transactions and claims, normalized into action items and grouped by rep, rebuilt from synced data instead of AMS360's raw download log.</span></p><p class="tool-hint">Run this first thing each morning to see what came down overnight.</p></div>
+    <div class="tool"><span class="tags"><span class="skill-name">/downloads</span><span class="tool-name">download_report_workbook</span></span><p class="tool-desc">Stage 2 of the download review &mdash; <span>the finished .xlsx built from download_report, with flagged rows and accuracy verdicts, one tab per rep.</span></p><p class="tool-hint">Use once the review's done and it's time to hand reps their action list.</p></div>
+  </section>
+
+  <section class="group">
+    <h2>Roadmap</h2>
+    <div class="tool"><span class="tags"><span class="tool-name">board_summary</span></span><p class="tool-desc">View the shared tool roadmap &mdash; <span>items by category/status/name, each with its full comment thread between Andrew and the client.</span></p><p class="tool-hint">Use to catch up on the roadmap before posting a comment or changing a status.</p></div>
+    <div class="tool"><span class="tags"><span class="tool-name">board_update_item</span></span><p class="tool-desc">Update a roadmap item &mdash; <span>status, priority level, or notes, by id or name match.</span></p><p class="tool-hint">Use after finishing work on something, or to reprioritize.</p></div>
+    <div class="tool"><span class="tags"><span class="tool-name">board_comment</span></span><p class="tool-desc">Post a comment on a roadmap item &mdash; <span>visible to both Andrew and the client on the page, attributed to Claude.</span></p><p class="tool-hint">Use to leave a note on the roadmap the same way Andrew or the client would.</p></div>
+    <div class="tool"><span class="tags"><span class="tool-name">board_create_item</span></span><p class="tool-desc">Add a new tool idea to the roadmap &mdash; <span>category, name, and any of priority/status/notes/etc. up front.</span></p><p class="tool-hint">Use when a new idea comes up in conversation so it doesn't get lost.</p></div>
+    <div class="tool"><span class="tags"><span class="tool-name">board_delete_item</span></span><p class="tool-desc">Permanently delete a roadmap item and its comments &mdash; <span>prompts for confirmation before deleting anything, and won't proceed without it.</span></p><p class="tool-hint">Destructive and can't be undone &mdash; use to remove an idea that's no longer relevant.</p></div>
+  </section>
+
+  <footer>
+    <nav class="sitemap" aria-label="Site pages">
+      <a href="/mcp-tools/" aria-current="page">Tools &amp; Skills</a>
+      <a href="/reports/">Download Reports</a>
+      <a href="/cl-renewal-summaries/">Renewal Summaries</a>
+      <a href="/ams360-sync/">AMS360 Sync</a>
+      <a href="/roadmap/">Roadmap</a>
+    </nav>
+    Boxwood MCP &middot; AMS360
+  </footer>
+
+</div>
+<footer class="brand-footer">
+  <a class="brand-footer-link" href="https://tyneside.io" target="_blank" rel="noopener noreferrer">
+    <img src="./assets/magpie.png" alt="" width="164" height="144">
+    <span class="primary">Tyneside Innovations</span>
+    <span class="secondary">Madison, Tennessee</span>
+  </a>
+</footer>
+</body>
+</html>

@@ -1,0 +1,324 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+<meta charset="UTF-8">
+<meta name="viewport" content="width=device-width, initial-scale=1.0">
+<link rel="icon" href="./assets/boxwood-favicon.ico">
+<title>Boxwood Download Reports</title>
+<link rel="preconnect" href="https://fonts.googleapis.com">
+<link rel="preconnect" href="https://fonts.gstatic.com" crossorigin>
+<link href="https://fonts.googleapis.com/css2?family=Play:wght@400;700&display=swap" rel="stylesheet">
+<link rel="stylesheet" href="./assets/styles.css">
+<style>
+  .card {
+    background: var(--card);
+    border: 1px solid var(--border);
+    border-radius: 10px;
+    padding: 0.9rem 1.1rem;
+    margin-bottom: 0.7rem;
+    display: flex;
+    flex-wrap: wrap;
+    align-items: center;
+    gap: 0.6rem 1.4rem;
+  }
+
+  .card .date {
+    font-weight: 600;
+    min-width: 12rem;
+  }
+
+  .card .meta {
+    color: var(--muted);
+    font-size: 0.88rem;
+  }
+
+  .download-btn {
+    margin-left: auto;
+    font: inherit;
+    font-size: 0.85rem;
+    font-weight: 700;
+    color: var(--bg);
+    background: var(--text);
+    border: none;
+    border-radius: 6px;
+    padding: 0.45rem 0.9rem;
+    cursor: pointer;
+  }
+
+  .download-btn:hover:not(:disabled) {
+    background: var(--accent-blue);
+    color: #ffffff;
+  }
+
+  .download-btn:disabled {
+    opacity: 0.6;
+    cursor: default;
+  }
+
+  .empty, .error, .loading {
+    color: var(--muted);
+    font-size: 0.9rem;
+    padding: 1rem 0;
+  }
+
+  .error { color: var(--fail); }
+
+  @media (max-width: 560px) {
+    .card .date { min-width: 0; }
+    .download-btn { margin-left: 0; width: 100%; }
+  }
+</style>
+</head>
+<body>
+<div class="page">
+
+  <div class="boxwood-brand">
+    <img src="./assets/boxwood-logo.png" alt="Boxwood Insurance Group">
+    <div class="heading">
+      <p class="kicker">Boxwood Insurance Group</p>
+      <h1>Download Reports</h1>
+    </div>
+  </div>
+
+  <p class="lede">Daily morning-download action lists, most recent first. Reports are kept for 30 days.</p>
+
+  <div id="reports"><p class="loading">Loading&hellip;</p></div>
+
+  <footer>
+    <nav class="sitemap" aria-label="Site pages">
+      <a href="/mcp-tools/">Tools &amp; Skills</a>
+      <a href="/reports/" aria-current="page">Download Reports</a>
+      <a href="/cl-renewal-summaries/">Renewal Summaries</a>
+      <a href="/ams360-sync/">AMS360 Sync</a>
+      <a href="/roadmap/">Roadmap</a>
+    </nav>
+    Boxwood MCP &middot; AMS360
+  </footer>
+
+</div>
+<footer class="brand-footer">
+  <a class="brand-footer-link" href="https://tyneside.io" target="_blank" rel="noopener noreferrer">
+    <img src="./assets/magpie.png" alt="" width="164" height="144">
+    <span class="primary">Tyneside Innovations</span>
+    <span class="secondary">Madison, Tennessee</span>
+  </a>
+</footer>
+<script>
+(function () {
+  "use strict";
+
+  var ORIGIN = window.location.origin;
+  var REDIRECT_URI = window.location.origin + window.location.pathname;
+  var API_BASE = ORIGIN + "/api/v1/boxwood-mcp";
+
+  var TOKEN_KEY = "boxwood_reports_token";
+  var CLIENT_KEY = "boxwood_reports_client_id";
+  var VERIFIER_KEY = "boxwood_reports_code_verifier";
+  var STATE_KEY = "boxwood_reports_oauth_state";
+
+  var container = document.getElementById("reports");
+
+  function base64url(bytes) {
+    var binary = "";
+    for (var i = 0; i < bytes.length; i++) binary += String.fromCharCode(bytes[i]);
+    return btoa(binary).replace(/\+/g, "-").replace(/\//g, "_").replace(/=+$/, "");
+  }
+
+  function randomString(len) {
+    var arr = new Uint8Array(len);
+    crypto.getRandomValues(arr);
+    return base64url(arr);
+  }
+
+  function sha256Base64url(str) {
+    return crypto.subtle.digest("SHA-256", new TextEncoder().encode(str)).then(function (digest) {
+      return base64url(new Uint8Array(digest));
+    });
+  }
+
+  function getStoredToken() {
+    try {
+      var raw = sessionStorage.getItem(TOKEN_KEY);
+      if (!raw) return null;
+      var parsed = JSON.parse(raw);
+      if (Date.now() >= parsed.expiresAt) return null;
+      return parsed.accessToken;
+    } catch (e) {
+      return null;
+    }
+  }
+
+  function startLogin() {
+    return fetch(ORIGIN + "/register", {
+      method: "POST",
+      headers: { "Content-Type": "application/json" },
+      body: JSON.stringify({ redirect_uris: [REDIRECT_URI] })
+    })
+      .then(function (res) { return res.json(); })
+      .then(function (client) {
+        sessionStorage.setItem(CLIENT_KEY, client.client_id);
+
+        var verifier = randomString(32);
+        sessionStorage.setItem(VERIFIER_KEY, verifier);
+
+        var state = randomString(16);
+        sessionStorage.setItem(STATE_KEY, state);
+
+        return sha256Base64url(verifier).then(function (challenge) {
+          var url = new URL(ORIGIN + "/authorize");
+          url.searchParams.set("client_id", client.client_id);
+          url.searchParams.set("redirect_uri", REDIRECT_URI);
+          url.searchParams.set("response_type", "code");
+          url.searchParams.set("code_challenge", challenge);
+          url.searchParams.set("code_challenge_method", "S256");
+          url.searchParams.set("state", state);
+          window.location.href = url.toString();
+        });
+      });
+  }
+
+  function completeLogin(code, state) {
+    var expectedState = sessionStorage.getItem(STATE_KEY);
+    var verifier = sessionStorage.getItem(VERIFIER_KEY);
+    var clientId = sessionStorage.getItem(CLIENT_KEY);
+
+    if (state !== expectedState || !verifier || !clientId) return Promise.resolve(null);
+
+    return fetch(ORIGIN + "/token", {
+      method: "POST",
+      headers: { "Content-Type": "application/x-www-form-urlencoded" },
+      body: new URLSearchParams({
+        code: code,
+        code_verifier: verifier,
+        redirect_uri: REDIRECT_URI,
+        client_id: clientId
+      })
+    })
+      .then(function (res) { return res.ok ? res.json() : null; })
+      .then(function (data) {
+        if (!data) return null;
+        var expiresAt = Date.now() + data.expires_in * 1000 - 30000;
+        sessionStorage.setItem(TOKEN_KEY, JSON.stringify({ accessToken: data.access_token, expiresAt: expiresAt }));
+        return data.access_token;
+      });
+  }
+
+  function formatDate(dateStr) {
+    var d = new Date(dateStr + "T00:00:00");
+    return d.toLocaleDateString(undefined, { weekday: "short", month: "short", day: "numeric", year: "numeric" });
+  }
+
+  function formatSize(bytes) {
+    if (bytes < 1024) return bytes + " B";
+    var kb = bytes / 1024;
+    if (kb < 1024) return kb.toFixed(1) + " KB";
+    return (kb / 1024).toFixed(1) + " MB";
+  }
+
+  function downloadReport(filename, token, button) {
+    button.disabled = true;
+    button.textContent = "Downloading…";
+
+    fetch(API_BASE + "/reports/files/" + encodeURIComponent(filename), {
+      headers: { Authorization: "Bearer " + token }
+    })
+      .then(function (res) {
+        if (!res.ok) throw new Error("HTTP " + res.status);
+        return res.blob();
+      })
+      .then(function (blob) {
+        var url = URL.createObjectURL(blob);
+        var a = document.createElement("a");
+        a.href = url;
+        a.download = filename;
+        document.body.appendChild(a);
+        a.click();
+        a.remove();
+        URL.revokeObjectURL(url);
+      })
+      .catch(function () {
+        alert("Download failed — please try again.");
+      })
+      .finally(function () {
+        button.disabled = false;
+        button.textContent = "Download";
+      });
+  }
+
+  function render(reports, token) {
+    if (!reports.length) {
+      container.innerHTML = '<p class="empty">No reports available yet.</p>';
+      return;
+    }
+
+    container.innerHTML = "";
+    reports.forEach(function (report) {
+      var card = document.createElement("div");
+      card.className = "card";
+
+      var dateSpan = document.createElement("span");
+      dateSpan.className = "date";
+      dateSpan.textContent = formatDate(report.date);
+
+      var sizeSpan = document.createElement("span");
+      sizeSpan.className = "meta";
+      sizeSpan.textContent = formatSize(report.sizeBytes);
+
+      var button = document.createElement("button");
+      button.type = "button";
+      button.className = "download-btn";
+      button.textContent = "Download";
+      button.addEventListener("click", function () { downloadReport(report.filename, token, button); });
+
+      card.appendChild(dateSpan);
+      card.appendChild(sizeSpan);
+      card.appendChild(button);
+      container.appendChild(card);
+    });
+  }
+
+  function loadReports(token) {
+    return fetch(API_BASE + "/reports/manifest", { headers: { Authorization: "Bearer " + token } })
+      .then(function (res) {
+        if (res.status === 401) {
+          sessionStorage.removeItem(TOKEN_KEY);
+          return startLogin();
+        }
+        if (!res.ok) throw new Error("HTTP " + res.status);
+        return res.json().then(function (data) { render(data.reports, token); });
+      })
+      .catch(function () {
+        container.innerHTML = '<p class="error">Couldn\'t load reports right now.</p>';
+      });
+  }
+
+  function main() {
+    var params = new URLSearchParams(window.location.search);
+    var code = params.get("code");
+    var state = params.get("state");
+
+    var tokenPromise;
+
+    var existingToken = getStoredToken();
+    if (existingToken) {
+      tokenPromise = Promise.resolve(existingToken);
+    } else if (code && state) {
+      tokenPromise = completeLogin(code, state).then(function (token) {
+        window.history.replaceState({}, "", window.location.pathname);
+        return token;
+      });
+    } else {
+      tokenPromise = Promise.resolve(null);
+    }
+
+    tokenPromise.then(function (token) {
+      if (!token) return startLogin();
+      return loadReports(token);
+    });
+  }
+
+  main();
+})();
+</script>
+</body>
+</html>

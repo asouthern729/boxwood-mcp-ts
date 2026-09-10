@@ -1,6 +1,6 @@
 // Unattended morning-download automation: drives download_report -> accuracy judgment ->
 // download_report_workbook end to end via the Claude Agent SDK, then writes the resulting .xlsx
-// to scripts/output/. Runs its own in-process McpServer instance (createServer()) — no subprocess,
+// to scripts/output/download-report/. Runs its own in-process McpServer instance (createServer()) — no subprocess,
 // no HTTP, no Auth0 — since this script always runs on the same machine as the deployed server, and
 // reads the generated file straight out of its own in-process downloadStore rather than fetching
 // the public download link download_report_workbook returns (see the comment above
@@ -19,7 +19,20 @@ import { query } from "@anthropic-ai/claude-agent-sdk"
 import { createServer } from "../src/mcpServer.js"
 import { getDownload } from "../src/utils/downloadStore.js"
 
-const OUTPUT_DIR = path.join(import.meta.dirname, "output")
+const OUTPUT_DIR = path.join(import.meta.dirname, "output", "download-report")
+
+// This script runs unattended via cron (see scripts/dailyMorningDownload.sh), so it must not
+// depend on whatever `claude login` session happens to be active on the box — that's a personal,
+// interactive credential that can expire or get logged out from under a scheduled job with nobody
+// there to re-auth. Requiring ANTHROPIC_API_KEY here, and passing it explicitly below, forces the
+// Claude Agent SDK's subprocess to authenticate as this key rather than silently falling back to
+// an ambient OAuth session (ANTHROPIC_API_KEY outranks a logged-in session when both are present,
+// but only if it's actually set — hence the fail-fast check).
+const ANTHROPIC_API_KEY = process.env.ANTHROPIC_API_KEY
+
+if(!ANTHROPIC_API_KEY) {
+  throw new Error("ANTHROPIC_API_KEY must be set (see .env.example) — generate one in the Anthropic Console rather than relying on a logged-in claude session")
+}
 
 const [since, until] = process.argv.slice(2)
 
@@ -109,7 +122,11 @@ async function main() {
       // this run can touch.
       settingSources: [],
       permissionMode: "default",
-      maxTurns: 20
+      maxTurns: 20,
+      // `env` REPLACES the subprocess environment rather than merging with it, so process.env is
+      // spread through here to keep PATH/HOME/etc — ANTHROPIC_API_KEY is called out explicitly so
+      // it's unmistakable that this run authenticates via API key, not a logged-in session.
+      env: { ...process.env, ANTHROPIC_API_KEY }
     }
   })
 

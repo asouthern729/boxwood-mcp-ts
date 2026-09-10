@@ -1,0 +1,205 @@
+:root {
+  --bg: #ffffff;
+  --card: #ffffff;
+  --text: #0a0a0a;
+  --muted: #6b6b6b;
+  --border: #e2e2e2;
+  --section-border: #ededed;
+  --accent-blue: oklch(73.7% .125 229);
+  --accent-blue-bg: color-mix(in oklch, var(--accent-blue) 18%, transparent);
+  --fail: #c22c2c;
+  --fail-bg: #fbe8e8;
+  --footer-neutral: oklch(20% 0 0);
+  --footer-base-200: oklch(95% .0081 61.42);
+  --footer-neutral-content: oklch(80% .0081 61.42);
+}
+
+@media (prefers-color-scheme: dark) {
+  :root:not([data-theme="light"]) {
+    --bg: #000000;
+    --card: #131316;
+    --text: #f2f2f2;
+    --muted: #9a9a9a;
+    --border: #262626;
+    --section-border: #1c1c1c;
+    --fail: #ff7a7a;
+    --fail-bg: #3a1c1c;
+    --footer-neutral: oklch(35% 0 0);
+    --footer-base-200: oklch(19% 0 0);
+    --footer-neutral-content: oklch(100% 0 0);
+  }
+}
+
+:root[data-theme="dark"] {
+  --bg: #000000;
+  --card: #131316;
+  --text: #f2f2f2;
+  --muted: #9a9a9a;
+  --border: #262626;
+  --section-border: #1c1c1c;
+  --fail: #ff7a7a;
+  --fail-bg: #3a1c1c;
+  --footer-neutral: oklch(35% 0 0);
+  --footer-base-200: oklch(19% 0 0);
+  --footer-neutral-content: oklch(100% 0 0);
+}
+
+* { box-sizing: border-box; }
+
+html, body {
+  height: 100%;
+}
+
+body {
+  margin: 0;
+  min-height: 100dvh;
+  display: flex;
+  flex-direction: column;
+  background: var(--bg);
+  color: var(--text);
+  font-family: "Play", ui-sans-serif, system-ui, -apple-system, "Segoe UI", sans-serif;
+  line-height: 1.5;
+  -webkit-font-smoothing: antialiased;
+}
+
+.page {
+  flex: 1 0 auto;
+  max-width: 720px;
+  width: 100%;
+  margin: 0 auto;
+  padding: 4.5rem 1.5rem 4rem;
+}
+
+.boxwood-brand {
+  display: flex;
+  align-items: center;
+  gap: 1.25rem;
+  margin-bottom: 3rem;
+}
+
+.boxwood-brand img {
+  height: 3.5rem;
+  width: auto;
+  display: block;
+  flex-shrink: 0;
+}
+
+.boxwood-brand .heading {
+  min-width: 0;
+}
+
+.kicker {
+  font-family: ui-monospace, SFMono-Regular, Menlo, Consolas, monospace;
+  font-size: 0.72rem;
+  letter-spacing: 0.14em;
+  text-transform: uppercase;
+  color: var(--muted);
+  margin: 0 0 0.9rem;
+}
+
+h1 {
+  font-size: clamp(1.9rem, 4.5vw, 2.5rem);
+  font-weight: 700;
+  letter-spacing: -0.02em;
+  margin: 0 0 0.75rem;
+  text-wrap: balance;
+}
+
+.lede {
+  color: var(--muted);
+  font-size: 1rem;
+  max-width: 56ch;
+  margin: 0 0 3rem;
+}
+
+footer {
+  margin-top: 3rem;
+  padding-top: 1.25rem;
+  border-top: 1px solid var(--border);
+  font-family: ui-monospace, SFMono-Regular, Menlo, Consolas, monospace;
+  font-size: 0.72rem;
+  color: var(--muted);
+  letter-spacing: 0.02em;
+}
+
+footer .sitemap {
+  display: flex;
+  flex-wrap: wrap;
+  gap: 0.35rem 1.1rem;
+  margin: 0 0 0.6rem;
+}
+
+footer .sitemap a {
+  color: var(--muted);
+  text-decoration: none;
+}
+
+footer .sitemap a:hover {
+  text-decoration: underline;
+}
+
+footer .sitemap a[aria-current="page"] {
+  color: var(--text);
+  font-weight: 600;
+}
+
+@media (max-width: 560px) {
+  .page { padding: 3rem 1.25rem 3rem; }
+}
+
+.brand-footer {
+  position: relative;
+  flex-shrink: 0;
+  height: 10rem;
+  background: linear-gradient(to right, var(--footer-neutral), var(--footer-base-200));
+  overflow: hidden;
+}
+
+.brand-footer-link {
+  position: absolute;
+  inset: 0;
+  z-index: 2;
+  display: flex;
+  flex-direction: column;
+  align-items: center;
+  justify-content: center;
+  text-decoration: none;
+  color: var(--footer-neutral-content);
+  font-family: ui-sans-serif, system-ui, -apple-system, "Segoe UI", Roboto, Helvetica, Arial, sans-serif;
+}
+
+.brand-footer-link .primary {
+  font-size: 1.125rem;
+  font-weight: 800;
+  letter-spacing: 10px;
+  text-transform: uppercase;
+}
+
+.brand-footer-link .secondary {
+  font-size: 1rem;
+  letter-spacing: 8px;
+  text-transform: uppercase;
+  margin-top: 0.25rem;
+}
+
+.brand-footer-link img {
+  position: absolute;
+  right: 0;
+  bottom: 0;
+  z-index: 1;
+  height: 9rem;
+  width: auto;
+  opacity: 0.25;
+}
+
+@media (prefers-color-scheme: dark) {
+  :root:not([data-theme="light"]) .brand-footer-link img { filter: invert(1); }
+}
+
+:root[data-theme="dark"] .brand-footer-link img { filter: invert(1); }
+
+@media (max-width: 600px) {
+  .brand-footer-link img { display: none; }
+  .brand-footer-link .primary { font-size: 0.95rem; letter-spacing: 6px; }
+  .brand-footer-link .secondary { font-size: 0.8rem; letter-spacing: 4px; }
+}

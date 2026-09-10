@@ -1,5 +1,5 @@
 import ExcelJS from "exceljs"
-import type { ReportItem } from "../tools/downloadReport.js"
+import type { ReportItem } from "../tools/downloads/downloadReport.js"
 
 export type AccuracyVerdict = {
   status: "matches" | "no_match" | "rejected" | "verify"

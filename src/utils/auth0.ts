@@ -1,6 +1,14 @@
 import { createHash } from "node:crypto"
 import { createRemoteJWKSet, jwtVerify } from "jose"
+import type { JWTPayload } from "jose"
 import { publicBaseUrl } from "../config/config.js"
+import { logger } from "./logger.js"
+
+export interface Auth0User extends JWTPayload {
+  scope?: string
+  azp?: string
+  gty?: string
+}
 
 const AUTH0_TENANT_DOMAIN = process.env.AUTH0_TENANT_DOMAIN!
 const AUTH0_CLIENT_ID = process.env.AUTH0_CLIENT_ID!
@@ -44,15 +52,41 @@ export async function exchangeCodeForToken(code: string) {
   return { accessToken: body.access_token, expiresIn: body.expires_in }
 }
 
+// The access token above is audience-scoped for our API and doesn't reliably carry profile
+// claims (name/email) even though "profile email" is requested — that's normal Auth0 behavior
+// for a custom-API-audience token. /userinfo is the standard OIDC way to resolve the logged-in
+// person's display info from that same access token, used once at login so the client never has
+// to prompt the user for their own name (see src/routes/board.ts's comment feature).
+export async function fetchUserInfo(accessToken: string) {
+  const response = await fetch(`https://${ AUTH0_TENANT_DOMAIN }/userinfo`, {
+    headers: { Authorization: `Bearer ${ accessToken }` }
+  })
+
+  if(!response.ok) {
+    logger.warn({ status: response.status, body: await response.text() }, "[AUTH0] /userinfo request failed")
+    return { label: null, email: null }
+  }
+
+  const body = await response.json() as { name?: string, nickname?: string, email?: string }
+  logger.info({ hasName: Boolean(body.name), hasNickname: Boolean(body.nickname), hasEmail: Boolean(body.email) }, "[AUTH0] /userinfo resolved")
+
+  return {
+    label: body.name || body.nickname || body.email || null,
+    // Kept separate from `label` (a display name) since it's used to reliably tell Andrew's
+    // comments apart from the client's for bubble coloring in the roadmap UI — see roadmap.html.
+    email: body.email || null
+  }
+}
+
 const jwks = createRemoteJWKSet(new URL(`https://${ AUTH0_TENANT_DOMAIN }/.well-known/jwks.json`))
 
-export async function verifyAccessToken(token: string) {
+export async function verifyAccessToken(token: string): Promise<Auth0User> {
   const { payload } = await jwtVerify(token, jwks, {
     issuer: AUTH0_ISSUER,
     audience: AUTH0_API_URI
   })
 
-  return payload
+  return payload as Auth0User
 }
 
 export function verifyCodeChallenge(codeVerifier: string, codeChallenge: string) {

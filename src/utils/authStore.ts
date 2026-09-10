@@ -16,6 +16,8 @@ type AuthCode = {
   codeChallenge: string
   clientId: string
   redirectUri: string
+  authorLabel: string | null
+  authorEmail: string | null
 }
 
 type RegisteredClient = {

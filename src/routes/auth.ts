@@ -2,6 +2,7 @@ import express, { Router } from "express"
 import {
   buildAuth0AuthorizeUrl,
   exchangeCodeForToken,
+  fetchUserInfo,
   verifyCodeChallenge
 } from "../utils/auth0.js"
 import {
@@ -83,13 +84,16 @@ router.get("/callback", async (req, res) => {
 
   try {
     const { accessToken, expiresIn } = await exchangeCodeForToken(auth0Code)
+    const { label: authorLabel, email: authorEmail } = await fetchUserInfo(accessToken)
 
     const ourCode = createAuthCode({
       auth0AccessToken: accessToken,
       expiresIn,
       codeChallenge: pending.codeChallenge,
       clientId: pending.clientId,
-      redirectUri: pending.redirectUri
+      redirectUri: pending.redirectUri,
+      authorLabel,
+      authorEmail
     })
 
     const redirectUrl = new URL(pending.redirectUri)
@@ -134,6 +138,8 @@ router.post("/token", express.urlencoded({ extended: false }), (req, res) => {
   res.json({
     access_token: entry.auth0AccessToken,
     token_type: "Bearer",
-    expires_in: entry.expiresIn
+    expires_in: entry.expiresIn,
+    author_label: entry.authorLabel,
+    author_email: entry.authorEmail
   })
 })
