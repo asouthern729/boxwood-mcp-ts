@@ -85,8 +85,8 @@ function resolveWindowBound(value: string | undefined, fallback: () => Date): Da
 
 const POLICY_TRANSACTION_QUERY = `
   SELECT
-    pt.trantype, pt.description, pt.effdate, pt.changeddate, pt.polid,
-    bp.polno AS policy_no, bp.poltypelob AS line_of_business,
+    pt.trantype, pt.description, pt.effdate, pt.changeddate, pt.entereddate, pt.polid,
+    bp.custid, bp.polno AS policy_no, bp.poltypelob AS line_of_business,
     co.name AS carrier_name,
     c.csrcode, ${ REP_NAME_EXPR } AS rep_name,
     ${ CUSTOMER_NAME_EXPR } AS customer_name
@@ -144,8 +144,8 @@ const CLAIM_QUERY = `
 // down to the true ~54 genuinely-missing ones once the nudge is accounted for.
 const MISSING_DOWNLOAD_TRANSACTION_QUERY = `
   SELECT
-    tr.trantype, tr.commenttran, tr.effdate, tr.changeddate, tr.polid,
-    bp.polno AS policy_no, bp.poltypelob AS line_of_business,
+    tr.trantype, tr.commenttran, tr.effdate, tr.changeddate, tr.entereddate, tr.polid,
+    bp.custid, bp.polno AS policy_no, bp.poltypelob AS line_of_business,
     co.name AS carrier_name,
     c.csrcode, ${ REP_NAME_EXPR } AS rep_name,
     ${ CUSTOMER_NAME_EXPR } AS customer_name
@@ -171,7 +171,9 @@ type MissingDownloadTransactionRow = {
   commenttran: string | null
   effdate: string
   changeddate: string
+  entereddate: string
   polid: string
+  custid: string
   policy_no: string
   line_of_business: string | null
   carrier_name: string | null
@@ -215,6 +217,21 @@ const CANDIDATE_LIMIT_PER_ITEM = 5
 // same policy (among this same batch) also covers that vehicle row's effdate, so each vehicle
 // change is attributed to exactly one transaction — the nearest one at or after it — never double-
 // counted across neighboring transactions.
+//
+// A second `NOT EXISTS` guards a different failure found investigating client-requested duplicate-
+// reduction work (2026-09-11): `txns` only ever contains transactions from *this report run's own
+// window* — so if a vehicle/coverage row's true owning transaction was already downloaded (and
+// reported) on an earlier day, that owner is invisible here, and the row silently defaults onto
+// whatever unrelated transaction happens to be nearby *in this run* instead. Confirmed against real
+// data: a policy's renewal (entered 5 days before a later report's window) never appeared in that
+// later run's `txns`, so its entire coverage rewrite — nothing to do with the later transaction —
+// misattributed onto an unrelated same-day endorsement one second after it, reading as "31 coverage
+// changes" caused by that endorsement when none of them were. Checking against the real
+// `afw_policytransaction` table directly (not just this run's own `txns`) catches this: if some
+// *other* real `source='D'` transaction on the policy sits at or after the vehicle/coverage row's
+// own effdate and strictly before the candidate's, a genuine closer owner exists somewhere (in or
+// out of this run's window) and this candidate shouldn't claim the row, even though it's the only
+// one currently in scope.
 const VEHICLE_CHANGE_QUERY = `
   WITH txns AS (
     SELECT * FROM UNNEST($1::int[], $2::uuid[], $3::timestamp[], $4::timestamp[]) AS t(idx, polid, lower_bound, upper_bound)
@@ -233,6 +250,11 @@ const VEHICLE_CHANGE_QUERY = `
     SELECT 1 FROM txns t2
     WHERE t2.polid = m.polid AND t2.upper_bound < m.upper_bound AND t2.upper_bound >= m.effdate
   )
+  AND NOT EXISTS (
+    SELECT 1 FROM afw_policytransaction pt2
+    WHERE pt2.polid = m.polid AND pt2.source = 'D'
+      AND pt2.effdate >= m.effdate AND pt2.effdate < m.upper_bound
+  )
 `
 
 type VehicleChangeRow = { idx: number; status: string; vin: string | null; make: string | null; model: string | null; vehyear: string | null }
@@ -248,7 +270,12 @@ type VehicleChangeRow = { idx: number; status: string; vin: string | null; make:
 // state (same coverageid, latest effdate strictly before this row's) so only a genuine value diff on
 // limit1-3/deduct1-3 is reported — confirmed against a real "DNLD/cvg chngs - inspection" transaction
 // this way surfaces exactly the 3 fields that actually moved (Dwelling/Other Structures/Personal
-// Property limits) out of 96 coverage rows in its window.
+// Property limits) out of 96 coverage rows in its window. Also carries the same second `NOT EXISTS`
+// guard as VEHICLE_CHANGE_QUERY (see its comment) against a coverage row's true owning transaction
+// having already been reported on an earlier day and so being invisible to this run's own `txns` —
+// confirmed real: a policy's renewal's entire coverage rewrite (26 rows) misattributed onto an
+// unrelated same-day endorsement one second later, reading as "31 coverage changes" caused by that
+// endorsement when none of them were, since the renewal itself was outside this run's window.
 //
 // Added/removed coverages use AMS360's own status='A'/'D' rather than the diff (a brand-new
 // coverageid has no prior row to diff against; the same NOT EXISTS attribution pattern as
@@ -259,30 +286,52 @@ type VehicleChangeRow = { idx: number; status: string; vin: string | null; make:
 // removed as a side effect of any coverage rewrite; `iscoverage` looked like the natural filter for
 // this but is inconsistent (the same coveragecode shows up as both 'Y' and 'N' on different rows),
 // so filtering on "has a limit or deductible value" is what's actually reliable.
+//
+// The "previous state" LATERAL below is scoped to (custid, polno, coverageid) rather than the
+// narrower (polid, coverageid) — found investigating client-requested duplicate-reduction work
+// (2026-09-11): `coverageid` was confirmed to stay stable for the same real coverage line across a
+// policy's renewal terms even though AMS360 mints a brand-new `polid` every term. A same-`polid`-only
+// scope means a renewal's very first coverage snapshot under its new `polid` can never find its own
+// prior row — even when a real, unchanged prior value exists under the *previous* term's `polid` —
+// so every renewal would otherwise over-report "none → current" for coverage lines that never
+// actually changed, confirmed real against Tiffany Fallon Rooney's coverage history (same
+// coverageid present under both her old-term and new-term polid, same value, for a limit the report
+// wrongly showed going from "none"). Joining through afw_basicpolinfo to resolve custid/polno keeps
+// the lookup scoped to this same real policy (not just trusting coverageid's uniqueness alone)
+// while still reaching across term/polid boundaries.
 const COVERAGE_CHANGE_QUERY = `
   WITH txns AS (
     SELECT * FROM UNNEST($1::int[], $2::uuid[], $3::timestamp[], $4::timestamp[]) AS t(idx, polid, lower_bound, upper_bound)
   ), matches AS (
     SELECT txns.idx, txns.polid, txns.upper_bound, cov.coverageid, cov.effdate, cov.status,
       COALESCE(cov.descrcov, cov.coveragecode) AS coverage_name,
-      cov.limit1, cov.limit2, cov.limit3, cov.deduct1, cov.deduct2, cov.deduct3
+      cov.limit1, cov.limit2, cov.limit3, cov.deduct1, cov.deduct2, cov.deduct3,
+      bp.custid, bp.polno
     FROM txns
     JOIN afw_coverage cov ON cov.polid = txns.polid AND cov.effdate BETWEEN txns.lower_bound AND txns.upper_bound
+    JOIN afw_basicpolinfo bp ON bp.polid = txns.polid
   ), attributed AS (
     SELECT m.* FROM matches m
     WHERE NOT EXISTS (
       SELECT 1 FROM txns t2
       WHERE t2.polid = m.polid AND t2.upper_bound < m.upper_bound AND t2.upper_bound >= m.effdate
     )
+    AND NOT EXISTS (
+      SELECT 1 FROM afw_policytransaction pt2
+      WHERE pt2.polid = m.polid AND pt2.source = 'D'
+        AND pt2.effdate >= m.effdate AND pt2.effdate < m.upper_bound
+    )
   )
-  SELECT a.idx, a.status, a.coverage_name, a.limit1, a.limit2, a.limit3, a.deduct1, a.deduct2, a.deduct3,
+  SELECT a.idx, a.status, a.coverage_name, a.coverageid, a.limit1, a.limit2, a.limit3, a.deduct1, a.deduct2, a.deduct3,
     p.limit1 AS prev_limit1, p.limit2 AS prev_limit2, p.limit3 AS prev_limit3,
     p.deduct1 AS prev_deduct1, p.deduct2 AS prev_deduct2, p.deduct3 AS prev_deduct3
   FROM attributed a
   LEFT JOIN LATERAL (
     SELECT c2.limit1, c2.limit2, c2.limit3, c2.deduct1, c2.deduct2, c2.deduct3
     FROM afw_coverage c2
-    WHERE c2.polid = a.polid AND c2.coverageid = a.coverageid AND c2.effdate < a.effdate
+    JOIN afw_basicpolinfo bp2 ON bp2.polid = c2.polid
+    WHERE bp2.custid = a.custid AND bp2.polno = a.polno
+      AND c2.coverageid = a.coverageid AND c2.effdate < a.effdate
     ORDER BY c2.effdate DESC LIMIT 1
   ) p ON true
   WHERE (
@@ -299,6 +348,7 @@ type CoverageChangeRow = {
   idx: number
   status: string
   coverage_name: string
+  coverageid: string
   limit1: number | null; limit2: number | null; limit3: number | null
   deduct1: number | null; deduct2: number | null; deduct3: number | null
   prev_limit1: number | null; prev_limit2: number | null; prev_limit3: number | null
@@ -314,34 +364,71 @@ const MAX_REPORTED_COVERAGE_CHANGES = 6
 // Mirrors summarizeVehicleChanges' "surface concrete specifics, cap the noise" shape, but each
 // afw_coverage row can independently move more than one field (e.g. both limit1 and deduct1 in the
 // same download), so this reports per-field rather than per-row.
+const COVERAGE_FIELDS = [
+  { label: "limit", key: "limit1" as const, prevKey: "prev_limit1" as const },
+  { label: "limit (2)", key: "limit2" as const, prevKey: "prev_limit2" as const },
+  { label: "limit (3)", key: "limit3" as const, prevKey: "prev_limit3" as const },
+  { label: "deductible", key: "deduct1" as const, prevKey: "prev_deduct1" as const },
+  { label: "deductible (2)", key: "deduct2" as const, prevKey: "prev_deduct2" as const },
+  { label: "deductible (3)", key: "deduct3" as const, prevKey: "prev_deduct3" as const }
+]
+
+// AMS360 sometimes writes a superseded placeholder ('D', deleted) immediately followed by the
+// final value ('A', added) for the exact same coverageid within one rewrite/new-business
+// transaction — confirmed real (client-requested accuracy check, 2026-09-11): John Lynch's
+// HO264928000 rewrite showed 16 distinct coverageids but 25 raw rows, because 9 of those
+// coverageids had this exact A/D pair, all 9 with byte-identical limit/deductible values on both
+// sides — inflating "25 coverage changes" when only 7 were real (the other 9 coverageids, each a
+// single unpaired row). Grouping by coverageid first, rather than treating every row
+// independently, catches this: an identical-value pair nets to nothing and is dropped entirely
+// (matches the same real coverage line being written twice, not two real facts); a
+// different-value pair is reported as one diff line (matching the normal 'C'-status diff format)
+// instead of a misleading "Removed X; Added X" pair naming the same coverage twice.
 function summarizeCoverageChanges(rows: CoverageChangeRow[]): string | null {
   if(rows.length === 0) return null
 
   const lines: string[] = []
+  const byCoverageId = new Map<string, CoverageChangeRow[]>()
 
   for(const row of rows) {
-    if(row.status === "A") {
-      lines.push(`Added coverage: ${ row.coverage_name }${ row.limit1 !== null ? ` (${ formatMoney(row.limit1) })` : "" }`)
+    const group = byCoverageId.get(row.coverageid)
+    if(group) group.push(row)
+    else byCoverageId.set(row.coverageid, [row])
+  }
+
+  for(const group of byCoverageId.values()) {
+    const added = group.find((r) => r.status === "A")
+    const removed = group.find((r) => r.status === "D")
+
+    if(added && removed && group.length === 2) {
+      for(const field of COVERAGE_FIELDS) {
+        const beforeValue = removed[field.key]
+        const afterValue = added[field.key]
+
+        if(beforeValue === afterValue) continue
+        lines.push(`${ added.coverage_name } ${ field.label }: ${ formatMoney(beforeValue) || "none" } → ${ formatMoney(afterValue) || "none" }`)
+      }
       continue
     }
 
-    if(row.status === "D") {
-      lines.push(`Removed coverage: ${ row.coverage_name }${ row.limit1 !== null ? ` (${ formatMoney(row.limit1) })` : "" }`)
-      continue
-    }
+    for(const row of group) {
+      if(row.status === "A") {
+        lines.push(`Added coverage: ${ row.coverage_name }${ row.limit1 !== null ? ` (${ formatMoney(row.limit1) })` : "" }`)
+        continue
+      }
 
-    const fields: { label: string; current: number | null; prev: number | null }[] = [
-      { label: "limit", current: row.limit1, prev: row.prev_limit1 },
-      { label: "limit (2)", current: row.limit2, prev: row.prev_limit2 },
-      { label: "limit (3)", current: row.limit3, prev: row.prev_limit3 },
-      { label: "deductible", current: row.deduct1, prev: row.prev_deduct1 },
-      { label: "deductible (2)", current: row.deduct2, prev: row.prev_deduct2 },
-      { label: "deductible (3)", current: row.deduct3, prev: row.prev_deduct3 }
-    ]
+      if(row.status === "D") {
+        lines.push(`Removed coverage: ${ row.coverage_name }${ row.limit1 !== null ? ` (${ formatMoney(row.limit1) })` : "" }`)
+        continue
+      }
 
-    for(const field of fields) {
-      if(field.current === field.prev) continue
-      lines.push(`${ row.coverage_name } ${ field.label }: ${ formatMoney(field.prev) || "none" } → ${ formatMoney(field.current) || "none" }`)
+      for(const field of COVERAGE_FIELDS) {
+        const current = row[field.key]
+        const prev = row[field.prevKey]
+
+        if(current === prev) continue
+        lines.push(`${ row.coverage_name } ${ field.label }: ${ formatMoney(prev) || "none" } → ${ formatMoney(current) || "none" }`)
+      }
     }
   }
 
@@ -410,7 +497,9 @@ type PolicyTransactionRow = {
   description: string
   effdate: string
   changeddate: string
+  entereddate: string
   polid: string
+  custid: string
   policy_no: string
   line_of_business: string | null
   carrier_name: string | null
@@ -458,6 +547,7 @@ export type ReportItem = {
   flagged: boolean
   repeat_count?: number
   stale_replay_count?: number
+  cross_term_echo_count?: number
   missing_transaction_record?: boolean
   candidate_prior_activity?: { date: string; note: string }[]
 }
@@ -585,13 +675,101 @@ function foldStaleReplays(rows: PolicyTransactionRow[]): { keptRows: PolicyTrans
   return { keptRows, staleReplayByKey }
 }
 
+// A third, distinct AMS360/carrier-side glitch from clusterRepeats' exact-rewrite and
+// foldStaleReplays' same-batch term-closeout replay: a carrier's overnight EDI feed can transmit
+// one real-world edit *twice* when it lands right at a policy's term-rollover boundary — once as a
+// plain "policy change" image against the *closing* term, and again folded into the "renewal"
+// image against the *new* term (since the new term's declarations already reflect the edit).
+// `afw_basicpolinfo` mints a brand-new `polid` every renewal term for the same `polno`, so AMS360's
+// sync materializes both as real, independent `afw_policytransaction` rows — genuinely distinct
+// (polid, effdate) primary keys, not literal duplicate rows — carrying identical `description` text,
+// entered within the same overnight sync batch, but weeks apart on `effdate` (however long the
+// remaining term was). Confirmed via `afw_transaction`: the staff note behind the edit exists
+// exactly once, filed against the *new* term's polid (e.g. "Added Tiffany's daughter Raquel Blue
+// Rooney. Sent dec page. Follow up for DNLD.") — Cincinnati echoed it as two separate carrier
+// messages, seconds apart, with distinct carrier reference numbers, one a "PCH" against the closing
+// term and one an "RWL"-bundled "PCH" against the new term. Confirmed systemic book-wide via direct
+// query against synced data: 611 same-sync-batch (`entereddate` within minutes of each other) pairs
+// across 294 distinct policies, `source='D'` only.
+//
+// Neither `clusterRepeats` (same `polid`, `effdate`-window) nor `foldStaleReplays` (same `polid`,
+// same-`changeddate` batch) can catch this — both key on a single `polid`, and this pattern spans
+// two different `polid` values by design. This runs *after* both of those (on their combined
+// output) and groups by `(custid, policy_no, description)` instead — a policy's own number is
+// stable across its renewal terms even though its `polid` isn't. Within a group, rows are chained
+// by `entereddate` proximity (same "one sync batch" logic `clusterRepeats` already uses, just keyed
+// on `entereddate` instead of `effdate`, since `effdate` itself is expected to differ by design
+// here — confirmed the anchor should be the newer term's own row, since that's where the real staff
+// note is actually filed). A chain only folds when it spans more than one `polid`: a same-`polid`
+// chain this late in the pipeline is two genuinely distinct real transactions on the very same term
+// that happen to share boilerplate description text (e.g. a generic "Policy change" reused weeks
+// apart) — not an echo — and must be left alone rather than merged.
+const CROSS_TERM_SYNC_BATCH_MS = 5 * 60_000
+
+type CrossTermEchoInfo = { count: number; olderEffdates: string[] }
+
+function foldCrossTermEchoes(
+  clusters: { row: PolicyTransactionRow; repeatCount: number }[]
+): { kept: { row: PolicyTransactionRow; repeatCount: number }[]; echoByKey: Map<string, CrossTermEchoInfo> } {
+  const groups = new Map<string, { row: PolicyTransactionRow; repeatCount: number }[]>()
+
+  for(const item of clusters) {
+    const key = `${ item.row.custid }||${ item.row.policy_no }||${ item.row.description }`
+    const group = groups.get(key)
+
+    if(group) group.push(item)
+    else groups.set(key, [item])
+  }
+
+  const kept: { row: PolicyTransactionRow; repeatCount: number }[] = []
+  const echoByKey = new Map<string, CrossTermEchoInfo>()
+
+  for(const group of groups.values()) {
+    if(group.length === 1) {
+      kept.push(group[0])
+      continue
+    }
+
+    const sorted = [...group].sort((a, b) => new Date(a.row.entereddate).getTime() - new Date(b.row.entereddate).getTime())
+    let chainStart = 0
+
+    for(let i = 1; i <= sorted.length; i++) {
+      const gap = i < sorted.length
+        ? new Date(sorted[i].row.entereddate).getTime() - new Date(sorted[i - 1].row.entereddate).getTime()
+        : Infinity
+
+      if(gap > CROSS_TERM_SYNC_BATCH_MS) {
+        const chain = sorted.slice(chainStart, i)
+        const distinctPolids = new Set(chain.map((c) => c.row.polid))
+
+        if(distinctPolids.size === 1) {
+          kept.push(...chain)
+        } else {
+          const anchor = chain.reduce((a, b) => (new Date(b.row.effdate).getTime() > new Date(a.row.effdate).getTime() ? b : a))
+          const others = chain.filter((c) => c !== anchor)
+
+          kept.push(anchor)
+          echoByKey.set(`${ anchor.row.polid }||${ anchor.row.effdate }`, {
+            count: others.length,
+            olderEffdates: others.map((o) => o.row.effdate).sort()
+          })
+        }
+
+        chainStart = i
+      }
+    }
+  }
+
+  return { kept, echoByKey }
+}
+
 type InternalItem = Omit<ReportItem, "item_id"> & { csrcode: string | null; rep_name: string | null; polid?: string }
 
 export function registerDownloadReportTool(server: McpServer) {
   server.registerTool(
     "download_report",
     {
-      description: "Boxwood's daily \"Download Report\" — the overnight carrier-download review each rep does every morning, rebuilt from synced AMS360 data instead of AMS360's own exported report. Returns policy transactions and claims that came down from carriers overnight, normalized into plain-language action items and grouped by representative (CSR). RESPONSE SHAPE — this returns a compact result, not the full dataset: the full item list (every rep's routine AND flagged items, with every field) is written to a 24h link (`report_url`) instead of being embedded inline, to keep this response small on a busy day. The inline `reps[].flagged_items` only includes items where `flagged: true`, trimmed to just what judging accuracy requires (`item_id`, `customer_name`, `policy_no`, `what_happened`, `repeat_count`, and up to 3 most-recent `candidate_prior_activity` notes, each capped to 240 characters) — routine items are represented solely by `reps[].summary` counts, and flagged items' other fields (carrier_name, detail, next_step, ...) live only in the full dataset behind the link. Save `report_token` (the same value as the last path segment of `report_url`): pass it to `download_report_workbook` to build the finished worksheet from the *full* dataset (not just the flagged subset you saw here). IMPORTANT — this is a data-synthesis step only, not the finished worksheet: (1) `flagged` means \"this category is one a client could plausibly have requested something about\" (policy change/cancellation/rewrite/reinstatement/reissue/new business) — it is NOT AMS360's native [WARNING]/GROUP REJECT flag from its live download-processing log, which isn't replicated into any table this MCP can query and so cannot be reproduced here; (2) flagged items include `candidate_prior_activity` (recent staff notes on that policy) but NO verdict — deciding whether the download actually matches a documented client request requires reading those notes and judging, which is a separate reasoning step, not something this tool computes; (3) claims reflect only their current state — AMS360's own report can show a claim re-downloaded multiple times in one night (an \"x2/x3 overnight\" note), but that per-event history isn't stored in these tables, so no repeat-count is reported for claims; (4) policy transactions ARE collapsed when AMS360's download processor writes the same transaction (same policy/type/description) several times in quick succession — a confirmed, ongoing AMS360-side glitch, not a client action — into one item, so 12 identical rows read as 1 client-relevant event, not 12 separate requests; a 2-row repeat merges quietly (common enough — ~78% of these — to be unremarkable on its own), but 3+ is surfaced via `repeat_count` and called a repeated transaction, since that pattern is rare enough to be worth a second look. It is NOT necessarily harmless: no synced table records whether a transaction actually applied (isposted/isuploaded were checked and don't track this), so a repeated transaction can equally mean AMS360 kept retrying something that kept failing (e.g. a GROUP REJECT loop) — `next_step` calls this out for any item with a `repeat_count` and the rep should verify directly in AMS360 rather than assume it's cosmetic. (5) `change_detail` (client-requested 2026-09-02, broadened 2026-09-02 from a vehicle-only field per follow-up feedback) spells out the concrete specifics of what changed on a policy transaction, across every line of business — not just AMS360's terse transaction description. Two independent signals are merged into this one field, semicolon-joined when both fire on the same transaction: vehicle adds/removals with VIN (e.g. \"Added: 2019 FORD F-150 SUPERCREW RAPTOR (VIN 1FTFW1RG5KFC53281); Removed: 2013 FORD F-150 SUPERCREW (VIN 1FTFW1ET3DKE56229)\" for a vehicle replacement — Personal and Commercial Auto, `afw_vehicle`/`afw_127vehicle`), and coverage/limit/deductible adds, removals, and value changes for any line of business (e.g. \"Dwelling limit: $850,000 → $899,000; Other Structures limit: $170,000 → $179,800\" for a homeowners coverage bump, or \"Added coverage: Water Backup of Sewers & Drains ($50,000)\" for a new endorsement — `afw_coverage`). Both are correlated to the specific transaction (not just the policy) even when several related transactions land seconds apart on the same policy in one overnight batch. Null whenever a transaction has neither kind of activity — most transactions, including ones with `detail` text that already mentions a vehicle or coverage (e.g. a plain premium change), will have this as null; don't read null as \"nothing changed,\" only as \"nothing this field tracks changed on this specific transaction.\" Deliberately does not report a vehicle that was merely edited in place (e.g. renumbered when a sibling vehicle was added/removed) or a coverage row rewritten with identical values (AMS360 rewrites every active coverage on any coverage-related download, not just the one that changed) — only clear adds/removals/value-changes, since AMS360's audit trail can't reliably distinguish a real edit from an incidental side-effect touch. (6) `effective_date` on a policy_transaction item is that specific transaction's own effdate (when the change took effect), not the policy's own poleffdate/polexpdate — always null on a claim item, since claims have no equivalent field. (7) `stale_replay_count` (client-requested 2026-09-03: reports appeared to be \"pulling ALL the changes for that policy throughout the policy year\") covers a second, distinct AMS360 glitch from the repeat_count one above: when a policy's term closes out (renewal/rewrite/new-business), AMS360 re-stamps `changeddate` on every OTHER transaction from that closing term's history too, not just the new event, so a whole year of already-actioned changes can otherwise look freshly downloaded overnight. When a download batch mixes one clearly-fresher transaction with much older siblings from the same policy, the older ones are folded into the fresher one (same policy) rather than reported as their own items — `stale_replay_count` says how many, and `next_step` names the date range they were originally effective across. A single old transaction with no fresher batch-mate is left exactly as-is; this only fires on the specific mixed-batch pattern confirmed in real data. (8) `missing_transaction_record` (client-requested 2026-09-03: \"if a new row is inserted into afw_transaction by a carrier download we want to see that tx ... even if there is no policy change detected\") surfaces a carrier download that never got its own row in AMS360's policy-transaction table at all — afw_policytransaction only keeps the latest write per (policy, effective date), so when two downloads land on the same key close together, the earlier one's content is otherwise invisible to this report. These items are built from afw_transaction's own raw processing-log text instead (its `detail` is AMS360's cleaned-up commenttran narrative, e.g. \"Download updated the writing company from Hartford Property & Casualty to Hartford Insurance Group\" or a vehicle's discount change) — `categorized`/`flagged`/`change_detail`/`repeat_count`/`stale_replay_count` all still apply normally on top, since these items carry a real policy and effective date same as any other. `next_step` names this explicitly so a rep isn't confused why an item has unusual detail text.",
+      description: "Boxwood's daily \"Download Report\" — the overnight carrier-download review each rep does every morning, rebuilt from synced AMS360 data instead of AMS360's own exported report. Returns policy transactions and claims that came down from carriers overnight, normalized into plain-language action items and grouped by representative (CSR). RESPONSE SHAPE — this returns a compact result, not the full dataset: the full item list (every rep's routine AND flagged items, with every field) is written to a 24h link (`report_url`) instead of being embedded inline, to keep this response small on a busy day. The inline `reps[].flagged_items` only includes items where `flagged: true`, trimmed to just what judging accuracy requires (`item_id`, `customer_name`, `policy_no`, `what_happened`, `repeat_count`, and up to 3 most-recent `candidate_prior_activity` notes, each capped to 240 characters) — routine items are represented solely by `reps[].summary` counts, and flagged items' other fields (carrier_name, detail, next_step, ...) live only in the full dataset behind the link. Save `report_token` (the same value as the last path segment of `report_url`): pass it to `download_report_workbook` to build the finished worksheet from the *full* dataset (not just the flagged subset you saw here). IMPORTANT — this is a data-synthesis step only, not the finished worksheet: (1) `flagged` means \"this category is one a client could plausibly have requested something about\" (policy change/cancellation/rewrite/reinstatement/reissue/new business) — it is NOT AMS360's native [WARNING]/GROUP REJECT flag from its live download-processing log, which isn't replicated into any table this MCP can query and so cannot be reproduced here; (2) flagged items include `candidate_prior_activity` (recent staff notes on that policy) but NO verdict — deciding whether the download actually matches a documented client request requires reading those notes and judging, which is a separate reasoning step, not something this tool computes; (3) claims reflect only their current state — AMS360's own report can show a claim re-downloaded multiple times in one night (an \"x2/x3 overnight\" note), but that per-event history isn't stored in these tables, so no repeat-count is reported for claims; (4) policy transactions ARE collapsed when AMS360's download processor writes the same transaction (same policy/type/description) several times in quick succession — a confirmed, ongoing AMS360-side glitch, not a client action — into one item, so 12 identical rows read as 1 client-relevant event, not 12 separate requests; a 2-row repeat merges quietly (common enough — ~78% of these — to be unremarkable on its own), but 3+ is surfaced via `repeat_count` and called a repeated transaction, since that pattern is rare enough to be worth a second look. It is NOT necessarily harmless: no synced table records whether a transaction actually applied (isposted/isuploaded were checked and don't track this), so a repeated transaction can equally mean AMS360 kept retrying something that kept failing (e.g. a GROUP REJECT loop) — `next_step` calls this out for any item with a `repeat_count` and the rep should verify directly in AMS360 rather than assume it's cosmetic. (5) `change_detail` (client-requested 2026-09-02, broadened 2026-09-02 from a vehicle-only field per follow-up feedback) spells out the concrete specifics of what changed on a policy transaction, across every line of business — not just AMS360's terse transaction description. Two independent signals are merged into this one field, semicolon-joined when both fire on the same transaction: vehicle adds/removals with VIN (e.g. \"Added: 2019 FORD F-150 SUPERCREW RAPTOR (VIN 1FTFW1RG5KFC53281); Removed: 2013 FORD F-150 SUPERCREW (VIN 1FTFW1ET3DKE56229)\" for a vehicle replacement — Personal and Commercial Auto, `afw_vehicle`/`afw_127vehicle`), and coverage/limit/deductible adds, removals, and value changes for any line of business (e.g. \"Dwelling limit: $850,000 → $899,000; Other Structures limit: $170,000 → $179,800\" for a homeowners coverage bump, or \"Added coverage: Water Backup of Sewers & Drains ($50,000)\" for a new endorsement — `afw_coverage`). Both are correlated to the specific transaction (not just the policy) even when several related transactions land seconds apart on the same policy in one overnight batch. Null whenever a transaction has neither kind of activity — most transactions, including ones with `detail` text that already mentions a vehicle or coverage (e.g. a plain premium change), will have this as null; don't read null as \"nothing changed,\" only as \"nothing this field tracks changed on this specific transaction.\" Deliberately does not report a vehicle that was merely edited in place (e.g. renumbered when a sibling vehicle was added/removed) or a coverage row rewritten with identical values (AMS360 rewrites every active coverage on any coverage-related download, not just the one that changed) — only clear adds/removals/value-changes, since AMS360's audit trail can't reliably distinguish a real edit from an incidental side-effect touch. `change_detail` only ever attributes a vehicle/coverage row to a transaction actually present in the current call's own window — if that row's true owning transaction was already downloaded and reported on an earlier call, this attribution correctly excludes the row entirely (verified against real data) rather than misattributing it to whatever unrelated transaction happens to be nearby in this call. Coverage limit/deductible comparisons also look up each coverage line's prior value across the policy's full renewal history (not just its current term), since AMS360 gives a policy a new internal term id every renewal but keeps the same coverage-line id — so a renewal's own first-of-term snapshot correctly compares against its real prior value instead of reading every limit as newly added. (6) `effective_date` on a policy_transaction item is that specific transaction's own effdate (when the change took effect), not the policy's own poleffdate/polexpdate — always null on a claim item, since claims have no equivalent field. (7) `stale_replay_count` (client-requested 2026-09-03: reports appeared to be \"pulling ALL the changes for that policy throughout the policy year\") covers a second, distinct AMS360 glitch from the repeat_count one above: when a policy's term closes out (renewal/rewrite/new-business), AMS360 re-stamps `changeddate` on every OTHER transaction from that closing term's history too, not just the new event, so a whole year of already-actioned changes can otherwise look freshly downloaded overnight. When a download batch mixes one clearly-fresher transaction with much older siblings from the same policy, the older ones are folded into the fresher one (same policy) rather than reported as their own items — `stale_replay_count` says how many, and `next_step` names the date range they were originally effective across. A single old transaction with no fresher batch-mate is left exactly as-is; this only fires on the specific mixed-batch pattern confirmed in real data. (8) `missing_transaction_record` (client-requested 2026-09-03: \"if a new row is inserted into afw_transaction by a carrier download we want to see that tx ... even if there is no policy change detected\") surfaces a carrier download that never got its own row in AMS360's policy-transaction table at all — afw_policytransaction only keeps the latest write per (policy, effective date), so when two downloads land on the same key close together, the earlier one's content is otherwise invisible to this report. These items are built from afw_transaction's own raw processing-log text instead (its `detail` is AMS360's cleaned-up commenttran narrative, e.g. \"Download updated the writing company from Hartford Property & Casualty to Hartford Insurance Group\" or a vehicle's discount change) — `categorized`/`flagged`/`change_detail`/`repeat_count`/`stale_replay_count` all still apply normally on top, since these items carry a real policy and effective date same as any other. `next_step` names this explicitly so a rep isn't confused why an item has unusual detail text. (9) `cross_term_echo_count` (found investigating client-requested duplicate-reduction 2026-09-11) covers a third, distinct glitch from repeat_count/stale_replay_count above, this one carrier-side rather than purely AMS360-side: a carrier's overnight feed can transmit one real edit twice right at a policy's term-rollover boundary — once as a plain policy-change image against the closing term, once folded into the renewal image against the new term — and since AMS360 mints a brand-new polid every renewal term, these land as two genuinely distinct policy-transaction rows (not literal duplicates) with identical description text, in the same sync batch, weeks apart on effdate. Confirmed via real data the underlying staff request was only ever entered once. Neither of the other two dedup mechanisms catches this since both key on a single polid; this one folds the closing-term echo into the new-term item instead (same policy number, matching description, same sync batch) and reports how many were folded plus their original effective date(s) in `next_step` — the rep should treat it as the same request already seen elsewhere, not a second one, unless something looks off.",
       inputSchema: {
         since: z.string().describe('Start of window: agency-local timestamp ("2026-08-28T08:00") or relative shorthand ("24h", "7d"). Defaults to the most recent 8am agency-local sync cutoff, minus 24h — i.e. the 8am-to-8am span ending at the last completed overnight sync (minus 72h on a Monday, reaching back to Friday 8am, since no report runs Sat/Sun)').optional(),
         until: z.string().describe("End of window, same format as since. Defaults to the most recent 8am agency-local sync cutoff (or yesterday's 8am, if today's hasn't happened yet) — a firm boundary, not \"now\", since the AMS360 ETL sync doesn't reliably finish pulling overnight carrier activity until shortly after 7:30am, and the report script itself doesn't run until 8am").optional(),
@@ -621,7 +799,9 @@ export function registerDownloadReportTool(server: McpServer) {
           description: formatMissingDownloadDetail(row.commenttran),
           effdate: row.effdate,
           changeddate: row.changeddate,
+          entereddate: row.entereddate,
           polid: row.polid,
+          custid: row.custid,
           policy_no: row.policy_no,
           line_of_business: row.line_of_business,
           carrier_name: row.carrier_name,
@@ -632,10 +812,10 @@ export function registerDownloadReportTool(server: McpServer) {
         }))
 
         const { keptRows, staleReplayByKey } = foldStaleReplays([...transactionRows, ...missingDownloadAsTransactionRows])
-        const transactionClusters = clusterRepeats(keptRows)
-        const canonicalRows = transactionClusters.map((c) => c.row)
+        const { kept: echoFoldedClusters, echoByKey } = foldCrossTermEchoes(clusterRepeats(keptRows))
+        const canonicalRows = echoFoldedClusters.map((c) => c.row)
 
-        const transactionItems: InternalItem[] = transactionClusters.map(({ row, repeatCount }) => {
+        const transactionItems: InternalItem[] = echoFoldedClusters.map(({ row, repeatCount }) => {
           const { category, flagged, nextStep } = categorizeTransaction(row.trantype)
           const isReportedRepeat = repeatCount >= MIN_REPORTED_REPEAT_COUNT
 
@@ -653,12 +833,17 @@ export function registerDownloadReportTool(server: McpServer) {
             ? `${ nextStepWithRepeatWarning } AMS360 also redelivered ${ staleReplay.count } older transaction(s) from earlier in this policy's term in the same download batch (originally effective ${ staleReplay.earliestEffdate.slice(0, 10) } to ${ staleReplay.latestEffdate.slice(0, 10) }) — that's very likely AMS360 re-syncing already-actioned history, not new client activity, so no action is needed on those unless something looks off.`
             : nextStepWithRepeatWarning
 
+          const crossTermEcho = echoByKey.get(`${ row.polid }||${ row.effdate }`)
+          const nextStepWithEchoWarning = crossTermEcho
+            ? `${ nextStepWithStaleWarning } AMS360 also transmitted this same change against this policy's prior term (originally effective ${ crossTermEcho.olderEffdates.map((d) => d.slice(0, 10)).join(", ") }) — carriers can echo one real edit against both the closing and new term at renewal, so that's very likely the same request, not a second one, unless something looks off.`
+            : nextStepWithStaleWarning
+
           // See MISSING_DOWNLOAD_TRANSACTION_QUERY — this item has no backing afw_policytransaction
           // row at all (a later download reused its exact key first), so its detail comes from
           // AMS360's raw processing log instead; worth telling the rep that up front.
           const finalNextStep = row.missingRecord
-            ? `${ nextStepWithStaleWarning } This download has no corresponding entry in AMS360's policy-transaction table — a later download reused the same effective date before this one could be recorded on its own, so the detail above comes from AMS360's raw processing log. Verify directly in AMS360 if anything here needs action.`
-            : nextStepWithStaleWarning
+            ? `${ nextStepWithEchoWarning } This download has no corresponding entry in AMS360's policy-transaction table — a later download reused the same effective date before this one could be recorded on its own, so the detail above comes from AMS360's raw processing log. Verify directly in AMS360 if anything here needs action.`
+            : nextStepWithEchoWarning
 
           return {
             customer_name: row.customer_name,
@@ -676,6 +861,7 @@ export function registerDownloadReportTool(server: McpServer) {
             flagged,
             repeat_count: isReportedRepeat ? repeatCount : undefined,
             stale_replay_count: staleReplay?.count,
+            cross_term_echo_count: crossTermEcho?.count,
             missing_transaction_record: row.missingRecord || undefined,
             csrcode: row.csrcode,
             rep_name: row.rep_name,
@@ -829,6 +1015,7 @@ export function registerDownloadReportTool(server: McpServer) {
           change_detail: item.change_detail,
           repeat_count: item.repeat_count,
           stale_replay_count: item.stale_replay_count,
+          cross_term_echo_count: item.cross_term_echo_count,
           missing_transaction_record: item.missing_transaction_record,
           // A missing_transaction_record item has no afw_policytransaction row at all — its `detail`
           // (AMS360's cleaned-up commenttran text) is the only source of concrete specifics, unlike a

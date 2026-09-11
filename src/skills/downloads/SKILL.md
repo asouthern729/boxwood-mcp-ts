@@ -101,6 +101,48 @@ description says so explicitly rather than silently dropping them:
   coverage change this field tracks happened on this transaction specifically." Rendered as its own
   "Policy Changes" column in the finished workbook (`downloadWorkbook.ts`), between Detail and Next
   Step.
+
+  **Both queries also guard against attributing a row to a transaction outside this report run's own
+  window** (found investigating client-requested duplicate-reduction work, 2026-09-11). The `NOT
+  EXISTS` pattern above only compares against `txns` — the transactions actually returned by *this*
+  run's own date window — so if a vehicle/coverage row's true owning transaction was already
+  downloaded (and reported) on an earlier day, that owner is invisible here and the row would
+  otherwise default onto whatever unrelated transaction happens to be nearby *in this run* instead.
+  Confirmed real: a policy's renewal (entered 5 days before a later report's window) never appeared
+  in that later run's `txns`, so its entire coverage rewrite (26 rows, none of them genuinely
+  changed) misattributed onto an unrelated same-day endorsement one second later, reading as "31
+  coverage changes" caused by that endorsement when none of them were — the same failure class as
+  the roadmap-reported "23 coverage changes was really just a billing switch" bug. Fixed with a
+  second `NOT EXISTS` checking the real `afw_policytransaction` table directly (`source='D'`, not
+  just this run's own `txns`): if some other real transaction on the policy sits at or after the
+  row's own effdate and strictly before the candidate's, a genuine closer owner exists somewhere (in
+  or out of this run's window) and the candidate shouldn't claim the row. Verified against the same
+  real Tiffany Fallon Rooney example the cross-term-echo fix uses: both her false "31 coverage
+  changes" (A01) and a false "Excess UM/Personal Umbrella limit: none → $2,000,000" (U01, confirmed
+  via real data neither limit was ever actually null anywhere in that coverage line's visible
+  history) are now correctly suppressed, while a same-window case (John Lynch's real same-day
+  4-policy rewrite) is unaffected.
+
+  **A third, related bug, same investigation, also fixed (2026-09-11)**: the coverage diff's `LEFT
+  JOIN LATERAL` "previous state" lookup was scoped to `c2.polid = a.polid` — but `coverageid` was
+  confirmed to stay stable for the same real coverage line across a policy's renewal terms even
+  though `polid` changes every term (AMS360 mints a new `polid` per term; confirmed for both
+  A01/U01 1162431's whole visible history, same coverageid present under both the old-term and
+  new-term `polid` with the same value). So a renewal's own *first* coverage snapshot under its new
+  `polid` could never find a same-`polid` prior row, even when a real, meaningful prior value
+  existed under the *previous* term's `polid` — every renewal read every limit as "none → current,"
+  not just the ones affected by the cross-window misattribution bug above (confirmed real: Rooney's
+  U01 "Excess Uninsured Motorist"/"Personal Umbrella" limits had genuinely been $2,000,000 for the
+  entire visible history, never null, yet the report showed "none → $2,000,000"). Fixed by scoping
+  the LATERAL lookup to `(custid, polno, coverageid)` instead — joined through `afw_basicpolinfo` to
+  resolve `custid`/`polno` for both the matched row and its LATERAL candidates, so the "previous
+  state" search reaches across term/`polid` boundaries for this same real policy, rather than trusting
+  `coverageid` alone to be globally unique. Verified against 13 real in-window renewal items spanning
+  the same test window: several now correctly show `null` (every coverage line genuinely unchanged,
+  where before they'd have shown spurious "none → current" diffs), while others still correctly
+  surface real changes (e.g. inflation-adjusted dwelling/personal-property/loss-of-use limits, a
+  genuine new vehicle add at renewal) — confirming the fix removes false positives without
+  suppressing real ones.
 - **Reports each policy transaction's own effective date** (`effective_date`, client-requested
   2026-09-03) — `pt.effdate`, i.e. when that specific download-processed change took effect, not the
   policy's own `poleffdate`/`polexpdate`. Always `null` on a claim item (no equivalent field).
@@ -166,6 +208,49 @@ description says so explicitly rather than silently dropping them:
   policy-transaction row) so a rep isn't confused. No dedicated workbook column; included in the
   inline flagged-item judgment view (unlike a normal item) since `detail` is this item's only source
   of concrete specifics rather than a label already implied by `what_happened`.
+- **Folds a carrier's "cross-term renewal echo" into a single item**
+  (`cross_term_echo_count`, `foldCrossTermEchoes` — investigated 2026-09-11 while scoping
+  duplicate-reduction work Andrew requested, jointly against real synced data via a peer
+  `postgres-mcp` session). A third, distinct glitch from `repeat_count`/`stale_replay_count` above —
+  this one is carrier-side, not purely AMS360-side: a carrier's overnight EDI feed can transmit one
+  real edit *twice* right at a policy's term-rollover boundary, once as a plain policy-change image
+  against the *closing* term and once folded into the *renewal* image against the *new* term (since
+  the new term's declarations already reflect the edit). `afw_basicpolinfo` mints a brand-new `polid`
+  every renewal term for the same `polno`, so AMS360's sync materializes both as real, genuinely
+  distinct `afw_policytransaction` rows (distinct `(polid, effdate)` primary keys, not literal
+  duplicates) carrying identical `description` text, entered within the same overnight sync batch,
+  weeks apart on `effdate`. Confirmed real via `afw_transaction`: the anchor example (Tiffany Fallon
+  Rooney, policies A01/U01 1162431) has exactly one staff note per policy ("Added Tiffany's daughter
+  Raquel Blue Rooney. Sent dec page. Follow up for DNLD."), filed once against the *new* term's
+  `polid` — Cincinnati echoed it as two separate carrier messages, seconds apart, with distinct
+  carrier reference numbers (a "PCH" against the closing term, an "RWL"-bundled "PCH" against the
+  new term). Confirmed systemic book-wide via direct query: 611 same-sync-batch pairs (`entereddate`
+  within minutes of each other) across 294 distinct policies, `source='D'` only — top description
+  buckets "$5M Umbrella Discount", "Policy change", "Cancellation confirmation".
+
+  Neither `clusterRepeats` nor `foldStaleReplays` can catch this since both key on a single `polid`;
+  this pattern spans two different `polid` values by design. Runs *after* both of those, grouping by
+  `(custid, policy_no, description)` instead — a policy's own number is stable across its renewal
+  terms even though its `polid` isn't — and chaining rows by `entereddate` proximity (same "one sync
+  batch" logic as `clusterRepeats`, just keyed on `entereddate` since `effdate` is expected to differ
+  by design here). A chain only folds when it spans more than one `polid`: a same-`polid` chain this
+  late in the pipeline is two genuinely distinct real transactions on the very same term that happen
+  to share boilerplate description text (e.g. a generic "Policy change" reused weeks apart), and is
+  deliberately left alone rather than merged. The newer term's row is kept as the anchor (matches
+  where the real staff note is actually filed); the closing term's row is folded into it, same
+  "collapse quietly, note the count/date range on the survivor" shape as `stale_replay_count`. No
+  dedicated workbook column (same as `repeat_count`/`stale_replay_count`) — surfaced via the count
+  field plus the date named in `next_step`.
+
+  **One investigated and ruled-out complication**: a "$5M Umbrella Discount" case (policy
+  H011323161) initially looked like it needed N-way folding (13 old-term rows vs. 17 new-term rows,
+  not a simple pair) — traced to a *separate* carrier redelivery-storm bug (the same carrier message,
+  identified by its own Msg Seq#, reprocessed by the download connector many times, each retry
+  nudging `effdate` by 1 second) that sits entirely inside `clusterRepeats`' own matching window (all
+  retries land within ~2-4 minutes, well under its 10-minute threshold) — confirmed `clusterRepeats`
+  already collapses each side (13→1, 17→1) before this cross-term fold ever runs, reducing the case
+  to the same simple 1-old/1-new pair shape as every other confirmed example. No N-way fold logic was
+  needed.
 
 ## Calling the tool
 
