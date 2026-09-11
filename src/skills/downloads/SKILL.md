@@ -50,7 +50,7 @@ description says so explicitly rather than silently dropping them:
   rather than silently dropped).
 - **For flagged items only**, retrieves candidate prior staff activity notes (`afw_transaction`,
   staff-classified, scoped to that `polid`, within `lookback_days` before the transaction's
-  `changeddate`) — but does **not** judge whether they match. That judgment (✓ matches / ✗ no
+  `entereddate`) — but does **not** judge whether they match. That judgment (✓ matches / ✗ no
   match / ⚠ verify, in the original hand-built report) requires reading free text and reasoning
   about it; it's a separate step performed on this tool's output, not something computed here.
 - **Groups by `afw_customer.csrcode`** (the customer's header CSR — the account owner), not
@@ -148,30 +148,21 @@ description says so explicitly rather than silently dropping them:
   policy's own `poleffdate`/`polexpdate`. Always `null` on a claim item (no equivalent field).
   Rendered as its own "Transaction Effective Date" column in the finished workbook, between What
   Happened and Detail.
-- **Folds "term-closeout replay" transactions into the fresher item on the same policy**
-  (`stale_replay_count`, `foldStaleReplays` — a second, distinct AMS360 glitch from the
-  `clusterRepeats`/`repeat_count` one above, found from client feedback 2026-09-03: "it looks like
-  it is going and pulling ALL the changes for that policy throughout the policy year — not just the
-  most recent that came through overnight"). Confirmed against real data: when a policy's term
-  closes out (renewal/rewrite/new-business), AMS360 re-stamps `changeddate` — the field this
-  report's window filter runs against — on *every other* transaction from that closing term's
-  history too, not just the actual new event. Evidence: 1,001+ real `(polid, changeddate)` batches
-  (same download event, exact-millisecond-identical `changeddate`) carrying multiple
-  differently-described transactions (up to 24 in one batch) whose own `effdate` spans nearly the
-  whole prior year; a histogram of `changeddate - effdate` across ~12k real policy-change rows shows
-  the expected smooth decay for legitimately late-processed changes (0-100 days) plus a distinct
-  anomalous spike right at the 1-year mark. Left alone, every one of these gets flagged and checked
-  against only the last `lookback_days` of staff notes (default 60) — which can't find the real
-  conversation from months ago, producing false "no match found" verdicts. Fix mirrors
-  `clusterRepeats`' own "collapse quietly, note the count on the survivor" shape rather than
-  dropping data: within a batch, the row with the smallest `changeddate - effdate` gap is the
-  anchor; any sibling whose own gap exceeds the anchor's by more than 30 days (chosen because ~70%
-  of real policy-change rows land within 30 days of their own effective date — comfortably past
-  normal backdating variance, safely short of the ~1-year replay spike) is folded into the anchor's
-  `next_step` instead of reported as its own item. A single isolated old transaction with no
-  fresher batch-mate is left untouched — this only fires on the specific mixed-batch pattern
-  confirmed in the data. No dedicated workbook column (same as `repeat_count`) — surfaced via the
-  count field plus the date range named in `next_step`.
+- **`foldStaleReplays` (removed 2026-09-11) — folded "term-closeout replay" transactions into the
+  fresher item on the same policy.** Was a second, distinct fix from `clusterRepeats`/`repeat_count`
+  above, originally added from client feedback 2026-09-03 ("it looks like it is going and pulling
+  ALL the changes for that policy throughout the policy year — not just the most recent that came
+  through overnight"): AMS360 re-stamps `changeddate` on every other transaction from a closing
+  term's history when the term closes out, not just the actual new event, and this report's window
+  filter used to run against `changeddate`. Superseded, not just patched: the window filter now
+  binds against `entereddate` instead (see "Calling the tool" below), which removes the underlying
+  cause rather than folding its symptoms — a `changeddate`-only re-stamp no longer pulls old rows
+  into a later day's report at all, so there's nothing left for this fold to catch. Confirmed
+  empirically dead before removal: 0 folds fired across 313 items spanning 10 report windows over
+  the full available dataset, vs. `foldCrossTermEchoes` below (a genuinely different, real-row
+  problem, not a `changeddate` artifact) still firing 7 times in the same sweep. Removed rather than
+  left dormant to keep the pipeline's live behavior legible; the implementation is in git history if
+  ever needed again.
 - **Surfaces a carrier download that never got its own `afw_policytransaction` row at all**
   (`missing_transaction_record`, `MISSING_DOWNLOAD_TRANSACTION_QUERY` — client-requested 2026-09-03:
   "if a new row is inserted into afw_transaction by a carrier download we want to see that tx ...
@@ -200,10 +191,10 @@ description says so explicitly rather than silently dropping them:
   survives the cleanup (some rows carry only the boilerplate).
 
   These rows are reshaped into the same `PolicyTransactionRow` shape as a real
-  `afw_policytransaction` row and merged into the same pipeline *before* `foldStaleReplays`/
-  `clusterRepeats` run — not a parallel code path — so categorization, flagging, `repeat_count`,
-  `stale_replay_count`, and the vehicle/coverage `change_detail` correlation all apply exactly as
-  they would to a normal item, since all of that machinery only ever needed a real `polid`/`effdate`.
+  `afw_policytransaction` row and merged into the same pipeline *before* `clusterRepeats` runs — not
+  a parallel code path — so categorization, flagging, `repeat_count`, and the vehicle/coverage
+  `change_detail` correlation all apply exactly as they would to a normal item, since all of that
+  machinery only ever needed a real `polid`/`effdate`.
   `next_step` gets an appended note explaining why this item's detail looks different (no backing
   policy-transaction row) so a rep isn't confused. No dedicated workbook column; included in the
   inline flagged-item judgment view (unlike a normal item) since `detail` is this item's only source
@@ -211,8 +202,8 @@ description says so explicitly rather than silently dropping them:
 - **Folds a carrier's "cross-term renewal echo" into a single item**
   (`cross_term_echo_count`, `foldCrossTermEchoes` — investigated 2026-09-11 while scoping
   duplicate-reduction work Andrew requested, jointly against real synced data via a peer
-  `postgres-mcp` session). A third, distinct glitch from `repeat_count`/`stale_replay_count` above —
-  this one is carrier-side, not purely AMS360-side: a carrier's overnight EDI feed can transmit one
+  `postgres-mcp` session). A second, distinct glitch from `repeat_count` above — this one is
+  carrier-side, not purely AMS360-side: a carrier's overnight EDI feed can transmit one
   real edit *twice* right at a policy's term-rollover boundary, once as a plain policy-change image
   against the *closing* term and once folded into the *renewal* image against the *new* term (since
   the new term's declarations already reflect the edit). `afw_basicpolinfo` mints a brand-new `polid`
@@ -228,8 +219,8 @@ description says so explicitly rather than silently dropping them:
   within minutes of each other) across 294 distinct policies, `source='D'` only — top description
   buckets "$5M Umbrella Discount", "Policy change", "Cancellation confirmation".
 
-  Neither `clusterRepeats` nor `foldStaleReplays` can catch this since both key on a single `polid`;
-  this pattern spans two different `polid` values by design. Runs *after* both of those, grouping by
+  `clusterRepeats` can't catch this since it keys on a single `polid`; this pattern spans two
+  different `polid` values by design. Runs *after* it, grouping by
   `(custid, policy_no, description)` instead — a policy's own number is stable across its renewal
   terms even though its `polid` isn't — and chaining rows by `entereddate` proximity (same "one sync
   batch" logic as `clusterRepeats`, just keyed on `entereddate` since `effdate` is expected to differ
@@ -238,9 +229,9 @@ description says so explicitly rather than silently dropping them:
   to share boilerplate description text (e.g. a generic "Policy change" reused weeks apart), and is
   deliberately left alone rather than merged. The newer term's row is kept as the anchor (matches
   where the real staff note is actually filed); the closing term's row is folded into it, same
-  "collapse quietly, note the count/date range on the survivor" shape as `stale_replay_count`. No
-  dedicated workbook column (same as `repeat_count`/`stale_replay_count`) — surfaced via the count
-  field plus the date named in `next_step`.
+  "collapse quietly, note the count/date range on the survivor" shape `clusterRepeats` uses. No
+  dedicated workbook column (same as `repeat_count`) — surfaced via the count field plus the date
+  named in `next_step`.
 
   **One investigated and ruled-out complication**: a "$5M Umbrella Discount" case (policy
   H011323161) initially looked like it needed N-way folding (13 old-term rows vs. 17 new-term rows,
@@ -267,7 +258,18 @@ description says so explicitly rather than silently dropping them:
   ~5-6 hour boundary bug), this tool resolves its window through `src/utils/localTime.ts`'s
   `agencyWallClockParts`/`bindableAgencyDate`/`mostRecentAgencySyncWindow` to anchor correctly in
   agency-local wall-clock time, since precision matters for something specifically framed as
-  "overnight."
+  "overnight." The window itself binds against each row's `entereddate` (when it was genuinely
+  first written), not `changeddate` (when it was last touched) — switched 2026-09-11 after staff
+  reported transactions "flagged as not on [today's] report" that had actually downloaded days
+  earlier. Confirmed at scale, not just those examples: `changeddate` on `afw_policytransaction`
+  drifts from `entereddate` on 70.7% of `source='D'` rows, by more than 30 days on 38.4% of them
+  (across thousands of distinct policies, max observed gap ~3.3 years), while `entereddate` itself
+  never moves once set. Binding on `changeddate` meant a transaction's report day could silently
+  drift to whatever day something unrelated last touched it; `entereddate` doesn't have that
+  problem. Same switch applied to `CLAIM_QUERY` (confirmed `afw_claim.entereddate` has the same
+  stable shape) and `MISSING_DOWNLOAD_TRANSACTION_QUERY` (confirmed `afw_transaction`'s
+  `entereddate`/`changeddate` are essentially always identical — no real drift there either way, but
+  switched for consistency).
 - `csr_code` — scope to one representative.
 - `lookback_days` (default 60) — how far back to search for candidate staff notes on flagged
   items; this was the value used in the original hand-built report, with the same caveat that
