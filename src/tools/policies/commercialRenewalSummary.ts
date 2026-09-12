@@ -252,10 +252,14 @@ const VEHICLES_QUERY = `
   ORDER BY t.vehno
 `
 
-// afw_127driver's schema does carry dob/licenseno columns, but they're locked down at the column-
-// grant level for the claude role — same PII convention as afw_applicant/afw_driver (see project
-// memory) — so they're deliberately left out of this SELECT rather than causing a permission-denied
-// error.
+// afw_127driver's schema does carry dob/licenseno/ssn columns, but they're locked down at the
+// column-grant level for the claude role, which reflects Andrew's intentional decision to exclude
+// PII from the replicated database — so they're deliberately left out of this SELECT rather than
+// causing a permission-denied error. (A same-role information_schema.columns check will make it
+// look like these columns don't exist at all, not merely inaccessible — Postgres only lists columns
+// a role has some privilege on when that role isn't the table's owner. Confirmed via admin access
+// that they're real columns, just invisible from claude's own seat — don't mistake that for the
+// columns being absent if this ever needs re-checking.)
 const DRIVERS_QUERY = `
   SELECT t.driverno, t.name, t.licensestate, t.datehired
   FROM (

@@ -409,10 +409,11 @@ function vehiclesSection(rows: VehicleRow[]): DocSection | null {
   }
 }
 
-// Only includes columns that actually exist in the source — no DOB/license number here, since
-// afw_127driver carries neither a populated nor a granted column for either (see the tool's own
-// comments); showing them as blank/"[NOT PROVIDED]" for every row would misleadingly imply the data
-// should have been there.
+// Only includes columns actually selected by DRIVERS_QUERY — no DOB/license number here, since
+// those columns are deliberately excluded at the DB-role level, reflecting Andrew's intentional
+// decision to keep PII out of the replicated database (see DRIVERS_QUERY's own comment); showing
+// them as blank/"[NOT PROVIDED]" for every row would misleadingly imply the data should have been
+// there.
 function driversSection(rows: DriverRow[]): DocSection | null {
   if(rows.length === 0) return null
 
