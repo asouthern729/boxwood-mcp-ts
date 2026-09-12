@@ -47,7 +47,7 @@ function headerCell(text: string, width: number): TableCell {
     shading: { fill: GREEN, type: ShadingType.CLEAR },
     borders: cellBorders(),
     verticalAlign: VerticalAlign.CENTER,
-    margins: { top: 40, bottom: 40, left: 80, right: 80 },
+    margins: { top: 80, bottom: 80, left: 80, right: 80 },
     children: [new Paragraph({
       children: [new TextRun({ text, bold: true, color: "FFFFFF", font: "Arial", size: 18 })]
     })]
@@ -62,7 +62,7 @@ function bodyCell(text: string, width: number, rowIndex: number): TableCell {
     shading: { fill, type: ShadingType.CLEAR },
     borders: cellBorders(),
     verticalAlign: VerticalAlign.CENTER,
-    margins: { top: 40, bottom: 40, left: 80, right: 80 },
+    margins: { top: 80, bottom: 80, left: 80, right: 80 },
     children: [new Paragraph({
       children: [new TextRun({ text: String(text), font: "Arial", size: 18 })]
     })]
@@ -76,7 +76,29 @@ const MAX_COL = 4200
 const PER_CHAR = 125 // approx DXA per character at 9pt Arial, tuned for condensed fit
 const FLEX_THRESHOLD = 1400 // columns naturally wider than this absorb shrink/growth
 
+// PROJECT RULE: a table header may wrap to a second line, but only ever at a word break — never
+// splitting a single word across lines — in this file or any future one that builds tables the
+// same way. Word already wraps at whitespace by default (it doesn't hard-break a word to fit), so
+// this just needs a floor: no column is ever allowed to shrink narrower than its OWN LONGEST WORD,
+// even under the flex-shrink pass below (a multi-word header like "Causes of Loss Form" only needs
+// room for "Causes", not the full phrase, since it's fine for that one to wrap across two lines).
+// Body cells are unaffected and may wrap freely, including between words, same as always.
+// Deliberately NOT padded for headerCell()'s own left/right margins on top of this — PER_CHAR is
+// already "tuned for condensed fit" against real rendered PDFs (see this file's top-of-file
+// calibration note), i.e. cell margins are already priced into it; an earlier version of this rule
+// (requiring the FULL header text to fit on one line) double-counted a separate margin allowance on
+// top of that and made the 6-column Property Coverage table mathematically unable to fit its
+// headers at all (hit a negative computed column width) — word-level floors are far smaller and
+// don't run into that.
+function headerFloorWidth(header: string): number {
+  const words = String(header).split(/\s+/).filter(Boolean)
+  const longestWord = words.reduce((max, w) => Math.max(max, w.length), 0)
+  return longestWord * PER_CHAR
+}
+
 function autofitWidths(headers: string[], rows: string[][]): number[] {
+  const headerFloors = headers.map(headerFloorWidth)
+
   const natural = headers.map((h, i) => {
     let maxLen = String(h).length
 
@@ -88,26 +110,73 @@ function autofitWidths(headers: string[], rows: string[][]): number[] {
     return Math.min(MAX_COL, Math.max(MIN_COL, maxLen * PER_CHAR))
   })
 
-  const fixedIdx: number[] = []
-  const flexIdx: number[] = []
-  natural.forEach((w, i) => (w <= FLEX_THRESHOLD ? fixedIdx : flexIdx).push(i))
-
-  const fixedSum = fixedIdx.reduce((a, i) => a + natural[i], 0)
-  const flexNaturalSum = flexIdx.reduce((a, i) => a + natural[i], 0)
-  const budgetForFlex = USABLE_WIDTH - fixedSum
+  // Per-column floor: never narrower than MIN_COL, and never narrower than the column's own
+  // longest single word (headerFloors) — see headerFloorWidth's comment on why that keeps a header
+  // from being forced to wrap mid-word. floors[i] <= natural[i] always, since natural[i] already
+  // incorporates the header's full length (>= its longest word) or longer.
+  const floors = natural.map((_, i) => Math.max(MIN_COL, headerFloors[i]))
 
   const widths = natural.slice()
+  const total = widths.reduce((a, b) => a + b, 0)
+  const diff = USABLE_WIDTH - total
 
-  if(flexIdx.length > 0 && flexNaturalSum > 0) {
-    const factor = budgetForFlex / flexNaturalSum
-    flexIdx.forEach((i) => { widths[i] = Math.max(MIN_COL, Math.floor(natural[i] * factor)) })
-  } else if(fixedSum !== USABLE_WIDTH && fixedIdx.length > 0) {
-    const factor = USABLE_WIDTH / fixedSum
-    fixedIdx.forEach((i) => { widths[i] = Math.floor(natural[i] * factor) })
+  if(diff > 0) {
+    // Surplus: grow "flex" columns (naturally wider than FLEX_THRESHOLD) proportionally to their
+    // own natural width — the table's widest columns absorb the leftover room. If none qualify,
+    // spread it across every column instead.
+    const flexIdx = natural.map((_, i) => i).filter((i) => natural[i] > FLEX_THRESHOLD)
+    const growIdx = flexIdx.length > 0 ? flexIdx : natural.map((_, i) => i)
+    const growBase = growIdx.reduce((a, i) => a + natural[i], 0)
+
+    if(growBase > 0) {
+      let distributed = 0
+      growIdx.forEach((i, idx) => {
+        const share = idx === growIdx.length - 1 ? diff - distributed : Math.floor(diff * (natural[i] / growBase))
+        widths[i] += share
+        distributed += share
+      })
+    }
+  } else if(diff < 0) {
+    // Deficit: shrink columns down toward their own floor, proportional to how much slack each has
+    // above it — a column already at (or near) its floor gives up little or nothing, so the
+    // reduction falls mainly on genuinely-wide columns. NEVER crosses below `floors[i]` for any
+    // column; if every column is already at its floor and a deficit remains, the table is left
+    // slightly wider than USABLE_WIDTH rather than breaking a header mid-word. (A previous version
+    // of this function instead always dumped the full leftover remainder onto the LAST column,
+    // headerFloor or not — that's exactly what forced "Value" to wrap mid-word in the Scheduled
+    // Items table: it's a short, already-at-floor last column with no slack to absorb a deficit
+    // several other wide columns had created.)
+    const deficit = -diff
+    const slack = widths.map((w, i) => Math.max(0, w - floors[i]))
+    const totalSlack = slack.reduce((a, b) => a + b, 0)
+
+    if(totalSlack > 0) {
+      const shrinkable = Math.min(deficit, totalSlack)
+      const idxWithSlack = slack.map((_, i) => i).filter((i) => slack[i] > 0)
+      let distributed = 0
+      idxWithSlack.forEach((i, idx) => {
+        const share = idx === idxWithSlack.length - 1
+          ? shrinkable - distributed
+          : Math.floor(shrinkable * (slack[i] / totalSlack))
+        widths[i] -= share
+        distributed += share
+      })
+    }
   }
 
-  const diff = USABLE_WIDTH - widths.reduce((a, b) => a + b, 0)
-  widths[widths.length - 1] += diff
+  // Any final few-DXA rounding remainder goes to whichever column has the most headroom above its
+  // own floor — never blindly to the last column, for the same reason as above.
+  const roundingDiff = USABLE_WIDTH - widths.reduce((a, b) => a + b, 0)
+  if(roundingDiff !== 0) {
+    let bestIdx = 0
+    let bestHeadroom = -Infinity
+    widths.forEach((w, i) => {
+      const headroom = w - floors[i]
+      if(headroom > bestHeadroom) { bestHeadroom = headroom; bestIdx = i }
+    })
+    widths[bestIdx] += roundingDiff
+  }
+
   return widths
 }
 
@@ -150,7 +219,7 @@ const MARGIN = 1440
 const PAGE_USABLE_HEIGHT = PAGE_HEIGHT - 2 * MARGIN // 12960 twips of usable vertical space per page
 
 const ROW_LINE_HEIGHT = 220
-const ROW_VPAD = 70
+const ROW_VPAD = 160 // matches bodyCell/headerCell's top+bottom margins (80+80) below
 const H1_HEIGHT = 640
 const H2_HEIGHT = 460
 const BODY_LINE_HEIGHT = 260
@@ -207,8 +276,18 @@ function layoutSections(sectionList: DocSection[]): (Paragraph | Table)[] {
 }
 
 // ---------- SECTION INPUT TYPES ----------
+// No per-row "Policy #" tag — even when combining several monoline policies into one document (see
+// commercialRenewalSummary.ts), each section's rows only ever come from one of those policies in
+// practice (Property/GL from the property policy, Vehicles/Drivers from auto, etc.), so the column
+// was pure noise. The cover-page policy summary table is still the reader's guide to what's combined.
 export type LocationRow = { locNo: string; address: string; city: string; state: string; zip: string }
-export type PropertyRow = { subjectOfInsurance: string; coverage: string; limit: string; deductible: string; coinsurance: string }
+// One row per premise/address (see PROPERTY_QUERY in commercialRenewalSummary.ts for how Building vs
+// BPP limits and the Causes of Loss Form/Deductible pairing are derived) — Building/BPP limits are
+// summed separately per address, but Causes of Loss Form and Deductible are shared columns across
+// both, since AMS360 doesn't split those by subject of insurance the way it does the limit itself.
+// `description` is always blank — a free-text field for staff to annotate by hand during the renewal
+// meeting, matching the client's own reference layout; the tool has nothing to put there.
+export type PropertyRow = { address: string; buildingLimit: string; bppLimit: string; causesOfLossForm: string; deductible: string; description: string }
 export type GlExposureRow = { location: string; classCode: string; classification: string; basis: string; exposure: string }
 export type EquipmentBlanket = { category: string; subcategory: string; totalItems: string; amountOfInsurance: string; coinsurance: string }
 export type EquipmentItemRow = { itemNo: string; manufacturer: string; model: string; description: string; serialNo: string; value: string }
@@ -216,15 +295,22 @@ export type VehicleRow = { vehNo: string; year: string; make: string; model: str
 export type DriverRow = { driverNo: string; name: string; licenseState: string; dateHired: string }
 export type WcExposureRow = { location: string; classCode: string; classification: string; payroll: string }
 
+// One row per combined policy on the cover page — only rendered when combining multiple policies
+// into one document; absent/empty for the single-policy case (see coverPageChildren).
+export type PolicySummaryRow = { polNo: string; type: string; premium: string; renewalDate: string }
+
 export type RenewalSummaryInput = {
   clientName: string
   additionalNamedInsureds: string[]
   currentPeriod: string
   renewalDate: string
+  // Present (length > 1) only when this document combines several policies — drives both the
+  // cover-page summary table and the "Policy #" column added to every section table below.
+  policySummary?: PolicySummaryRow[]
   locations: LocationRow[]
   property: PropertyRow[]
   glExposure: GlExposureRow[]
-  equipmentBlanket: EquipmentBlanket | null
+  equipmentBlanket: EquipmentBlanket[]
   equipmentItems: EquipmentItemRow[]
   vehicles: VehicleRow[]
   drivers: DriverRow[]
@@ -255,18 +341,15 @@ function locationsSection(rows: LocationRow[]): DocSection | null {
   }
 }
 
-// Property Coverage cannot be grouped by location (afw_cprem carries no reliable location link in
-// this tenant's synced data — see the tool's own comments) — presented policy-wide instead, one row
-// per coverage line, rather than the client example's by-address layout.
+// One row per premise/address — see PropertyRow's own comment and PROPERTY_QUERY in
+// commercialRenewalSummary.ts for how this is derived (afw_cprem.attachid -> afw_140subofins.soiid
+// -> afw_140premiseinfo.piid -> afw_clocation, discovered after the originally-assumed clocid link
+// turned out to be permanently unpopulated).
 function propertySection(rows: PropertyRow[]): DocSection | null {
   if(rows.length === 0) return null
 
-  // Header reads "Coverage" rather than "Causes of Loss Form" — afw_cprem.coverage (the source
-  // column) mixes genuine causes-of-loss form text ("Special form"/"Basic form") with standalone
-  // endorsement/extension names ("Diamond Prop Plus Cov", "Electronic Data Restoration Expense"),
-  // confirmed against real data — "Causes of Loss Form" would misdescribe the latter.
-  const headers = ["Subject of Insurance", "Coverage", "Limit", "Deductible", "Coinsurance"]
-  const tableRows = rows.map((p) => [p.subjectOfInsurance, p.coverage, p.limit, p.deductible, p.coinsurance])
+  const headers = ["Address", "Building Limit", "BPP Limit", "Causes of Loss Form", "Deductible", "Description"]
+  const tableRows = rows.map((p) => [p.address, p.buildingLimit, p.bppLimit, p.causesOfLossForm, p.deductible, p.description])
 
   return {
     height: H1_HEIGHT + estimateTableHeight(headers, tableRows),
@@ -286,13 +369,13 @@ function glSection(rows: GlExposureRow[]): DocSection | null {
   }
 }
 
-function equipmentSection(blanket: EquipmentBlanket | null, items: EquipmentItemRow[]): DocSection | null {
-  if(!blanket && items.length === 0) return null
+function equipmentSection(blankets: EquipmentBlanket[], items: EquipmentItemRow[]): DocSection | null {
+  if(blankets.length === 0 && items.length === 0) return null
 
   const blocks: (Paragraph | Table)[] = [h1("Equipment List & Value")]
   let height = H1_HEIGHT
 
-  if(blanket) {
+  for(const blanket of blankets) {
     const pairs: [string, string][] = [
       ["Category", blanket.category],
       ["Subcategory", blanket.subcategory],
@@ -356,8 +439,29 @@ function wcSection(rows: WcExposureRow[]): DocSection | null {
 
 const LOGO_PATH = path.join(import.meta.dirname, "..", "..", "assets", "boxwood-logo.png")
 
-function coverPageChildren(clientName: string, currentPeriod: string, renewalDate: string): Paragraph[] {
+// When combining several policies, the single current-period/renewal-date lines below aren't
+// meaningful (each policy has its own dates) — a summary table of all included policies replaces
+// them instead, and doubles as the reader's key to the "Policy #" column added throughout the rest
+// of the document.
+function coverPageChildren(clientName: string, currentPeriod: string, renewalDate: string, policySummary?: PolicySummaryRow[]): (Paragraph | Table)[] {
   const logoData = readFileSync(LOGO_PATH)
+
+  const dateBlock: (Paragraph | Table)[] = policySummary && policySummary.length > 0
+    ? [buildTable(
+        ["Policy #", "Type", "Premium", "Renewal Date"],
+        policySummary.map((p) => [p.polNo, p.type, p.premium, p.renewalDate])
+      )]
+    : [
+        new Paragraph({
+          alignment: AlignmentType.CENTER,
+          children: [new TextRun({ text: `Current Policy Period: ${ currentPeriod }`, color: NEARBLACK, size: 28, font: "Arial" })]
+        }),
+        new Paragraph({
+          alignment: AlignmentType.CENTER,
+          spacing: { after: 360 },
+          children: [new TextRun({ text: `Renewal Effective: ${ renewalDate }`, color: NEARBLACK, size: 28, font: "Arial" })]
+        })
+      ]
 
   return [
     new Paragraph({
@@ -379,15 +483,7 @@ function coverPageChildren(clientName: string, currentPeriod: string, renewalDat
       spacing: { after: 240 },
       children: [new TextRun({ text: clientName, bold: true, color: NEARBLACK, size: 56, font: "Arial" })]
     }),
-    new Paragraph({
-      alignment: AlignmentType.CENTER,
-      children: [new TextRun({ text: `Current Policy Period: ${ currentPeriod }`, color: NEARBLACK, size: 28, font: "Arial" })]
-    }),
-    new Paragraph({
-      alignment: AlignmentType.CENTER,
-      spacing: { after: 360 },
-      children: [new TextRun({ text: `Renewal Effective: ${ renewalDate }`, color: NEARBLACK, size: 28, font: "Arial" })]
-    }),
+    ...dateBlock,
     new Paragraph({ children: [new PageBreak()] })
   ]
 }
@@ -438,7 +534,7 @@ export async function buildRenewalSummaryDoc(input: RenewalSummaryInput): Promis
         }
       },
       children: [
-        ...coverPageChildren(input.clientName, input.currentPeriod, input.renewalDate),
+        ...coverPageChildren(input.clientName, input.currentPeriod, input.renewalDate, input.policySummary),
         ...layoutSections(included.map((s) => s.section))
       ]
     }]
