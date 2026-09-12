@@ -10,6 +10,16 @@
 <link href="https://fonts.googleapis.com/css2?family=Play:wght@400;700&display=swap" rel="stylesheet">
 <link rel="stylesheet" href="./assets/styles.css">
 <style>
+  html {
+    scroll-behavior: smooth;
+  }
+
+  @media (prefers-reduced-motion: reduce) {
+    html {
+      scroll-behavior: auto;
+    }
+  }
+
   .category-group {
     margin-top: 2.5rem;
   }
@@ -28,6 +38,30 @@
     margin: 0 0 0.75rem;
     padding-top: 0.5rem;
     border-top: 1px solid var(--section-border);
+    scroll-margin-top: 1.5rem;
+  }
+
+  .category-nav {
+    display: flex;
+    flex-wrap: wrap;
+    gap: 0.4rem 1.2rem;
+    margin: -2rem 0 3rem;
+    font-family: ui-monospace, SFMono-Regular, Menlo, Consolas, monospace;
+    font-size: 0.75rem;
+    font-weight: 600;
+    letter-spacing: 0.04em;
+  }
+
+  .category-nav a {
+    color: var(--muted);
+    opacity: 0.7;
+    text-decoration: none;
+  }
+
+  .category-nav a:hover {
+    color: var(--text);
+    opacity: 1;
+    text-decoration: underline;
   }
 
   .item {
@@ -397,8 +431,8 @@
     font-weight: 700;
     text-transform: uppercase;
     letter-spacing: 0.03em;
-    color: var(--bg);
-    background: var(--text);
+    color: #d97757;
+    background: #000000;
     border: none;
     border-radius: 6px;
     padding: 0.4rem 0.9rem;
@@ -434,6 +468,14 @@
 
   <p class="lede">Tool ideas and progress, grouped by category and ranked by priority. Change a status, adjust priority, or leave a comment.</p>
 
+  <nav class="category-nav" aria-label="Jump to category">
+    <a href="#commercial-lines">Commercial Lines</a>
+    <a href="#personal-lines">Personal Lines</a>
+    <a href="#claims">Claims</a>
+    <a href="#employee-benefits">Employee Benefits</a>
+    <a href="#management-dashboards">Management Dashboards</a>
+  </nav>
+
   <section class="chat-panel">
     <h2><img src="./assets/claude.png" alt="">Claude</h2>
     <div id="chat-messages" class="chat-messages"></div>
@@ -449,7 +491,7 @@
     <nav class="sitemap" aria-label="Site pages">
       <a href="/mcp-tools/">Tools &amp; Skills</a>
       <a href="/reports/">Download Reports</a>
-      <a href="/cl-renewal-summaries/">Renewal Summaries</a>
+      <a href="/cl-renewal-summaries/">Commercial Pre‑Renewal Summaries</a>
       <a href="/ams360-sync/">AMS360 Sync</a>
       <a href="/roadmap/" aria-current="page">Roadmap</a>
     </nav>
@@ -589,6 +631,10 @@
     return escaped.replace(/(https?:\/\/[^\s]+)/g, function (url) {
       return '<a href="' + url + '" target="_blank" rel="noopener noreferrer">' + url + '</a>';
     });
+  }
+
+  function slugify(text) {
+    return text.toLowerCase().replace(/[^a-z0-9]+/g, "-").replace(/^-+|-+$/g, "");
   }
 
   function groupByCategory(items) {
@@ -830,6 +876,7 @@
 
       var heading = document.createElement("h2");
       heading.textContent = group.category;
+      heading.id = slugify(group.category);
       section.appendChild(heading);
 
       group.items.forEach(function (item) {
