@@ -260,10 +260,11 @@ const VEHICLES_QUERY = `
 // a role has some privilege on when that role isn't the table's owner. Confirmed via admin access
 // that they're real columns, just invisible from claude's own seat — don't mistake that for the
 // columns being absent if this ever needs re-checking.)
+// datehired dropped per client feedback (9/13) — not shown in the finished doc, no need to select it.
 const DRIVERS_QUERY = `
-  SELECT t.driverno, t.name, t.licensestate, t.datehired
+  SELECT t.driverno, t.name, t.licensestate
   FROM (
-    SELECT t.driverno, t.name, t.licensestate, t.datehired, t.status,
+    SELECT t.driverno, t.name, t.licensestate, t.status,
       ROW_NUMBER() OVER (PARTITION BY t.polid, t.lobid, t.drivid ORDER BY t.effdate DESC) AS rn
     FROM afw_127driver t
     WHERE t.polid = $1
@@ -272,21 +273,17 @@ const DRIVERS_QUERY = `
   ORDER BY t.driverno
 `
 
+// No location join per client feedback (9/13): "Don't have to have addresses for workers comp
+// payroll. Just class codes and exposure." — dropped the afw_clocation LEFT JOIN LATERAL entirely
+// since nothing else here needed it.
 const WC_EXPOSURE_QUERY = `
-  SELECT t.ratingclasscode, t.categories, t.vestannremun, t.iestannremun,
-    loc.addr1, loc.city, loc.state, loc.zip
+  SELECT t.ratingclasscode, t.categories, t.vestannremun, t.iestannremun
   FROM (
-    SELECT t.clocid, t.ratingclasscode, t.categories, t.vestannremun, t.iestannremun, t.status,
+    SELECT t.ratingclasscode, t.categories, t.vestannremun, t.iestannremun, t.status,
       ROW_NUMBER() OVER (PARTITION BY t.polid, t.lobid, t.wratid ORDER BY t.effdate DESC) AS rn
     FROM afw_130rating t
     WHERE t.polid = $1
   ) t
-  LEFT JOIN LATERAL (
-    SELECT c.addr1, c.city, c.state, c.zip
-    FROM afw_clocation c
-    WHERE c.polid = $1 AND c.clocid = t.clocid AND c.status != 'D'
-    ORDER BY c.effdate DESC LIMIT 1
-  ) loc ON true
   WHERE t.rn = 1 AND t.status != 'D'
   ORDER BY t.ratingclasscode
 `
@@ -488,8 +485,8 @@ async function fetchPolicyData(policy: ResolvedPolicy): Promise<PolicyData> {
     runReadOnlyQuery(EQUIPMENT_BLANKET_QUERY, [policy.polid]) as Promise<{ category: string | null; subcategory: string | null; totalitems: string | null; amtofins: string | null; coinspct: string | null }[]>,
     runReadOnlyQuery(EQUIPMENT_ITEMS_QUERY, [policy.polid]) as Promise<{ equipno: string | null; manufacturer: string | null; model: string | null; equipdesc: string | null; serialno: string | null; iinsamt: number | null }[]>,
     runReadOnlyQuery(VEHICLES_QUERY, [policy.polid]) as Promise<{ vehno: string | null; vehyear: string | null; make: string | null; model: string | null; vin: string | null }[]>,
-    runReadOnlyQuery(DRIVERS_QUERY, [policy.polid]) as Promise<{ driverno: string | null; name: string | null; licensestate: string | null; datehired: string | null }[]>,
-    runReadOnlyQuery(WC_EXPOSURE_QUERY, [policy.polid]) as Promise<{ ratingclasscode: string | null; categories: string | null; vestannremun: string | null; iestannremun: number | null; addr1: string | null; city: string | null; state: string | null; zip: string | null }[]>
+    runReadOnlyQuery(DRIVERS_QUERY, [policy.polid]) as Promise<{ driverno: string | null; name: string | null; licensestate: string | null }[]>,
+    runReadOnlyQuery(WC_EXPOSURE_QUERY, [policy.polid]) as Promise<{ ratingclasscode: string | null; categories: string | null; vestannremun: string | null; iestannremun: number | null }[]>
   ])
 
   return {
@@ -536,11 +533,9 @@ async function fetchPolicyData(policy: ResolvedPolicy): Promise<PolicyData> {
     drivers: driverRows.map((d) => ({
       driverNo: clean(d.driverno),
       name: clean(d.name),
-      licenseState: clean(d.licensestate),
-      dateHired: formatDate(d.datehired)
+      licenseState: clean(d.licensestate)
     })),
     wcExposure: wcRows.map((w) => ({
-      location: formatAddress(w.addr1, w.city, w.state, w.zip),
       classCode: clean(w.ratingclasscode),
       classification: clean(w.categories),
       payroll: w.iestannremun !== null ? money(w.iestannremun) : numericMoney(w.vestannremun)

@@ -292,8 +292,10 @@ export type GlExposureRow = { location: string; classCode: string; classificatio
 export type EquipmentBlanket = { category: string; subcategory: string; totalItems: string; amountOfInsurance: string; coinsurance: string }
 export type EquipmentItemRow = { itemNo: string; manufacturer: string; model: string; description: string; serialNo: string; value: string }
 export type VehicleRow = { vehNo: string; year: string; make: string; model: string; vin: string }
-export type DriverRow = { driverNo: string; name: string; licenseState: string; dateHired: string }
-export type WcExposureRow = { location: string; classCode: string; classification: string; payroll: string }
+export type DriverRow = { driverNo: string; name: string; licenseState: string }
+// No location here per Patrick's feedback (9/13): "Don't have to have addresses for workers comp
+// payroll. Just class codes and exposure."
+export type WcExposureRow = { classCode: string; classification: string; payroll: string }
 
 // One row per combined policy on the cover page — only rendered when combining multiple policies
 // into one document; absent/empty for the single-policy case (see coverPageChildren).
@@ -413,12 +415,13 @@ function vehiclesSection(rows: VehicleRow[]): DocSection | null {
 // those columns are deliberately excluded at the DB-role level, reflecting Andrew's intentional
 // decision to keep PII out of the replicated database (see DRIVERS_QUERY's own comment); showing
 // them as blank/"[NOT PROVIDED]" for every row would misleadingly imply the data should have been
-// there.
+// there. Date Hired dropped per client feedback (9/13) — driver info gets manually verified at the
+// renewal meeting regardless, so it wasn't adding anything.
 function driversSection(rows: DriverRow[]): DocSection | null {
   if(rows.length === 0) return null
 
-  const headers = ["Driver #", "Name", "License State", "Date Hired"]
-  const tableRows = rows.map((d) => [d.driverNo, d.name, d.licenseState, d.dateHired])
+  const headers = ["Driver #", "Name", "License State"]
+  const tableRows = rows.map((d) => [d.driverNo, d.name, d.licenseState])
 
   return {
     height: H1_HEIGHT + estimateTableHeight(headers, tableRows),
@@ -426,11 +429,14 @@ function driversSection(rows: DriverRow[]): DocSection | null {
   }
 }
 
+// No Location column per Patrick's feedback (9/13): "Don't have to have addresses for workers comp
+// payroll. Just class codes and exposure." (This also sidesteps the earlier WC-location
+// discrepancy against his reference doc — moot now that no address is shown at all.)
 function wcSection(rows: WcExposureRow[]): DocSection | null {
   if(rows.length === 0) return null
 
-  const headers = ["Location", "Class Code", "Classification", "Current Payroll", "Renewal Payroll"]
-  const tableRows = rows.map((w) => [w.location, w.classCode, w.classification, w.payroll, ""])
+  const headers = ["Class Code", "Classification", "Current Payroll", "Renewal Payroll"]
+  const tableRows = rows.map((w) => [w.classCode, w.classification, w.payroll, ""])
 
   return {
     height: H1_HEIGHT + estimateTableHeight(headers, tableRows),
