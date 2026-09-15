@@ -45,7 +45,7 @@
     display: flex;
     flex-wrap: wrap;
     gap: 0.4rem 1.2rem;
-    margin: -2rem 0 3rem;
+    margin: -2rem 0 1rem;
     font-family: ui-monospace, SFMono-Regular, Menlo, Consolas, monospace;
     font-size: 0.75rem;
     font-weight: 600;
@@ -64,12 +64,44 @@
     text-decoration: underline;
   }
 
+  .in-progress-nav {
+    display: flex;
+    flex-wrap: wrap;
+    align-items: center;
+    gap: 0.4rem 1.2rem;
+    margin: 0 0 3rem;
+    font-family: ui-monospace, SFMono-Regular, Menlo, Consolas, monospace;
+    font-size: 0.75rem;
+    font-weight: 600;
+    letter-spacing: 0.04em;
+  }
+
+  .in-progress-nav:empty {
+    display: none;
+    margin: 0;
+  }
+
+  .in-progress-nav .in-progress-label {
+    color: var(--muted);
+    opacity: 0.7;
+  }
+
+  .in-progress-nav a {
+    color: var(--accent-blue);
+    text-decoration: none;
+  }
+
+  .in-progress-nav a:hover {
+    text-decoration: underline;
+  }
+
   .item {
     background: var(--card);
     border: 1px solid var(--border);
     border-radius: 10px;
     padding: 1rem 1.1rem;
     margin-bottom: 0.9rem;
+    scroll-margin-top: 1.5rem;
   }
 
   .item-head {
@@ -450,13 +482,31 @@
     cursor: default;
   }
 
+  .back-to-top {
+    text-align: center;
+    margin: 0.5rem 0 2rem;
+  }
+
+  .back-to-top a {
+    color: var(--accent-blue);
+    font-family: ui-monospace, SFMono-Regular, Menlo, Consolas, monospace;
+    font-size: 0.75rem;
+    font-weight: 600;
+    letter-spacing: 0.04em;
+    text-decoration: none;
+  }
+
+  .back-to-top a:hover {
+    text-decoration: underline;
+  }
+
   @media (max-width: 560px) {
     .item-name { width: 100%; margin-right: 0; }
   }
 </style>
 </head>
 <body>
-<div class="page">
+<div class="page" id="top">
 
   <div class="boxwood-brand">
     <img src="./assets/boxwood-logo.png" alt="Boxwood Insurance Group">
@@ -476,6 +526,8 @@
     <a href="#management-dashboards">Management Dashboards</a>
   </nav>
 
+  <nav class="in-progress-nav" id="in-progress-nav" aria-label="In progress ideas"></nav>
+
   <section class="chat-panel">
     <h2><img src="./assets/claude.png" alt="">Claude</h2>
     <div id="chat-messages" class="chat-messages"></div>
@@ -486,6 +538,8 @@
   </section>
 
   <div id="board"><p class="loading">Loading&hellip;</p></div>
+
+  <p class="back-to-top"><a href="#top">&uarr; Back to Top</a></p>
 
   <footer>
     <nav class="sitemap" aria-label="Site pages">
@@ -637,6 +691,10 @@
     return text.toLowerCase().replace(/[^a-z0-9]+/g, "-").replace(/^-+|-+$/g, "");
   }
 
+  function itemAnchorId(item) {
+    return "item-" + item.id;
+  }
+
   function groupByCategory(items) {
     var byCategory = {};
     items.forEach(function (item) {
@@ -730,6 +788,7 @@
   function buildItem(item, session) {
     var el = document.createElement("div");
     el.className = "item";
+    el.id = itemAnchorId(item);
 
     var head = document.createElement("div");
     head.className = "item-head";
@@ -862,9 +921,32 @@
     return el;
   }
 
+  function renderInProgressNav(items) {
+    var nav = document.getElementById("in-progress-nav");
+    if (!nav) return;
+
+    nav.innerHTML = "";
+
+    var inProgress = items.filter(function (item) { return item.status === "in_progress"; });
+    if (!inProgress.length) return;
+
+    var label = document.createElement("span");
+    label.className = "in-progress-label";
+    label.textContent = "In Progress";
+    nav.appendChild(label);
+
+    inProgress.forEach(function (item) {
+      var link = document.createElement("a");
+      link.href = "#" + itemAnchorId(item);
+      link.textContent = item.name;
+      nav.appendChild(link);
+    });
+  }
+
   function render(items, session) {
     if (!items.length) {
       container.innerHTML = '<p class="empty">Nothing on the board yet.</p>';
+      renderInProgressNav([]);
       return;
     }
 
@@ -885,6 +967,8 @@
 
       container.appendChild(section);
     });
+
+    renderInProgressNav(items);
   }
 
   function getChatSessionId() {
