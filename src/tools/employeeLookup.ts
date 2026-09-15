@@ -81,22 +81,28 @@ function attachRoles(
 }
 
 // "Current" (in force today, not just the latest bound term) — client-confirmed 2026-08-27, same
-// definition as book_summary/policy_query: renewalrptflag='A', not a submission shell, not
-// status='D', and poleffdate <= today <= polexpdate. Applied here too (both to the "policies"
-// include and, via EXISTS, to which customers even qualify for the "customers" include) so an
-// employee's book means the same thing regardless of which tool a caller reaches for — a customer
-// whose only policies are lapsed or a future-dated renewal that hasn't started yet doesn't count
-// as "belonging to" this employee's current book, matching book_summary's customer_count exactly.
+// definition as book_summary/policy_query: not a submission shell, not status='D', and
+// poleffdate <= today <= polexpdate. Applied here too (both to the "policies" include and, via
+// EXISTS, to which customers even qualify for the "customers" include) so an employee's book means
+// the same thing regardless of which tool a caller reaches for — a customer whose only policies are
+// lapsed or a future-dated renewal that hasn't started yet doesn't count as "belonging to" this
+// employee's current book, matching book_summary's customer_count exactly.
+//
+// Deliberately does NOT also require renewalrptflag='A' (client-corrected 2026-09-14, Defatta Custom
+// Homes LLC — see commercialRenewalSummary.ts's RESOLVE_POLICY_QUERY comment for the full story):
+// AMS360 can flip a term's flag to 'R' the moment its successor is bound, weeks before that
+// successor's own poleffdate arrives, so the flag alone can miss the term genuinely in force today.
+// The date bounds below already fully define "in force," with or without the flag.
 const CURRENT_POLICY_EXISTS = `
   EXISTS (
     SELECT 1 FROM afw_basicpolinfo cp
-    WHERE cp.custid = c.custid AND cp.renewalrptflag = 'A' AND cp.polsubtype != 'S' AND cp.status != 'D'
+    WHERE cp.custid = c.custid AND cp.polsubtype != 'S' AND cp.status != 'D'
       AND cp.poleffdate <= now() AND cp.polexpdate >= now()
   )
 `
 
 const CURRENT_POLICY_CONDITIONS = `
-  p.renewalrptflag = 'A' AND p.polsubtype != 'S' AND p.status != 'D'
+  p.polsubtype != 'S' AND p.status != 'D'
   AND p.poleffdate <= now() AND p.polexpdate >= now()
 `
 

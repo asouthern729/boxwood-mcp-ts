@@ -106,6 +106,12 @@ const INCLUDE_QUERIES: Record<Include, string> = {
   // that detail exists (commercial, written through AMS360's detailed rating workflow), falling
   // back to fulltermpremium otherwise. Use policy_query directly (with include: ["premiums"]) for
   // the underlying coverage-line breakdown or to see expired/prior terms — this is current-only.
+  //
+  // Deliberately does NOT filter on renewalrptflag='A' (client-corrected 2026-09-14, Defatta Custom
+  // Homes LLC — see commercialRenewalSummary.ts's RESOLVE_POLICY_QUERY comment for the full story):
+  // the flag can read 'R' for a term that's genuinely in force today, once its successor term is
+  // bound ahead of its own effective date. The poleffdate/polexpdate bounds below are what actually
+  // define "in force," with or without the flag.
   policies: `
     SELECT p.custid, p.polid, p.polno, p.status, p.poltype, p.polsubtype, p.typeofbus,
       p.poleffdate, p.polexpdate, p.cocode, co.name AS carrier_name,
@@ -122,7 +128,7 @@ const INCLUDE_QUERIES: Record<Include, string> = {
     FROM afw_basicpolinfo p
     LEFT JOIN afw_company co ON p.cocode = co.cocode
     WHERE p.custid = ANY($1::uuid[])
-      AND p.renewalrptflag = 'A' AND p.polsubtype != 'S' AND p.status != 'D'
+      AND p.polsubtype != 'S' AND p.status != 'D'
       AND p.poleffdate <= now() AND p.polexpdate >= now()
     ORDER BY p.custid, p.poleffdate DESC
   `

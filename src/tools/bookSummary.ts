@@ -71,12 +71,22 @@ import { errorResult, textResult } from "../utils/mcpHelpers.js"
 // Filtering to poleffdate <= now() AND polexpdate >= now() *before* the dedup ROW_NUMBER() means a
 // customer whose latest bound term is a future renewal correctly falls back to their actual
 // currently-active prior term instead of showing no current policy at all.
+//
+// renewalrptflag='A' itself is deliberately NOT part of the WHERE below anymore (client-corrected
+// 2026-09-14, Defatta Custom Homes LLC): AMS360 can flip a term's flag to 'R' the instant its
+// successor term is bound, even weeks before that successor's own poleffdate arrives — so during
+// that window the term genuinely in force today carries 'R', not 'A'. The poleffdate/polexpdate
+// bounds above were already doing all the real "in force" filtering (per the paragraph above this
+// one); the flag condition was redundant when correct and actively wrong in this edge case, so
+// dropping it loses no real protection. The ROW_NUMBER dedup (poleffdate DESC, entereddate DESC per
+// (custid, polno)) is unaffected — it still picks the latest-entered revision of whichever single
+// term satisfies the date bounds.
 const CURRENT_POLICIES_CTE = `
   current_policies AS (
     SELECT p.* FROM (
       SELECT p.*, ROW_NUMBER() OVER (PARTITION BY p.custid, p.polno ORDER BY p.poleffdate DESC, p.entereddate DESC) AS rn
       FROM afw_basicpolinfo p
-      WHERE p.renewalrptflag = 'A' AND p.polsubtype != 'S' AND p.status != 'D'
+      WHERE p.polsubtype != 'S' AND p.status != 'D'
         AND p.poleffdate <= now() AND p.polexpdate >= now()
     ) p
     WHERE p.rn = 1

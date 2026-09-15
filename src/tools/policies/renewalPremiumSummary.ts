@@ -19,6 +19,12 @@ const CUSTOMER_NAME_EXPR = "COALESCE(c.dba, NULLIF(TRIM(CONCAT_WS(' ', c.firstna
 // policy on the account (not just ones matching a polno) — the whole point of this tool is splitting
 // that set into "renewing soon" (main table) vs. "everything else" (the account's other current
 // policies), per Patrick's own spec (see this file's header comment below).
+//
+// Deliberately does NOT filter on renewalrptflag='A' (client-corrected 2026-09-14, Defatta Custom
+// Homes LLC — see commercialRenewalSummary.ts's RESOLVE_POLICY_QUERY comment for the full story):
+// AMS360 can flip a term's flag to 'R' the moment its successor is bound, weeks before that successor
+// actually starts, so the flag alone can miss the term that's genuinely in force today. The
+// poleffdate/polexpdate bounds below already do all the real work of defining "in force."
 const ACCOUNT_POLICIES_QUERY = `
   SELECT p.polid, p.polno, p.polexpdate, p.custid, p.csrcode,
     ${ CUSTOMER_NAME_EXPR } AS customer_name,
@@ -31,7 +37,6 @@ const ACCOUNT_POLICIES_QUERY = `
   LEFT JOIN afw_company co ON co.cocode = p.cocode
   LEFT JOIN afw_employee csr ON csr.empcode = p.csrcode
   WHERE p.typeofbus = 2
-    AND p.renewalrptflag = 'A'
     AND p.polsubtype != 'S'
     AND p.status != 'D'
     AND p.poleffdate <= now()
