@@ -7,8 +7,8 @@ import { sendMailWithAttachment } from "../../utils/mailer.js"
 import { errorResult, textResult } from "../../utils/mcpHelpers.js"
 import { logger } from "../../utils/logger.js"
 import { fetchPolicyLobInfo } from "../../utils/policyLineOfBusiness.js"
-import type { OtherPolicyRow, PremiumRow } from "../../utils/renewalPremiumSummaryWorkbook.js"
-import { buildRenewalPremiumSummaryWorkbook } from "../../utils/renewalPremiumSummaryWorkbook.js"
+import type { ExtraRow, KnownLobCode, LobRowFill, OtherPolicyRow } from "../../utils/renewalPremiumSummaryWorkbook.js"
+import { LOB_ROW_ORDER, buildRenewalPremiumSummaryWorkbook } from "../../utils/renewalPremiumSummaryWorkbook.js"
 
 const XLSX_MIME_TYPE = "application/vnd.openxmlformats-officedocument.spreadsheetml.sheet"
 
@@ -59,21 +59,6 @@ type AccountPolicy = {
   fulltermpremium: string | number | null
 }
 
-// Patrick's template (Commercial_Renewal_Template_Reformatted.xlsx, emailed 2026-09-10) pre-fills a
-// market-trend range per line of business. Only applied to a MONOLINE policy whose single line of
-// business matches one of these 8 codes — a Package policy blending several lines has no single
-// applicable range, so that column is left blank for it rather than guessing which range applies.
-const TRENDING_RANGES: Record<string, string> = {
-  CGL: "+1% to +9%",
-  PROP: "flat to +10%",
-  AUTOB: "+5% to +15%",
-  CUMBR: "+10% to +20%",
-  WORK: "-2% to +2%",
-  EPLI: "0 to +5%",
-  INMRC: "0 to +15%",
-  DO: "0 to +5%"
-}
-
 function formatDate(value: string | null): string {
   return value ? value.slice(0, 10) : ""
 }
@@ -94,21 +79,21 @@ export function registerRenewalPremiumSummaryTool(server: McpServer) {
   server.registerTool(
     "renewal_premium_summary",
     {
-      // Client-requested (Patrick, roadmap item #1, 9/10 — see Commercial_Renewal_Template_Reformatted.xlsx
-      // he emailed) as a per-LINE-OF-BUSINESS premium breakdown ("Auto is going up x amount, Umbrella is
-      // going up y amount, not just the entire package is going up x%"). Investigated before building
-      // (2026-09-11, real data): summing afw_cprem.premium by line of business is NOT trustworthy for
-      // exactly the policies where it would matter — commercial Package policies. Confirmed on a real
-      // multi-LOB Package policy that afw_cprem's per-line premium sums to only 62% of the policy's
-      // actual afw_basicpolinfo.fulltermpremium (AMS360 itself bills these as one blended package rate —
-      // afw_policytranpremium.lineofbus reads 'CPKGE', never split by line — afw_cprem's line-level
-      // premium is a secondary/illustrative allocation that doesn't reconcile to what's actually charged).
-      // Book-wide, 51% of current commercial policies also have no usable afw_cprem premium at all. Per
-      // Patrick's own explicit fallback ("if we can only do it by policy number that is fine we can work
-      // with that"), this tool reports premium PER POLICY instead — one row per policy, "Coverage" names
-      // what lines of business are bundled on it (from afw_lineofbusiness) without claiming to split its
-      // premium among them.
-      description: "Builds Patrick's \"Commercial Renewal Premium Overview\" .xlsx for a commercial account — one row per policy renewing within the given window (premium, carrier, which lines of business are bundled on it), a TOTAL PREMIUM row, and a second table of the account's other current commercial policies (not in the window) with their expiration dates, for later quote notes. Always account-scoped (custid, not polno) since the whole point is separating \"renewing soon\" from \"everything else on the account.\" IMPORTANT: premium is reported per POLICY, not split by line of business, even though the source template has a line-of-business-shaped layout — see this tool's full description in the codebase for why (afw_cprem's line-level premium doesn't reconcile to actual billed premium on multi-LOB Package policies; AMS360 bills those as one blended rate). The \"Coverage\" column instead lists which lines of business are bundled on each policy (e.g. \"Package — General Liability, Property, Inland Marine\") so the reader knows what's included without a false precise split. A \"Trending Percent Increase\" market-benchmark range (from Patrick's template) is filled in only for a monoline policy in one of 8 known lines of business — left blank for Package policies, which blend several. \"Renewal\"/\"Carrier\" (renewal side)/\"Percent Change\"/the per-carrier market-option columns (Grange, Frankenmuth, Accident Fund, Philadelphia, Travelers, CRC) are always left blank — not knowable until the renewal is actually priced/bound or shopped, filled in by hand. By default the finished workbook is emailed to the account's CSR (resolved from csrcode) and a 24-hour download link is also returned; pass send_email=false to skip the email and just get the link, or override_recipient to send to a specific address instead of the real CSR — required when the account's current policies resolve to more than one distinct CSR (no single real CSR to default to).",
+      // Client-requested (Patrick, roadmap item #1, 9/10 — see CL_Renewal_Premium_Summary.xlsx he
+      // emailed, permission given to reuse the file directly) as a per-LINE-OF-BUSINESS premium
+      // breakdown ("Auto is going up x amount, Umbrella is going up y amount, not just the entire
+      // package is going up x%"). Investigated before building (2026-09-11, real data): summing
+      // afw_cprem.premium by line of business is NOT trustworthy for exactly the policies where it
+      // would matter — commercial Package policies. Confirmed on a real multi-LOB Package policy that
+      // afw_cprem's per-line premium sums to only 62% of the policy's actual
+      // afw_basicpolinfo.fulltermpremium (AMS360 itself bills these as one blended package rate —
+      // afw_policytranpremium.lineofbus reads 'CPKGE', never split by line). Per client feedback
+      // (2026-09-13), a Package policy's full blended premium goes on its "primary" line instead of
+      // attempting an unreliable split (see LOB_ROW_ORDER in renewalPremiumSummaryWorkbook.ts). Also
+      // per that same feedback: the tool only needs to fill Coverage/Current/Carrier — everything
+      // else (Renewal, Percent Change, Trending, market-option carriers) is either already baked
+      // into the template as a static value/formula, or filled in by hand later.
+      description: "Builds Patrick's \"Commercial Renewal Premium Overview\" .xlsx (his actual template, reused directly — see assets/templates/commercial-renewal-template.xlsx) for a commercial account. Fills in Current premium and Carrier for each of the template's 8 fixed lines of business (General Liability, Property, Auto, Umbrella, Workers Comp, EPLI, Inland Marine, D&O) among policies renewing within the given window; a monoline policy maps directly to its one line, a Package policy's full (unsplit) premium goes on its \"primary\" bundled line since AMS360 doesn't reliably support splitting a blended package rate per line. A policy whose line(s) don't match any of the 8 goes in one of a few spare rows the template also keeps blank for a coverage added at renewal that wasn't in the current term. A second table lists the account's other current commercial policies (not in the window) with their expiration dates, for later quote notes. Always account-scoped (custid, not polno) since the whole point is separating \"renewing soon\" from \"everything else on the account.\" TOTAL PREMIUM, each line's Percent Change, and the Trending Percent Increase ranges are already live formulas/static values in the template — never touched here. \"Renewal\"/\"Carrier\" (renewal side)/the per-carrier market-option columns (Grange, Frankenmuth, Accident Fund, Philadelphia, Travelers, CRC) are always left blank — not knowable until the renewal is actually priced/bound or shopped, filled in by hand. By default the finished workbook is emailed to the account's CSR (resolved from csrcode) and a 24-hour download link is also returned; pass send_email=false to skip the email and just get the link, or override_recipient to send to a specific address instead of the real CSR — required when the account's current policies resolve to more than one distinct CSR (no single real CSR to default to).",
       inputSchema: {
         custid: z.string().uuid().describe("The commercial customer's ID (from customer_lookup) — every one of their current, in-force commercial policies is considered"),
         renewal_within_days: z.number().int().positive().default(90).describe("Policies whose renewal (polexpdate) falls within this many days from today go in the main premium table; everything else on the account goes in the \"other effective dates\" table. Defaults to 90 (Patrick's own example: \"the next 90 days\")."),
@@ -141,19 +126,53 @@ export function registerRenewalPremiumSummaryTool(server: McpServer) {
         const lobInfo = await Promise.all(policies.map((p) => fetchPolicyLobInfo(p.polid)))
         const lobByPolid = new Map(policies.map((p, i) => [p.polid, lobInfo[i]]))
 
-        const rows: PremiumRow[] = included.map((policy) => {
-          const { classification, lobDescriptions, lobCodes } = lobByPolid.get(policy.polid)!
-          const label = lobDescriptions.length > 0 ? lobDescriptions.join(", ") : "—"
-          const coverage = classification ? `${ classification } — ${ label }` : label
-          const trendingRange = lobCodes.length === 1 ? (TRENDING_RANGES[lobCodes[0]] ?? "") : ""
+        // Maps each included policy onto the template's fixed 8-line-of-business rows (General
+        // Liability/Property/Auto/Umbrella/Workers Comp/EPLI/Inland Marine/D&O) rather than one row
+        // per policy — those rows, their Percent Change formulas, and their Trending ranges are
+        // already baked into commercial-renewal-template.xlsx. A monoline policy maps directly to
+        // its one line; a Package policy's full (blended, unsplit) premium goes on its "primary"
+        // line — the first of its bundled lines in LOB_ROW_ORDER, General Liability first as the
+        // usual anchor coverage for a bundled program (client feedback, 2026-09-13: don't attempt an
+        // unreliable per-line split). Two policies landing on the same row (e.g. two monoline Auto
+        // policies) sum their premiums and combine carrier names. Anything matching none of the 8
+        // known lines at all goes to extraRows instead, filling the template's spare rows.
+        const lobRows: Partial<Record<KnownLobCode, LobRowFill>> = {}
+        const extraRows: ExtraRow[] = []
 
-          return {
-            coverage,
-            current: toNumber(policy.fulltermpremium),
-            carrier: policy.carrier_name?.trim() || "—",
-            trendingRange
+        for(const policy of included) {
+          const { lobDescriptions, lobCodes } = lobByPolid.get(policy.polid)!
+          const primaryCode = LOB_ROW_ORDER.find((code) => lobCodes.includes(code))
+          const current = toNumber(policy.fulltermpremium)
+          const carrier = policy.carrier_name?.trim() || "—"
+
+          // Client feedback (2026-09-15): drop the "Package —"/"Monoline —" prefix, and lead with
+          // whichever bundled line of business actually corresponds to the row this policy landed
+          // on (primaryCode) — lobDescriptions/lobCodes are parallel arrays in afw_lineofbusiness's
+          // own order, which doesn't necessarily already put the row's own line first (e.g. a
+          // Package's GL coverage could come back listed after Umbrella/Property) — the rest of the
+          // bundle follows in its original order. Policy # is kept separate from the coverage text
+          // (not concatenated into one string) so the workbook builder can render it smaller/italic
+          // to the right of the coverage text, rather than needing a taller row for a second line.
+          const primaryIdx = primaryCode ? lobCodes.indexOf(primaryCode) : -1
+          const orderedDescriptions = primaryIdx > 0
+            ? [lobDescriptions[primaryIdx], ...lobDescriptions.filter((_, i) => i !== primaryIdx)]
+            : lobDescriptions
+          const coverage = orderedDescriptions.length > 0 ? orderedDescriptions.join(", ") : "—"
+
+          if(primaryCode) {
+            const existing = lobRows[primaryCode]
+            lobRows[primaryCode] = existing
+              ? {
+                  current: existing.current !== null || current !== null ? (existing.current ?? 0) + (current ?? 0) : null,
+                  carrier: existing.carrier.split("; ").includes(carrier) ? existing.carrier : `${ existing.carrier }; ${ carrier }`,
+                  coverage: existing.coverage.split("; ").includes(coverage) ? existing.coverage : `${ existing.coverage }; ${ coverage }`,
+                  policyNos: existing.policyNos.split(", ").includes(policy.polno) ? existing.policyNos : `${ existing.policyNos }, ${ policy.polno }`
+                }
+              : { current, carrier, coverage, policyNos: policy.polno }
+          } else {
+            extraRows.push({ coverage, policyNos: policy.polno, current, carrier })
           }
-        })
+        }
 
         const otherPolicies: OtherPolicyRow[] = other.map((policy) => {
           const { classification } = lobByPolid.get(policy.polid)!
@@ -166,7 +185,7 @@ export function registerRenewalPremiumSummaryTool(server: McpServer) {
         const renewalDates = [...new Set(included.map((p) => formatDate(p.polexpdate)))]
         const renewalDateLabel = renewalDates.length === 1 ? renewalDates[0] : `${ renewalDates[0] } – ${ renewalDates[renewalDates.length - 1] }`
 
-        const buffer = await buildRenewalPremiumSummaryWorkbook({ clientName, renewalDateLabel, rows, otherPolicies })
+        const buffer = await buildRenewalPremiumSummaryWorkbook({ clientName, renewalDateLabel, lobRows, extraRows, otherPolicies })
 
         const filename = `${ clientName.replace(/[^A-Za-z0-9]+/g, "_").replace(/^_+|_+$/g, "") || "Unknown" }_Renewal_Premium_Summary.xlsx`
         const token = storeDownload(buffer, filename, XLSX_MIME_TYPE)
@@ -202,7 +221,10 @@ export function registerRenewalPremiumSummaryTool(server: McpServer) {
         return textResult({
           message: `Built the Renewal Premium Overview for ${ clientName } — ${ included.length } polic${ included.length === 1 ? "y" : "ies" } renewing within ${ renewal_within_days } days, ${ other.length } other current polic${ other.length === 1 ? "y" : "ies" } listed separately. ${ emailStatus }`,
           download_url: downloadUrl,
-          included_policies: rows.map((r) => ({ coverage: r.coverage, current_premium: r.current, carrier: r.carrier })),
+          included_policies: [
+            ...Object.entries(lobRows).map(([code, r]) => ({ coverage: code, current_premium: r.current, carrier: r.carrier })),
+            ...extraRows.map((r) => ({ coverage: r.coverage, current_premium: r.current, carrier: r.carrier }))
+          ],
           other_policies: otherPolicies
         })
       } catch(error) {

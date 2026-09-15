@@ -1,222 +1,174 @@
 import ExcelJS from "exceljs"
+import path from "node:path"
 
-// Mirrors the layout of Commercial_Renewal_Template_Reformatted.xlsx (Patrick's template, emailed
-// 2026-09-10 — see roadmap item #1's comment thread) as closely as a generated sheet reasonably can:
-// same column set, same two-table structure, same section labels. Colors reused from
-// renewalSummaryDoc.ts's Word-doc palette (GREEN/NEARBLACK) so this tool's output reads as the same
-// brand as commercial_renewal_summary's .docx, not a one-off style.
-const COLORS = {
-  brandGreen: "FF459361",
-  greenTint: "FFE3F0E7",
-  gray: "FF6B6B6B",
-  grayBg: "FFF2F2F2",
-  dark: "FF231F20",
-  white: "FFFFFFFF",
-  border: "FFD9D9D9"
-} as const
+// Loads and fills in Patrick's actual template (assets/templates/commercial-renewal-template.xlsx —
+// see scripts/templatePrep/prepRenewalPremiumTemplate.py for how it was derived from his original
+// CL_Renewal_Premium_Summary.xlsx, permission given to reuse it directly) rather than rebuilding the
+// layout from scratch — real styling, real formulas (Percent Change, TOTAL PREMIUM), not an
+// approximation of them.
+const TEMPLATE_PATH = path.join(import.meta.dirname, "..", "..", "assets", "templates", "commercial-renewal-template.xlsx")
 
-const THIN_BORDER: Partial<ExcelJS.Borders> = {
-  top: { style: "thin", color: { argb: COLORS.border } },
-  bottom: { style: "thin", color: { argb: COLORS.border } },
-  left: { style: "thin", color: { argb: COLORS.border } },
-  right: { style: "thin", color: { argb: COLORS.border } }
+// Row order matches the template's fixed 8-line-of-business table (rows 12-19) exactly — also used
+// as the priority order for picking a Package policy's "primary" line (client feedback, 2026-09-13:
+// put the whole blended premium on the policy's primary line rather than attempting an unreliable
+// per-line split — General Liability first, as the usual anchor coverage for a bundled program).
+export const LOB_ROW_ORDER = ["CGL", "PROP", "AUTOB", "CUMBR", "WORK", "EPLI", "INMRC", "DO"] as const
+export type KnownLobCode = typeof LOB_ROW_ORDER[number]
+
+const FIRST_LOB_ROW = 12 // through 19 — always exactly 8 rows, one per LOB_ROW_ORDER entry
+
+// The template's own label/Trending text per line, keyed by code rather than fixed row position —
+// needed because rows are now reordered per generation (populated lines first; see
+// buildRenewalPremiumSummaryWorkbook), so a line's label/Trending has to travel with it rather than
+// stay pinned to whichever row it originally occupied in the template.
+const LOB_LABEL: Record<KnownLobCode, string> = {
+  CGL: "General Liability ", PROP: "Property", AUTOB: "Auto", CUMBR: "Umbrella",
+  WORK: "Workers Comp", EPLI: "EPLI", INMRC: "Inland Marine", DO: "D&O"
+}
+const LOB_TRENDING: Record<KnownLobCode, string> = {
+  CGL: "+1% to +9%", PROP: "flat to +10%", AUTOB: "+5% to +15%", CUMBR: "+10% to +20%",
+  WORK: "-2% to +2%", EPLI: "0 to +5%", INMRC: "0 to +15%", DO: "0 to +5%"
 }
 
-const MAIN_COLUMNS = [
-  "Coverage", "Current", "Carrier", "Renewal", "Carrier", "Percent Change", "Trending Percent Increase",
-  "Grange", "Frankenmuth", "Accident Fund", "Philadelphia", "Travelers", "CRC"
-]
-const LAST_COL = "M" // 13 columns, A-M
+const NUM_SPARE_ROWS = 3 // matches prepRenewalPremiumTemplate.py's NUM_BLANK_ROWS
+const FIRST_SPARE_ROW = 20
+// Row 23 (TOTAL PREMIUM) is never written to directly — its SUM/Percent-Change formulas are already
+// baked into the template and just pick up whatever lands in C12:C22/E12:E22 above.
+const OTHER_POLICIES_FIRST_ROW = 27
+const OTHER_POLICIES_MAX_ROWS = 6 // matches the template's 6 pre-styled "other" data rows (27-32)
 
-function styleTitleCell(cell: ExcelJS.Cell) {
-  cell.font = { name: "Arial", size: 14, bold: true, color: { argb: COLORS.dark } }
-}
-
-function styleFieldLabelCell(cell: ExcelJS.Cell) {
-  cell.font = { name: "Arial", size: 10.5, bold: true, color: { argb: COLORS.dark } }
-}
-
-function styleFieldValueCell(cell: ExcelJS.Cell) {
-  cell.font = { name: "Arial", size: 10.5, color: { argb: COLORS.dark } }
-}
-
-function styleSectionHeaderCell(cell: ExcelJS.Cell) {
-  cell.font = { name: "Arial", size: 11, bold: true, color: { argb: COLORS.dark } }
-  cell.fill = { type: "pattern", pattern: "solid", fgColor: { argb: COLORS.greenTint } }
-}
-
-function styleColumnHeaderCell(cell: ExcelJS.Cell) {
-  cell.font = { name: "Arial", size: 10, bold: true, color: { argb: COLORS.white } }
-  cell.fill = { type: "pattern", pattern: "solid", fgColor: { argb: COLORS.brandGreen } }
-  cell.alignment = { horizontal: "left", vertical: "middle", wrapText: true }
-  cell.border = THIN_BORDER
-}
-
-function styleBodyCell(cell: ExcelJS.Cell, opts: { bold?: boolean; fill?: string } = {}) {
-  cell.font = { name: "Arial", size: 10, bold: !!opts.bold, color: { argb: COLORS.dark } }
-  if(opts.fill) cell.fill = { type: "pattern", pattern: "solid", fgColor: { argb: opts.fill } }
-  cell.alignment = { horizontal: "left", vertical: "top", wrapText: true }
-  cell.border = THIN_BORDER
-}
-
-// One row per policy included in the renewal window — NOT one row per line of business. See
-// renewalPremiumSummary.ts's own header comment for why: AMS360 rates most multi-LOB commercial
-// Package policies as a single blended premium (afw_policytranpremium.lineofbus = 'CPKGE'), so a
-// per-LOB split would either be unavailable or actively wrong for exactly the policies where a
-// split would matter most. `coverage` instead names what's bundled on the policy (e.g. "Package —
-// General Liability, Property, Inland Marine"), and `current` is that whole policy's premium.
-export type PremiumRow = { coverage: string; current: number | null; carrier: string; trendingRange: string }
+export type LobRowFill = { current: number | null; carrier: string; coverage: string; policyNos: string }
+export type ExtraRow = { coverage: string; policyNos: string; current: number | null; carrier: string }
 export type OtherPolicyRow = { coveragePolicy: string; expirationDate: string }
 
 export type RenewalPremiumSummaryInput = {
   clientName: string
   renewalDateLabel: string
-  rows: PremiumRow[]
+  lobRows: Partial<Record<KnownLobCode, LobRowFill>>
+  extraRows: ExtraRow[]
   otherPolicies: OtherPolicyRow[]
+}
+
+// Client feedback (2026-09-15): show Policy # to the right of the coverage text, in a smaller
+// italic font, rather than on its own line (which would need taller rows to avoid clipping).
+// ExcelJS represents mixed-formatting-within-one-cell as `richText` runs, each with its own font —
+// captures the cell's EXISTING font first (whatever the template already has for that row, e.g.
+// bold green Calibri 11) and reuses it verbatim for the coverage run, so this doesn't hardcode a
+// font that could drift from the template's own styling on a future revision.
+function setCoverageCell(cell: ExcelJS.Cell, coverage: string, policyNos: string): void {
+  const baseFont = cell.font
+  cell.value = {
+    richText: [
+      { font: baseFont, text: coverage },
+      { font: { ...baseFont, size: Math.max(7, (baseFont.size ?? 11) - 3), bold: false, italic: true }, text: `  ${ policyNos }` }
+    ]
+  }
 }
 
 export async function buildRenewalPremiumSummaryWorkbook(input: RenewalPremiumSummaryInput): Promise<Buffer> {
   const workbook = new ExcelJS.Workbook()
-  const sheet = workbook.addWorksheet("Renewal Premium Summary", { views: [{ showGridLines: false }] })
+  await workbook.xlsx.readFile(TEMPLATE_PATH)
+  const sheet = workbook.getWorksheet(1)
+  if(!sheet) throw new Error("commercial-renewal-template.xlsx has no first worksheet")
 
-  sheet.columns = [
-    { width: 34 }, { width: 13 }, { width: 16 }, { width: 13 }, { width: 16 }, { width: 13 }, { width: 15 },
-    { width: 11 }, { width: 12 }, { width: 12 }, { width: 12 }, { width: 12 }, { width: 10 }
-  ]
+  sheet.getCell("C6").value = input.clientName
+  sheet.getCell("C7").value = input.renewalDateLabel
 
-  let r = 1
+  // Client feedback (2026-09-15, final ordering): the 8 known coverage types always print first as
+  // one block — populated ones among themselves first, then the remaining empty ones — matching the
+  // template's own original fixed 8-line table. Extra/unmatched policies (a Package with no known
+  // line at all, or a monoline policy in a line the template has no fixed row for — e.g. Surety)
+  // print after that whole block, not interleaved with it. Whatever's left of the template's fixed
+  // 11-row budget (rows 12-22) after both groups shows as blank rows — however many that happens to
+  // be, not padded/forced to any particular count. This stays entirely within the template's
+  // existing fixed layout (TOTAL PREMIUM's row/formula range, everything below it) rather than
+  // inserting rows to grow the sheet.
+  type RowEntry =
+    | { kind: "known"; code: KnownLobCode; fill: LobRowFill }
+    | { kind: "extra"; extra: ExtraRow }
+    | { kind: "blank" }
+    | { kind: "empty"; code: KnownLobCode }
 
-  sheet.mergeCells(`A${ r }:${ LAST_COL }${ r }`)
-  const titleCell = sheet.getCell(`A${ r }`)
-  titleCell.value = "COMMERCIAL RENEWAL PREMIUM OVERVIEW"
-  titleCell.alignment = { horizontal: "center" }
-  styleTitleCell(titleCell)
-  sheet.getRow(r).height = 26
-  r += 2
+  const populatedKnown: RowEntry[] = LOB_ROW_ORDER
+    .filter((code) => input.lobRows[code])
+    .map((code) => ({ kind: "known", code, fill: input.lobRows[code]! }))
+  const emptyKnown: RowEntry[] = LOB_ROW_ORDER
+    .filter((code) => !input.lobRows[code])
+    .map((code) => ({ kind: "empty", code }))
+  // Capped at NUM_SPARE_ROWS — more unmatched policies than that simply aren't placed, same overflow
+  // behavior as before, since there's no more room in the fixed template without inserting rows.
+  const populatedExtra: RowEntry[] = input.extraRows
+    .slice(0, NUM_SPARE_ROWS)
+    .map((extra) => ({ kind: "extra", extra }))
 
-  sheet.getCell(`A${ r }`).value = "Insured Name:"
-  styleFieldLabelCell(sheet.getCell(`A${ r }`))
-  sheet.getCell(`B${ r }`).value = input.clientName
-  styleFieldValueCell(sheet.getCell(`B${ r }`))
-  r += 1
+  const TOTAL_ROWS = (FIRST_SPARE_ROW + NUM_SPARE_ROWS) - FIRST_LOB_ROW
+  const mainEntries: RowEntry[] = [...populatedKnown, ...emptyKnown, ...populatedExtra]
+  const blanks: RowEntry[] = Array.from({ length: Math.max(0, TOTAL_ROWS - mainEntries.length) }, () => ({ kind: "blank" }))
+  const entries = [...mainEntries, ...blanks].slice(0, TOTAL_ROWS)
 
-  sheet.getCell(`A${ r }`).value = "Renewal Date:"
-  styleFieldLabelCell(sheet.getCell(`A${ r }`))
-  sheet.getCell(`B${ r }`).value = input.renewalDateLabel
-  styleFieldValueCell(sheet.getCell(`B${ r }`))
-  r += 2
+  entries.forEach((entry, i) => {
+    const row = FIRST_LOB_ROW + i
+    const bCell = sheet.getCell(`B${ row }`)
 
-  sheet.mergeCells(`A${ r }:G${ r }`)
-  sheet.mergeCells(`H${ r }:${ LAST_COL }${ r }`)
-  const summaryHeader = sheet.getCell(`A${ r }`)
-  summaryHeader.value = "RENEWAL PROGRAM SUMMARY"
-  styleSectionHeaderCell(summaryHeader)
-  const marketHeader = sheet.getCell(`H${ r }`)
-  marketHeader.value = "MARKET OPTIONS"
-  styleSectionHeaderCell(marketHeader)
-  r += 1
-
-  const mainHeaderRow = sheet.getRow(r)
-  MAIN_COLUMNS.forEach((label, i) => {
-    const cell = mainHeaderRow.getCell(i + 1)
-    cell.value = label
-    styleColumnHeaderCell(cell)
-  })
-  mainHeaderRow.height = 30
-  r += 1
-
-  const firstDataRow = r
-  for(const row of input.rows) {
-    const rowIndex = r - firstDataRow
-    const fill = rowIndex % 2 === 0 ? COLORS.greenTint : undefined
-
-    styleBodyCell(sheet.getCell(`A${ r }`), { fill })
-    sheet.getCell(`A${ r }`).value = row.coverage
-
-    const currentCell = sheet.getCell(`B${ r }`)
-    styleBodyCell(currentCell, { fill })
-    if(row.current !== null) {
-      currentCell.value = row.current
-      currentCell.numFmt = "$#,##0"
+    if(entry.kind === "known") {
+      // Trending only applies to a known coverage line (it's an inherent property of the line
+      // itself, e.g. "+1% to +9%" for General Liability) — shown whether or not it's populated, so
+      // the reader still sees the benchmark range for a line this account doesn't currently carry.
+      sheet.getCell(`H${ row }`).value = LOB_TRENDING[entry.code]
+      setCoverageCell(bCell, entry.fill.coverage, entry.fill.policyNos)
+      if(entry.fill.current !== null) sheet.getCell(`C${ row }`).value = entry.fill.current
+      sheet.getCell(`D${ row }`).value = entry.fill.carrier
+    } else if(entry.kind === "extra") {
+      // No Trending — an extra/unmatched policy isn't one of the 8 tracked lines, so no benchmark
+      // range applies. Explicitly cleared, not just left unwritten: this row may now land on a
+      // template row position (12-19) that already has one of the 8 known lines' own Trending value
+      // baked in from the template's default layout, which would otherwise leak through untouched.
+      sheet.getCell(`H${ row }`).value = null
+      setCoverageCell(bCell, entry.extra.coverage, entry.extra.policyNos)
+      if(entry.extra.current !== null) sheet.getCell(`C${ row }`).value = entry.extra.current
+      sheet.getCell(`D${ row }`).value = entry.extra.carrier
+    } else if(entry.kind === "blank") {
+      // Explicitly cleared (not just left unwritten) for the same reason as the "extra" case above —
+      // this row may land on a template position that already has default label/Trending content.
+      bCell.value = null
+      sheet.getCell(`C${ row }`).value = null
+      sheet.getCell(`D${ row }`).value = null
+      sheet.getCell(`H${ row }`).value = null
+    } else {
+      sheet.getCell(`H${ row }`).value = LOB_TRENDING[entry.code]
+      bCell.value = LOB_LABEL[entry.code]
     }
+  })
 
-    styleBodyCell(sheet.getCell(`C${ r }`), { fill })
-    sheet.getCell(`C${ r }`).value = row.carrier
+  const otherPolicies = input.otherPolicies.slice(0, OTHER_POLICIES_MAX_ROWS)
+  otherPolicies.forEach((other, i) => {
+    const row = OTHER_POLICIES_FIRST_ROW + i
+    sheet.getCell(`A${ row }`).value = other.coveragePolicy
+    sheet.getCell(`D${ row }`).value = other.expirationDate
+  })
 
-    // Renewal / Carrier / Percent Change stay blank — not knowable until the renewal is actually
-    // priced/bound, same as Patrick's own template.
-    for(const col of ["D", "E", "F"]) styleBodyCell(sheet.getCell(`${ col }${ r }`), { fill })
-
-    styleBodyCell(sheet.getCell(`G${ r }`), { fill })
-    sheet.getCell(`G${ r }`).value = row.trendingRange
-
-    // Market-option carrier columns (H-M) stay blank — filled in by hand as quotes come back.
-    for(const col of ["H", "I", "J", "K", "L", "M"]) styleBodyCell(sheet.getCell(`${ col }${ r }`), { fill })
-
-    r += 1
-  }
-  const lastDataRow = r - 1
-
-  const totalRow = sheet.getRow(r)
-  const totalLabelCell = totalRow.getCell(1)
-  totalLabelCell.value = "TOTAL PREMIUM"
-  styleBodyCell(totalLabelCell, { bold: true, fill: COLORS.grayBg })
-
-  const totalCurrentCell = totalRow.getCell(2)
-  styleBodyCell(totalCurrentCell, { bold: true, fill: COLORS.grayBg })
-  if(lastDataRow >= firstDataRow) {
-    totalCurrentCell.value = { formula: `SUM(B${ firstDataRow }:B${ lastDataRow })` }
-    totalCurrentCell.numFmt = "$#,##0"
-  } else {
-    totalCurrentCell.value = 0
-    totalCurrentCell.numFmt = "$#,##0"
-  }
-
-  for(const col of ["C", "D", "E", "F", "G", "H", "I", "J", "K", "L", "M"]) {
-    styleBodyCell(totalRow.getCell(col), { bold: true, fill: COLORS.grayBg })
-  }
-  r += 2
-
-  sheet.mergeCells(`A${ r }:C${ r }`)
-  sheet.mergeCells(`D${ r }:${ LAST_COL }${ r }`)
-  const otherHeader = sheet.getCell(`A${ r }`)
-  otherHeader.value = "OTHER EFFECTIVE DATES & QUOTE NOTES"
-  styleSectionHeaderCell(otherHeader)
-  const notesHeader = sheet.getCell(`D${ r }`)
-  notesHeader.value = "ADDITIONAL QUOTE NOTES"
-  styleSectionHeaderCell(notesHeader)
-  r += 1
-
-  sheet.mergeCells(`A${ r }:B${ r }`)
-  const otherColHeaders: [string, string][] = [["A", "Coverage / Policy"], ["C", "Expiration Date"], ["D", "Quote Notes"]]
-  for(const [col, label] of otherColHeaders) {
-    const cell = sheet.getCell(`${ col }${ r }`)
-    cell.value = label
-    styleColumnHeaderCell(cell)
-  }
-  for(const col of ["E", "F", "G", "H", "I", "J", "K", "L", "M"]) styleColumnHeaderCell(sheet.getCell(`${ col }${ r }`))
-  r += 1
-
-  for(const other of input.otherPolicies) {
-    sheet.mergeCells(`A${ r }:B${ r }`)
-    styleBodyCell(sheet.getCell(`A${ r }`))
-    sheet.getCell(`A${ r }`).value = other.coveragePolicy
-
-    styleBodyCell(sheet.getCell(`C${ r }`))
-    sheet.getCell(`C${ r }`).value = other.expirationDate
-
-    sheet.mergeCells(`D${ r }:${ LAST_COL }${ r }`)
-    styleBodyCell(sheet.getCell(`D${ r }`))
-
-    r += 1
-  }
-
-  if(input.otherPolicies.length === 0) {
-    sheet.mergeCells(`A${ r }:${ LAST_COL }${ r }`)
-    const emptyCell = sheet.getCell(`A${ r }`)
-    emptyCell.value = "No other current policies on this account."
-    styleBodyCell(emptyCell)
-    emptyCell.font = { name: "Arial", size: 10, italic: true, color: { argb: COLORS.gray } }
+  // Client feedback (2026-09-15): "unwanted empty rows" — the template pre-styles all
+  // OTHER_POLICIES_MAX_ROWS rows with borders and light shading regardless of whether that many
+  // "other" policies actually exist, so an account with fewer than the max (Defatta: 4 of 6) shows
+  // trailing rows that look like intended-but-blank entries. Clears border/fill on every column of
+  // any row beyond the real data (not just A/D, which is all that's ever written) so it renders as a
+  // plain blank row instead. Only touches rows that are ENTIRELY unused — doesn't attempt to split a
+  // "quote notes" box that spans two policy rows (F27:H28 etc.) when an odd otherPolicies count
+  // leaves just one half of that pair unused, since only the box's own top-left cell actually
+  // carries its visible border/fill.
+  for(let i = otherPolicies.length; i < OTHER_POLICIES_MAX_ROWS; i++) {
+    const row = OTHER_POLICIES_FIRST_ROW + i
+    for(const col of ["A", "B", "C", "D", "E", "F", "G", "H"]) {
+      const cell = sheet.getCell(`${ col }${ row }`)
+      // Assigning the WHOLE style object (not mutating .border/.fill as separate sub-property
+      // writes) matters here: this template has several rows sharing one underlying style record
+      // (confirmed via the raw XML — rows 28-32's column A all point at the same style index), and
+      // ExcelJS's per-property setters mutate that shared record in place rather than cloning it per
+      // cell — a `cell.border = {}` on an unused row silently blanked the SAME style on the
+      // populated rows sharing it too. Spreading `cell.style` into a fresh object first forces a
+      // distinct style for this one cell.
+      cell.style = { ...cell.style, border: {}, fill: { type: "pattern", pattern: "none" } }
+    }
   }
 
   const rawBuffer = await workbook.xlsx.writeBuffer()
