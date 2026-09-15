@@ -11,5 +11,5 @@ mkdir -p scripts/logs
 
 {
   echo "===== $(date -Iseconds) ====="
-  npx tsx scripts/morningDownload.ts && npx tsx scripts/sendReportEmail.ts andrew@tyneside.io,patrick@boxwoodins.com
+  npx tsx scripts/morningDownload.ts && npx tsx scripts/sendReportEmail.ts
 } >> scripts/logs/morning-download.log 2>&1

@@ -37,6 +37,7 @@ export type MailAttachment = { filename: string; content: Buffer; contentType: s
 
 export async function sendMailWithAttachment(opts: {
   to: string | string[]
+  cc?: string | string[]
   subject: string
   text?: string
   attachment: MailAttachment
@@ -50,6 +51,7 @@ export async function sendMailWithAttachment(opts: {
   await getTransporter().sendMail({
     from,
     to: opts.to,
+    cc: opts.cc,
     subject: opts.subject,
     text: opts.text,
     attachments: [opts.attachment]
