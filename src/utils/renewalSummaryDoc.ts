@@ -96,18 +96,36 @@ function headerFloorWidth(header: string): number {
   return longestWord * PER_CHAR
 }
 
+// Confirmed against a real generated document (Defatta Custom Homes LLC, 2026-09-15): whenever a
+// column's width is driven by its OWN header text — no row content in that column is as long as the
+// header itself, e.g. a single-word header like "Premium" or "Description" on an otherwise-short/
+// blank column — the natural-width formula below lands EXACTLY on headerLen * PER_CHAR with zero
+// DXA of slack above the word-break floor. That's mathematically enough room per PER_CHAR's own
+// (approximate) calibration, but leaves no margin for PER_CHAR being an estimate at all, and both of
+// those exact-fit headers wrapped mid-word in the rendered .docx despite headerFloorWidth's
+// guarantee otherwise holding — the floor prevents a column being shrunk narrower than its longest
+// word, but never GRANTS extra room when nothing (no wide row content, no flex-surplus distribution)
+// pushes the column wider than that bare minimum in the first place. HEADER_SAFETY_DXA adds that
+// margin directly to the header-derived contribution to natural width — never to floors[i] itself,
+// which still stays the strict "never shrink below this" guarantee the deficit-shrink pass relies on.
+const HEADER_SAFETY_DXA = 150 // ~1.2 extra characters of headroom at PER_CHAR's own rate
+
 function autofitWidths(headers: string[], rows: string[][]): number[] {
   const headerFloors = headers.map(headerFloorWidth)
 
   const natural = headers.map((h, i) => {
-    let maxLen = String(h).length
+    const headerLen = String(h).length
+    let bodyMaxLen = 0
 
     for(const r of rows) {
       const len = String(r[i]).length
-      if(len > maxLen) maxLen = len
+      if(len > bodyMaxLen) bodyMaxLen = len
     }
 
-    return Math.min(MAX_COL, Math.max(MIN_COL, maxLen * PER_CHAR))
+    const headerDxa = headerLen * PER_CHAR + HEADER_SAFETY_DXA
+    const bodyDxa = bodyMaxLen * PER_CHAR
+
+    return Math.min(MAX_COL, Math.max(MIN_COL, Math.max(headerDxa, bodyDxa)))
   })
 
   // Per-column floor: never narrower than MIN_COL, and never narrower than the column's own
@@ -289,7 +307,12 @@ export type LocationRow = { locNo: string; address: string; city: string; state:
 // meeting, matching the client's own reference layout; the tool has nothing to put there.
 export type PropertyRow = { address: string; buildingLimit: string; bppLimit: string; causesOfLossForm: string; deductible: string; description: string }
 export type GlExposureRow = { location: string; classCode: string; classification: string; basis: string; exposure: string }
-export type EquipmentBlanket = { category: string; subcategory: string; totalItems: string; amountOfInsurance: string; coinsurance: string }
+// Field set/order matches the client's own reference layout (client feedback, 2026-09-15): Covered
+// Location and Coverage/Deductible come from a separate join (afw_146locations/afw_clocation and
+// afw_cprem respectively — see EQUIPMENT_BLANKET_QUERY's comment), not columns on
+// afw_146equipsummary itself. scheduledUnscheduled is already a resolved label (afw_prcode's ISU
+// AttrCode), not a raw code.
+export type EquipmentBlanket = { coveredLocation: string; category: string; scheduledUnscheduled: string; coverage: string; amountOfInsurance: string; totalItems: string; deductible: string }
 export type EquipmentItemRow = { itemNo: string; manufacturer: string; model: string; description: string; serialNo: string; value: string }
 export type VehicleRow = { vehNo: string; year: string; make: string; model: string; vin: string }
 export type DriverRow = { driverNo: string; name: string; licenseState: string }
@@ -379,11 +402,13 @@ function equipmentSection(blankets: EquipmentBlanket[], items: EquipmentItemRow[
 
   for(const blanket of blankets) {
     const pairs: [string, string][] = [
+      ["Covered Location", blanket.coveredLocation],
       ["Category", blanket.category],
-      ["Subcategory", blanket.subcategory],
+      ["Scheduled / Unscheduled", blanket.scheduledUnscheduled],
+      ["Coverage", blanket.coverage],
+      ["Blanket Amount of Insurance", blanket.amountOfInsurance],
       ["Total Scheduled Items", blanket.totalItems],
-      ["Amount of Insurance", blanket.amountOfInsurance],
-      ["Coinsurance", blanket.coinsurance]
+      ["Deductible", blanket.deductible]
     ]
     blocks.push(h2("Blanket Summary"), fieldValueTable(pairs))
     height += H2_HEIGHT + estimateTableHeight(["Field", "Value"], pairs.map(([f, v]) => [f, v]))
@@ -446,29 +471,33 @@ function wcSection(rows: WcExposureRow[]): DocSection | null {
 
 const LOGO_PATH = path.join(import.meta.dirname, "..", "..", "assets", "boxwood-logo.png")
 
-// When combining several policies, the single current-period/renewal-date lines below aren't
-// meaningful (each policy has its own dates) — a summary table of all included policies replaces
-// them instead, and doubles as the reader's key to the "Policy #" column added throughout the rest
-// of the document.
+// The "Current Policy Period"/"Renewal Effective" subheader always shows (client feedback,
+// 2026-09-15 — matches the employee's own reference layout), even when combining several policies
+// into one document: it reflects the primary (first-matched) policy's dates specifically, same as
+// currentPeriod/renewalDate's source in commercialRenewalSummary.ts. When combining, the policy
+// summary table is added below it — one row per combined policy, so any OTHER policy's differing
+// dates are still visible there, and it remains the reader's key to the "Policy #" column added
+// throughout the rest of the document.
 function coverPageChildren(clientName: string, currentPeriod: string, renewalDate: string, policySummary?: PolicySummaryRow[]): (Paragraph | Table)[] {
   const logoData = readFileSync(LOGO_PATH)
 
-  const dateBlock: (Paragraph | Table)[] = policySummary && policySummary.length > 0
-    ? [buildTable(
-        ["Policy #", "Type", "Premium", "Renewal Date"],
-        policySummary.map((p) => [p.polNo, p.type, p.premium, p.renewalDate])
-      )]
-    : [
-        new Paragraph({
-          alignment: AlignmentType.CENTER,
-          children: [new TextRun({ text: `Current Policy Period: ${ currentPeriod }`, color: NEARBLACK, size: 28, font: "Arial" })]
-        }),
-        new Paragraph({
-          alignment: AlignmentType.CENTER,
-          spacing: { after: 360 },
-          children: [new TextRun({ text: `Renewal Effective: ${ renewalDate }`, color: NEARBLACK, size: 28, font: "Arial" })]
-        })
-      ]
+  const dateBlock: (Paragraph | Table)[] = [
+    new Paragraph({
+      alignment: AlignmentType.CENTER,
+      children: [new TextRun({ text: `Current Policy Period: ${ currentPeriod }`, color: NEARBLACK, size: 28, font: "Arial" })]
+    }),
+    new Paragraph({
+      alignment: AlignmentType.CENTER,
+      spacing: { after: 360 },
+      children: [new TextRun({ text: `Renewal Effective: ${ renewalDate }`, color: NEARBLACK, size: 28, font: "Arial" })]
+    }),
+    ...(policySummary && policySummary.length > 0
+      ? [buildTable(
+          ["Policy #", "Type", "Premium", "Renewal Date"],
+          policySummary.map((p) => [p.polNo, p.type, p.premium, p.renewalDate])
+        )]
+      : [])
+  ]
 
   return [
     new Paragraph({

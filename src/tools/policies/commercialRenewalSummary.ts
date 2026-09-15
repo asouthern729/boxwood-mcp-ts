@@ -197,9 +197,22 @@ const PROPERTY_QUERY = `
   ORDER BY pi.piid, (cprem_320.ilimit1 IS NULL), cprem_320.coverage
 `
 
+// afw_126shazard.classification is per-row free text AMS360 itself never standardizes — confirmed
+// against real data it's inconsistently abbreviated (or, on the client's own reference document,
+// simply not what AMS360's proposal-builder engine displays for the same class code) with no
+// canonical description reachable anywhere in AMS360's own schema/API (joint investigation with the
+// postgres-mcp and ams360-etl peer sessions, 2026-09-15: not a sync gap, this data was never part of
+// AMS360's AFW_* relational schema at all — AFW_126SHazard.Classification's own field spec in the
+// Design Guide documents it as sourced from "the ISO classification table or other standard industry
+// table," i.e. licensed ISO/AAIS rating-engine content, structurally outside what the Data Lake API
+// exposes). gl_classification_code is a standalone reference table (not afw_-prefixed, not synced
+// AMS360 data) built from https://www.insurancexdate.com/gl.php (1,154 codes, pulled 2026-09-15) to
+// fill this gap — LEFT JOINed here and preferred over the raw free text below when a match exists,
+// falling back to it otherwise (a handful of class codes on any given policy may not appear in that
+// external list). Client-reported 2026-09-15, Defatta Custom Homes LLC.
 const GL_EXPOSURE_QUERY = `
   SELECT t.classcode, t.classification, t.prembasis, t.exposure,
-    loc.addr1, loc.city, loc.state, loc.zip
+    loc.addr1, loc.city, loc.state, loc.zip, gcc.description AS gl_description
   FROM (
     SELECT t.clocid, t.classcode, t.classification, t.prembasis, t.exposure, t.status,
       ROW_NUMBER() OVER (PARTITION BY t.polid, t.lobid, t.shazid ORDER BY t.effdate DESC) AS rn
@@ -212,6 +225,7 @@ const GL_EXPOSURE_QUERY = `
     WHERE c.polid = $1 AND c.clocid = t.clocid AND c.status != 'D'
     ORDER BY c.effdate DESC LIMIT 1
   ) loc ON true
+  LEFT JOIN gl_classification_code gcc ON gcc.classcode = t.classcode
   WHERE t.rn = 1 AND t.status != 'D'
   ORDER BY t.classcode
 `
@@ -219,14 +233,55 @@ const GL_EXPOSURE_QUERY = `
 // 146equipsummary/146schedequip both key on a composite (polid, lobid, imefid, imesumid[, imseid])
 // rather than a single own id — the PARTITION BY below must cover every part of that key or rows
 // under-dedupe (confirmed against the live schema while planning this tool).
+//
+// Client-reported 2026-09-15 (Defatta Custom Homes LLC): the Blanket Summary section was missing
+// Covered Location, Scheduled/Unscheduled, Coverage, and Deductible — all present on the client's
+// own reference layout — because the original query only selected afw_146equipsummary's own plain
+// columns. Three more joins fill these in, confirmed against real data:
+//   - schedulecode ('M'/'S'/'U') resolves via afw_prcode's ISU AttrCode ("Scheduled Items, Not
+//     Attached"/"Scheduled Items, Attached"/"Unscheduled") — same resolution pattern as prembasis's
+//     PM AttrCode elsewhere in this file.
+//   - imlocid links to afw_146locations (its OWN polid/lobid/imlocid/effdate-keyed row, same dedup
+//     convention as everything else in this file), which usually has null addr1/city/state/zip of
+//     its own but carries a clocid pointing back to afw_clocation for the real address — confirmed
+//     on Defatta's own blanket record (imlocid resolves to clocid 0437eb33..., locno 00001, "110
+//     Reynolds Rd").
+//   - cpremid links directly to afw_cprem (the same coverage-line premium/rating table
+//     PROPERTY_QUERY already uses) for Coverage (afw_cprem.coverage, e.g. "Fraud and Deceit") and
+//     Deductible (afw_cprem.deduct) — deduped the same way PROPERTY_QUERY's cprem_320 CTE does,
+//     since afw_cprem is a change history, not a snapshot.
 const EQUIPMENT_BLANKET_QUERY = `
-  SELECT t.category, t.subcategory, t.totalitems, t.amtofins, t.coinspct
+  SELECT t.category, t.totalitems, t.amtofins, schedule.description AS schedule_description,
+    loc.addr1, loc.city, loc.state, loc.zip, prem.coverage, prem.deduct
   FROM (
-    SELECT t.category, t.subcategory, t.totalitems, t.amtofins, t.coinspct, t.status,
+    SELECT t.category, t.totalitems, t.amtofins, t.schedulecode, t.imlocid, t.cpremid, t.status,
       ROW_NUMBER() OVER (PARTITION BY t.polid, t.lobid, t.imefid, t.imesumid ORDER BY t.effdate DESC) AS rn
     FROM afw_146equipsummary t
     WHERE t.polid = $1
   ) t
+  LEFT JOIN afw_prcode schedule ON rtrim(schedule.attrcode) = 'ISU' AND rtrim(schedule.code) = t.schedulecode
+  LEFT JOIN LATERAL (
+    SELECT COALESCE(il.addr1, cl.addr1) AS addr1, COALESCE(il.city, cl.city) AS city,
+      COALESCE(il.state, cl.state) AS state, COALESCE(il.zip, cl.zip) AS zip
+    FROM (
+      SELECT il.*, ROW_NUMBER() OVER (PARTITION BY il.polid, il.lobid, il.imlocid ORDER BY il.effdate DESC) AS rn
+      FROM afw_146locations il
+      WHERE il.polid = $1 AND il.imlocid = t.imlocid
+    ) il
+    LEFT JOIN afw_clocation cl ON cl.polid = $1 AND cl.clocid = il.clocid AND cl.status != 'D'
+    WHERE il.rn = 1 AND il.status != 'D'
+    LIMIT 1
+  ) loc ON true
+  LEFT JOIN LATERAL (
+    SELECT cp.coverage, cp.deduct
+    FROM (
+      SELECT cp.*, ROW_NUMBER() OVER (PARTITION BY cp.polid, cp.lobid, cp.cpremid ORDER BY cp.effdate DESC) AS rn
+      FROM afw_cprem cp
+      WHERE cp.polid = $1 AND cp.cpremid = t.cpremid
+    ) cp
+    WHERE cp.rn = 1 AND cp.status != 'D'
+    LIMIT 1
+  ) prem ON true
   WHERE t.rn = 1 AND t.status != 'D'
   ORDER BY (t.totalitems IS NOT NULL) DESC, (t.amtofins IS NOT NULL) DESC
   LIMIT 1
@@ -304,6 +359,15 @@ function formatZip(zip: string | null): string {
   if(!zip) return ""
   const digits = zip.trim()
   return /^\d{9}$/.test(digits) ? `${ digits.slice(0, 5) }-${ digits.slice(5) }` : digits
+}
+
+// afw_clocation.locno comes back zero-padded (e.g. "00001") — stripped to its plain numeric form
+// ("1") for display, per client feedback (2026-09-15). Only strips LEADING zeros immediately
+// followed by another digit, so a bare "0" (if that ever occurs) is left alone rather than emptied,
+// and a non-numeric locno (never seen in practice, but not guaranteed by the column's type) passes
+// through unchanged since it won't start with "0<digit>" anyway.
+function formatLocNo(locno: string): string {
+  return locno.trim().replace(/^0+(?=\d)/, "")
 }
 
 function formatAddress(addr1: string | null, city: string | null, state: string | null, zip: string | null): string {
@@ -491,8 +555,8 @@ async function fetchPolicyData(policy: ResolvedPolicy): Promise<PolicyData> {
     runReadOnlyQuery(NAMED_INSUREDS_QUERY, [policy.polid]) as Promise<{ namedins: string }[]>,
     runReadOnlyQuery(LOCATIONS_QUERY, [policy.polid]) as Promise<{ locno: string; addr1: string | null; addr2: string | null; city: string | null; state: string | null; zip: string | null }[]>,
     runReadOnlyQuery(PROPERTY_QUERY, [policy.polid]) as Promise<PropertyQueryRow[]>,
-    runReadOnlyQuery(GL_EXPOSURE_QUERY, [policy.polid]) as Promise<{ classcode: string | null; classification: string | null; prembasis: string | null; exposure: string | null; addr1: string | null; city: string | null; state: string | null; zip: string | null }[]>,
-    runReadOnlyQuery(EQUIPMENT_BLANKET_QUERY, [policy.polid]) as Promise<{ category: string | null; subcategory: string | null; totalitems: string | null; amtofins: string | null; coinspct: string | null }[]>,
+    runReadOnlyQuery(GL_EXPOSURE_QUERY, [policy.polid]) as Promise<{ classcode: string | null; classification: string | null; prembasis: string | null; exposure: string | null; addr1: string | null; city: string | null; state: string | null; zip: string | null; gl_description: string | null }[]>,
+    runReadOnlyQuery(EQUIPMENT_BLANKET_QUERY, [policy.polid]) as Promise<{ category: string | null; totalitems: string | null; amtofins: string | null; schedule_description: string | null; addr1: string | null; city: string | null; state: string | null; zip: string | null; coverage: string | null; deduct: number | null }[]>,
     runReadOnlyQuery(EQUIPMENT_ITEMS_QUERY, [policy.polid]) as Promise<{ equipno: string | null; manufacturer: string | null; model: string | null; equipdesc: string | null; serialno: string | null; iinsamt: number | null }[]>,
     runReadOnlyQuery(VEHICLES_QUERY, [policy.polid]) as Promise<{ vehno: string | null; vehyear: string | null; make: string | null; model: string | null; vin: string | null }[]>,
     runReadOnlyQuery(DRIVERS_QUERY, [policy.polid]) as Promise<{ driverno: string | null; name: string | null; licensestate: string | null }[]>,
@@ -502,7 +566,7 @@ async function fetchPolicyData(policy: ResolvedPolicy): Promise<PolicyData> {
   return {
     namedInsuredNames: namedInsuredRows.map((r) => r.namedins.trim()),
     locations: locationRows.map((l) => ({
-      locNo: l.locno,
+      locNo: formatLocNo(l.locno),
       address: [l.addr1, l.addr2].filter(Boolean).join(" "),
       city: l.city ?? "",
       state: l.state ?? "",
@@ -512,17 +576,19 @@ async function fetchPolicyData(policy: ResolvedPolicy): Promise<PolicyData> {
     glExposure: glRows.map((g) => ({
       location: formatAddress(g.addr1, g.city, g.state, g.zip),
       classCode: clean(g.classcode),
-      classification: clean(g.classification),
+      classification: clean(g.gl_description) || clean(g.classification),
       basis: premBasisLabel(g.prembasis),
       exposure: numericMoney(g.exposure)
     })),
     equipmentBlanket: equipmentBlanketRows.length > 0
       ? {
+          coveredLocation: formatAddress(equipmentBlanketRows[0].addr1, equipmentBlanketRows[0].city, equipmentBlanketRows[0].state, equipmentBlanketRows[0].zip),
           category: clean(equipmentBlanketRows[0].category),
-          subcategory: clean(equipmentBlanketRows[0].subcategory),
-          totalItems: clean(equipmentBlanketRows[0].totalitems),
+          scheduledUnscheduled: clean(equipmentBlanketRows[0].schedule_description),
+          coverage: clean(equipmentBlanketRows[0].coverage),
           amountOfInsurance: numericMoney(equipmentBlanketRows[0].amtofins),
-          coinsurance: clean(equipmentBlanketRows[0].coinspct)
+          totalItems: clean(equipmentBlanketRows[0].totalitems) || "0",
+          deductible: equipmentBlanketRows[0].deduct !== null ? money(equipmentBlanketRows[0].deduct) : ""
         }
       : null,
     equipmentItems: inferMissingEquipmentDetails(equipmentItemRows.map((e) => ({
@@ -626,17 +692,33 @@ export function registerCommercialRenewalSummaryTool(server: McpServer) {
         // breaks down: every monoline policy records at least its own copy of the customer's primary
         // address (confirmed on Trace Construction: the Property policy's full 7-location schedule
         // PLUS a redundant standalone "1804 Williamson Ct" row from each of the other 3 combined
-        // policies — WC, Auto, and a 4th line). Deduped here by normalized address across all
-        // combined policies so the same physical location doesn't appear once per policy that
-        // happens to reference it.
+        // policies — WC, Auto, and a 4th line).
+        //
+        // Deduped by locNo, NOT by normalized address text (client-reported 2026-09-15, Defatta
+        // Custom Homes LLC): confirmed against real data that AMS360 keeps locno consistent for the
+        // same physical location across a customer's separate monoline policies (all three of
+        // Defatta's combined policies carry locno='00001' for their shared primary address), but each
+        // monoline policy's OWN copy of that location's address text can differ slightly — Defatta's
+        // Property policy has "110-112 Reynolds Rd" (zip 37064) while its other two policies both
+        // have "110 Reynolds Rd" (zip 37064-2926). Deduping on address text left two "Loc # 1" rows
+        // with different addresses in the finished document; locNo is the stable, shared identifier
+        // that actually says "this is the same location." When two policies' copies of the same
+        // locNo disagree on address text, the longer (more complete) one wins, since a fuller street
+        // address is more useful to the reader than a shorter/older copy.
         const locationsSeen = new Map<string, LocationRow>()
         for(const data of perPolicyData) {
           for(const loc of data.locations) {
-            const key = [loc.address, loc.city, loc.state, loc.zip].join("|").toLowerCase().trim()
-            if(!locationsSeen.has(key)) locationsSeen.set(key, loc)
+            const key = loc.locNo.trim().toLowerCase()
+            const existing = locationsSeen.get(key)
+            if(!existing || loc.address.length > existing.address.length) locationsSeen.set(key, loc)
           }
         }
-        const locations = [...locationsSeen.values()]
+        const locations = [...locationsSeen.values()].sort((a, b) => {
+          const na = Number(a.locNo)
+          const nb = Number(b.locNo)
+          if(Number.isFinite(na) && Number.isFinite(nb) && na !== nb) return na - nb
+          return a.locNo.localeCompare(b.locNo)
+        })
 
         const property = matches.flatMap((_, i) => perPolicyData[i].property)
         const glExposure = matches.flatMap((_, i) => perPolicyData[i].glExposure)
