@@ -8,15 +8,27 @@
 // work; this script's job ends at "file on disk."
 //
 // Usage: npx tsx scripts/morningDownload.ts [since] [until]
-//   since/until are optional and passed through verbatim to download_report's own since/until
-//   format (relative shorthand like "24h", or an agency-local timestamp) — omit both to use
-//   download_report's own default window (5pm agency-local yesterday through now).
+//   since/until are optional CLI overrides, passed through verbatim to download_report's own
+//   since/until format (relative shorthand like "24h", or an agency-local timestamp) — this is for
+//   manual/backtesting runs against a specific past window, and deliberately bypasses the
+//   watermark logic below entirely (an explicit override shouldn't perturb the automation's own
+//   state).
+//
+//   With no CLI args (the normal cron path — see dailyMorningDownload.sh), this script instead
+//   reads a persisted watermark (src/utils/downloadReportWatermark.ts) and drives download_report's
+//   `synced_since` bound from it — see the 2026-09-16/17 vendor-download-gap incident for why a
+//   plain entereddate-windowed default isn't enough: a row entered in AMS360 just before one
+//   morning's sync, but not actually synced into Postgres until the *next* day, otherwise falls
+//   into the gap between two entereddate windows and is never reported at all. The watermark only
+//   advances after a run actually succeeds end to end (report generated, file written), so a
+//   failed run just makes the next run's lookback wider rather than losing that window's data.
 
 import "dotenv/config"
 import { mkdirSync, writeFileSync } from "node:fs"
 import path from "node:path"
 import { query } from "@anthropic-ai/claude-agent-sdk"
 import { createServer } from "../src/mcpServer.js"
+import { readDownloadReportWatermark, writeDownloadReportWatermark } from "../src/utils/downloadReportWatermark.js"
 import { getDownload } from "../src/utils/downloadStore.js"
 
 const OUTPUT_DIR = path.join(import.meta.dirname, "output", "download-report")
@@ -34,11 +46,38 @@ if(!ANTHROPIC_API_KEY) {
   throw new Error("ANTHROPIC_API_KEY must be set (see .env.example) — generate one in the Anthropic Console rather than relying on a logged-in claude session")
 }
 
-const [since, until] = process.argv.slice(2)
+const [argvSince, argvUntil] = process.argv.slice(2)
+const isExplicitOverride = Boolean(argvSince || argvUntil)
 
-const windowInstruction = since || until
-  ? `Use since=${ JSON.stringify(since ?? "(omit)") } and until=${ JSON.stringify(until ?? "(omit)") } when calling download_report.`
-  : "Call download_report with no since/until args, so it uses its own default overnight window."
+// Captured once, up front — used both to size the watermark-driven lookback below and, on success,
+// as the new watermark itself (see writeDownloadReportWatermark call near the bottom).
+const runStartedAt = new Date()
+
+let since = argvSince
+let until = argvUntil
+let syncedSince: string | undefined
+
+if(!isExplicitOverride) {
+  const watermark = readDownloadReportWatermark()
+
+  if(watermark) {
+    // entereddate-side lookback is just a generous sanity/performance bound here, not the
+    // correctness mechanism — synced_since (below) is what actually guarantees nothing gets
+    // skipped. +1 day of slack on top of the watermark's own age covers a transaction entered in
+    // AMS360 shortly before the watermark but not synced until after it (exactly what happened
+    // 2026-09-17).
+    const lookbackDays = Math.max(1, Math.ceil((runStartedAt.getTime() - watermark.getTime()) / 86_400_000) + 1)
+    since = `${ lookbackDays }d`
+    syncedSince = watermark.toISOString()
+  }
+  // No watermark yet (first run ever) — leave since/until/syncedSince all unset, so
+  // download_report falls back to its own default (today's fixed entereddate window). The
+  // watermark starts accumulating from this run's success onward.
+}
+
+const windowInstruction = since || until || syncedSince
+  ? `Use since=${ JSON.stringify(since ?? "(omit)") }, until=${ JSON.stringify(until ?? "(omit)") }, and synced_since=${ JSON.stringify(syncedSince ?? "(omit)") } when calling download_report (omit any argument marked "(omit)" entirely rather than passing that literal string).`
+  : "Call download_report with no since/until/synced_since args, so it uses its own default overnight window."
 
 const PROMPT = `Run Boxwood's morning download review end to end.
 
@@ -199,6 +238,16 @@ async function main() {
   const outPath = path.join(OUTPUT_DIR, `${ dateSlug }_download_report.xlsx`)
   writeFileSync(outPath, entry.buffer)
   console.log(`[morningDownload] wrote ${ outPath }`)
+
+  // Only advance the watermark for the normal unattended cron path, and only once the report has
+  // actually been built successfully end to end — an explicit CLI override run (backtesting a past
+  // window) must never perturb the automation's own state, and a failed run should leave the
+  // watermark alone so the next run's lookback naturally widens to cover what was missed instead
+  // of silently skipping it.
+  if(succeeded && !isExplicitOverride) {
+    writeDownloadReportWatermark(runStartedAt)
+    console.log(`[morningDownload] advanced watermark to ${ runStartedAt.toISOString() }`)
+  }
 
   process.exit(succeeded ? 0 : 1)
 }

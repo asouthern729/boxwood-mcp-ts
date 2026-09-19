@@ -40,3 +40,4 @@ tsconfig.tsbuildinfo
 
 *.zip
 scripts/output/
+scripts/state/
