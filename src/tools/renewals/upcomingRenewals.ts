@@ -19,9 +19,10 @@ const BASE_CONDITIONS = [
   "p.renewalrptflag = 'A'",
   "p.polsubtype != 'S'",
   "p.status != 'D'",
-  "p.polexpdate BETWEEN now() AND now() + make_interval(days => $1::int)",
   "NOT EXISTS (SELECT 1 FROM afw_basicpolinfo bp2 WHERE bp2.priorpolid = p.polid)"
 ]
+
+const DATE_ONLY_PATTERN = /^\d{4}-\d{2}-\d{2}$/
 
 const CORE_QUERY = `
   SELECT
@@ -41,6 +42,13 @@ const CORE_QUERY = `
   LEFT JOIN afw_employee csr ON p.csrcode = csr.empcode
 `
 
+// The book's two dominant typeofbus segments (see policies/renewals SKILL.md) — a friendlier alias
+// so a caller doesn't need to already know these raw AMS360 codes.
+const BOOK_TYPE_CODES = {
+  commercial: 2,
+  personal: 1
+} as const
+
 const BREAKDOWN_DIMENSIONS = {
   producer: {
     select: "p.execcode AS key, COALESCE(NULLIF(TRIM(CONCAT_WS(' ', exec.firstname, exec.lastname)), ''), p.execcode) AS label",
@@ -58,22 +66,37 @@ export function registerUpcomingRenewalsTool(server: McpServer) {
   server.registerTool(
     "upcoming_renewals",
     {
-      description: "Answer \"what's renewing soon?\" — active policy terms (afw_basicpolinfo) whose polexpdate falls within a day window from now. Excludes marketing/submission shells, non-active terms, and terms that already have a successor via priorpolid (already renewed). Resolves carrier/producer/CSR/customer names inline and flags whether a renewal transaction (RWL/RWQ) already exists. Optionally scope by producer, CSR, carrier, or type of business, and group by producer or carrier for a count plus premium sum/average within the window (e.g. \"premium renewing next quarter, by carrier\"). IMPORTANT: the resolved name fields sit alongside the raw csrcode/execcode (and, in a breakdown, alongside a raw `code`) — those raw codes (e.g. \"!!C\") are opaque AMS360 identifiers with no meaning to an end user and should never be surfaced in an answer; always report the resolved name instead. The same goes for `polid`/`custid` (internal UUIDs) — use `polno` or the resolved customer name instead; they exist only to chain to other tools like `policy_query`/`claim_lookup`.",
+      description: "Answer \"what's renewing soon?\" — active policy terms (afw_basicpolinfo) whose polexpdate falls within a window. Excludes marketing/submission shells, non-active terms, and terms that already have a successor via priorpolid (already renewed). Resolves carrier/producer/CSR/customer names inline and flags whether a renewal transaction (RWL/RWQ) already exists. Optionally scope by producer, CSR, carrier, or type of business, and group by producer or carrier for a count plus premium sum/average within the window (e.g. \"premium renewing next quarter, by carrier\"). `book_type` (\"commercial\" or \"personal\") is a friendlier alias for `typeofbus` 2/1 respectively (e.g. \"give me a commercial client with a policy expiring in the next 30 days\" → `within_days: 30, book_type: \"commercial\"`) — the book has other, undecoded typeofbus codes too (see policies/renewals SKILL.md), so `book_type` only ever covers these two dominant segments; pass `typeofbus` directly for anything else. Two ways to scope the window, pick whichever fits the question: `within_days` (a rolling window from today — e.g. \"the next 30 days\") is right for a relative ask; `start_date`/`end_date` (an exact YYYY-MM-DD range, both required together) is right for a specific calendar period like \"December\" or \"Q1\" — computing that period's dates and passing start_date/end_date directly returns exactly that window in one call, rather than fetching a wider rolling window that includes irrelevant months and filtering afterward, which costs more rows, more pagination, and more calls for no benefit. start_date/end_date take precedence over within_days when both kinds are given. IMPORTANT: the resolved name fields sit alongside the raw csrcode/execcode (and, in a breakdown, alongside a raw `code`) — those raw codes (e.g. \"!!C\") are opaque AMS360 identifiers with no meaning to an end user and should never be surfaced in an answer; always report the resolved name instead. The same goes for `polid`/`custid` (internal UUIDs) — use `polno` or the resolved customer name instead; they exist only to chain to other tools like `policy_query`/`claim_lookup`. Each result row already carries everything needed to list/summarize many clients at once (resolved customer name, polno, renewal date, resolved CSR/producer/carrier name, premium) — do NOT call customer_lookup once per result to answer a bulk \"which clients are renewing\" question, that adds no new information and wastes calls; only call customer_lookup when the person wants a deeper profile on one specific client.",
       inputSchema: {
-        within_days: z.number().int().min(1).max(365).default(30).describe("Renewal window in days from now"),
+        within_days: z.number().int().min(1).max(365).default(30).describe("Renewal window in days from now. Ignored if start_date/end_date are given."),
+        start_date: z.string().regex(DATE_ONLY_PATTERN, "Expected YYYY-MM-DD").describe("Start of an exact calendar date range (YYYY-MM-DD, inclusive) — use this + end_date instead of within_days when the person names a specific period (\"December\", \"Q1\", \"next week of the 15th\") rather than a relative window. Must be paired with end_date.").optional(),
+        end_date: z.string().regex(DATE_ONLY_PATTERN, "Expected YYYY-MM-DD").describe("End of an exact calendar date range (YYYY-MM-DD, inclusive). Must be paired with start_date.").optional(),
         producer_code: z.string().describe("Exact match against producer/exec employee code (afw_basicpolinfo.execcode)").optional(),
         csr_code: z.string().describe("Exact match against CSR employee code (afw_basicpolinfo.csrcode)").optional(),
         carrier_code: z.string().describe("Exact match against carrier code (afw_basicpolinfo.cocode)").optional(),
         typeofbus: z.number().int().describe("Exact match against type-of-business code (afw_basicpolinfo.typeofbus)").optional(),
+        book_type: z.enum(["commercial", "personal"]).describe("Friendlier alias over typeofbus for the book's two dominant segments — \"commercial\" restricts to typeofbus=2, \"personal\" to typeofbus=1. Combines with typeofbus via AND if both are given.").optional(),
         group_by: z.enum(["producer", "carrier", "none"]).default("none").describe("Include a breakdown (count + premium sum/average) grouped by producer or carrier, scoped to the same renewal window"),
         limit: z.number().int().min(1).max(200).default(25).describe("Max results to return per page"),
         offset: z.number().int().min(0).default(0).describe("Number of results to skip")
       }
     },
-    async ({ within_days, producer_code, csr_code, carrier_code, typeofbus, group_by, limit, offset }) => {
+    async ({ within_days, start_date, end_date, producer_code, csr_code, carrier_code, typeofbus, book_type, group_by, limit, offset }) => {
       try {
+        if((start_date && !end_date) || (end_date && !start_date)) {
+          return errorResult(new Error("Pass both start_date and end_date together, not just one."))
+        }
+
         const conditions = [...BASE_CONDITIONS]
-        const params: unknown[] = [within_days]
+        const params: unknown[] = []
+
+        if(start_date && end_date) {
+          params.push(start_date, end_date)
+          conditions.push(`p.polexpdate BETWEEN $${ params.length - 1 }::date AND $${ params.length }::date`)
+        } else {
+          params.push(within_days)
+          conditions.push(`p.polexpdate BETWEEN now() AND now() + make_interval(days => $${ params.length }::int)`)
+        }
 
         if(producer_code) {
           params.push(producer_code)
@@ -89,6 +112,10 @@ export function registerUpcomingRenewalsTool(server: McpServer) {
         }
         if(typeofbus !== undefined) {
           params.push(typeofbus)
+          conditions.push(`p.typeofbus = $${ params.length }`)
+        }
+        if(book_type) {
+          params.push(BOOK_TYPE_CODES[book_type])
           conditions.push(`p.typeofbus = $${ params.length }`)
         }
 
@@ -138,7 +165,7 @@ export function registerUpcomingRenewalsTool(server: McpServer) {
 
         return textResult(response)
       } catch(error) {
-        logger.error({ err: error, within_days, producer_code, csr_code, carrier_code, typeofbus, group_by, limit, offset }, "upcoming_renewals failed")
+        logger.error({ err: error, within_days, start_date, end_date, producer_code, csr_code, carrier_code, typeofbus, book_type, group_by, limit, offset }, "upcoming_renewals failed")
         return errorResult(error)
       }
     }

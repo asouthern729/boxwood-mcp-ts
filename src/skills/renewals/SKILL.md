@@ -1,12 +1,12 @@
 ---
 name: renewals
-description: Domain knowledge for boxwood-mcp-ts's renewal-related MCP tools — upcoming_renewals (Boxwood Insurance's AMS360 book of business filtered to active policy terms expiring within a day window, with marketing shells, expired terms, and already-renewed terms excluded) and commercial_renewal_summary (builds and emails a branded Pre-Renewal Review .docx for one commercial policy). Use when answering questions about what's renewing soon, a producer's or carrier's upcoming renewal book, which accounts need renewal outreach, or building a renewal-meeting packet for a commercial client.
+description: Domain knowledge for boxwood-mcp-ts's renewal-related MCP tools — upcoming_renewals (Boxwood Insurance's AMS360 book of business filtered to active policy terms expiring within a day window, with marketing shells, expired terms, and already-renewed terms excluded) and risk_profile (builds a branded Pre-Renewal Review .docx, exposures only, for one or more commercial policies). Use when answering questions about what's renewing soon, a producer's or carrier's upcoming renewal book, which accounts need renewal outreach, or building a renewal-meeting packet for a commercial client.
 ---
 
 # Boxwood renewals
 
 Two tools cover renewal work today: `upcoming_renewals` (find what's coming due) and
-`commercial_renewal_summary` (build the renewal-meeting document for one commercial account). More
+`risk_profile` (build the renewal-meeting document for one or more commercial accounts). More
 renewal-related tools will land in this same skill over time rather than each getting its own skill
 — check here first for anything renewal-shaped.
 
@@ -16,11 +16,12 @@ renewal-related tools will land in this same skill over time rather than each ge
 
 ### Calling the tool
 
-`within_days` (default 30, max 365) is the only required concept — how far out to look from real `now()`. Narrow with any combination of:
+The window is either `within_days` (default 30, max 365 — a rolling window from real `now()`, for a relative ask like "the next 30 days") or an exact `start_date`/`end_date` pair (YYYY-MM-DD, both required together, for a specific calendar period like "December" or "Q1" — takes precedence over `within_days` when given). Always prefer `start_date`/`end_date` when the person names a specific period rather than computing a rolling window wide enough to contain it and filtering afterward — that wastes rows, risks pagination, and burns turns for no benefit. Narrow either window with any combination of:
 - `producer_code` — exact match against `afw_basicpolinfo.execcode` (the producer/agent of record, distinct from CSR)
 - `csr_code` — exact match against `afw_basicpolinfo.csrcode`
 - `carrier_code` — exact match against `afw_basicpolinfo.cocode`
 - `typeofbus` — exact match, integer code. `1` (personal) and `2` (commercial) dominate the book; other codes (`0`, `3`-`7`) also appear in small numbers and aren't decoded anywhere — don't assume it's strictly binary
+- `book_type` — friendlier alias over `typeofbus` for the book's two dominant segments: `"commercial"` restricts to `typeofbus = 2`, `"personal"` to `typeofbus = 1`. The book has other, undecoded `typeofbus` codes too (`0`, `3`-`7`) that `book_type` doesn't cover — pass `typeofbus` directly for those. Combines with an explicit `typeofbus` via AND if both are given (redundant if consistent, zero rows if not)
 
 `group_by` (default `"none"`) adds a `breakdown` array grouped by `"producer"` or `"carrier"` — a separate count query over the same filters, not a client-side tally. Each breakdown row is `{ code, label, count }`. `limit` (default 25, max 200) + `offset` paginate; response includes `has_more`. Results are always sorted `polexpdate` ascending — soonest-expiring first — there's no `sort` param.
 
@@ -55,36 +56,42 @@ There are three other renewal-adjacent `trantype` codes in the data (`RWX`, `RRQ
 
 - "What's renewing in the next 30 days?" → `within_days: 30` (the default — can omit)
 - "What's Blake Lambert's renewal book look like for next quarter?" → `within_days: 90, producer_code: "<lambert's execcode>"`
-- "Any commercial renewals coming up this month?" → `within_days: 30, typeofbus: 2`
+- "Any commercial renewals coming up this month?" → `within_days: 30, book_type: "commercial"` (equivalent to `typeofbus: 2`)
+- "Give me a commercial client with a policy expiring in the next 30 days" → `within_days: 30, book_type: "commercial"`
+- "What personal lines renewals are coming up this week?" → `within_days: 7, book_type: "personal"`
 - "How many renewals per producer in the next 30 days?" → `within_days: 30, group_by: "producer"`
+- "I want to review what commercial clients have renewals coming in December" → one `upcoming_renewals` call with `start_date: "2026-12-01", end_date: "2026-12-31", book_type: "commercial"` — an exact calendar range, not `within_days` (computing a wide rolling window that also covers Sept–Nov and filtering afterward wastes rows, risks pagination, and burns turns for no benefit; `start_date`/`end_date` return exactly the December rows in one call). **Do NOT call `customer_lookup` once per matching row to "review" them** — every field needed for a client-by-client review (resolved customer name, `polno`, renewal date, resolved CSR name, resolved carrier name, premium) is already in each `upcoming_renewals` row. Fanning out into a `customer_lookup` call per result (15-30+ sequential tool calls for a busy month) adds no new information for this kind of question and burns context/turns for nothing — only call `customer_lookup` when the person wants to drill into ONE specific client's fuller profile (contacts, policies, loss history, etc.), not to answer a list/summary question about many clients at once.
 - "Which of these still need outreach vs. are already in motion?" → check `has_renewal_activity` per row
 
-## commercial_renewal_summary
+## risk_profile
 
-Builds a branded "Pre-Renewal Review" Word document (`.docx`) for one commercial-lines policy — the current program's exposure schedules (Named Insureds, Locations, Property Coverage, General Liability Exposure, Equipment, Vehicles, Drivers, Workers' Comp Exposure), meant for the CSR and client to review together ahead of the renewal meeting. Called ad hoc, not tied to `download_report` or any other tool — a rep can ask for one for any commercial account at any time.
+Builds a branded "Pre-Renewal Review" Word document (`.docx`) for one or more commercial-lines policies — the current expiring program's exposure schedules ONLY (Named Insureds, Locations, Property Coverage, General Liability Exposure, Equipment, Vehicles, Drivers, Workers' Comp Exposure) — deliberately no premiums or coverage limits (that's the separate, not-yet-built "CL Renewal Summary" tool). Meant for the CSR and client to review together ahead of the renewal meeting. Called ad hoc, not tied to `download_report` or any other tool — a rep can ask for one for any commercial account at any time.
 
 ### Calling the tool
 
-Pass `polno` (partial match) and/or `custid` to identify the policy — resolves to the customer's current in-force term (`typeofbus = 2 AND poleffdate <= today <= polexpdate`). Deliberately does NOT also require `renewalrptflag = 'A'` (client-corrected 2026-09-14, Defatta Custom Homes LLC): AMS360 can flip a term's flag to `'R'` the moment its successor term is bound, weeks before that successor's own effective date arrives — so the term genuinely in force today can carry `'R'`, not `'A'`, and a literal `renewalrptflag = 'A'` filter would find nothing at all for that account until the new term actually starts. Zero matches or a personal-lines policy is a clean error; more than one match (e.g. `polno` too broad, or a customer with several distinct commercial policies) returns a short disambiguation list instead of guessing — narrow with a more specific `polno` or add `custid`.
+Pass `polno` (partial match) and/or `custid` to identify the policy — resolves to the customer's current in-force term(s) (`typeofbus = 2 AND poleffdate <= today <= polexpdate`). Deliberately does NOT also require `renewalrptflag = 'A'` (client-corrected 2026-09-14, Defatta Custom Homes LLC): AMS360 can flip a term's flag to `'R'` the moment its successor term is bound, weeks before that successor's own effective date arrives — so the term genuinely in force today can carry `'R'`, not `'A'`, and a literal `renewalrptflag = 'A'` filter would find nothing at all for that account until the new term actually starts. Zero matches or a personal-lines-only match is a clean error.
 
-`send_email` (default `true`) emails the finished document to the policy's CSR (resolved from `csrcode`); pass `false` to only get a download link back without notifying anyone. `cc` adds extra recipients alongside the CSR. `override_recipient` sends to that address **instead of** the real CSR entirely — always use this for testing/QA so a real CSR doesn't get a test document.
+`renewal_within_days` (optional) scopes matches to policies whose `polexpdate` falls within that many days from today — pass this (e.g. `90`) when resolving "renewing soon" rather than pulling every current commercial policy on the account, which can include lines of business (e.g. Workers' Comp/Employee Benefits still coded `typeofbus=2`) irrelevant to the renewal conversation at hand.
+
+**Multiple current policies matching the SAME customer are combined into one document, not treated as ambiguous** — e.g. `custid` alone, or a loosely-matched `polno`, resolving to several of that customer's policies. The combined doc gets a cover page with a policy summary table (policy #, type, premium, renewal date), and Named Insureds are merged/deduped across policies (up to 12 at once); every other section's rows are simply combined with no per-row policy tag. Matches across DIFFERENT customers (an ambiguous `polno` with no `custid`) are still a genuine error — narrow with a more specific `polno` or add `custid`.
+
+There is no email-sending on this tool — it only ever returns a download link; share it with the CSR directly.
 
 ### What's included, and what's deliberately left out
 
 Every section is independently omitted (not shown empty) when the policy has no data for it — never assume all 8 sections appear. The General Liability and Workers' Comp tables carry an intentionally blank trailing "Renewal Exposure"/"Renewal Payroll" column — this is for the live meeting, never populate it.
 
-**Property Coverage is listed policy-wide, not grouped by address**, unlike some older client-supplied reference documents. AMS360's synced coverage-line data (`afw_cprem`) has no reliable row-level link back to a specific location in this tenant's data (`clocid` populated on well under 1% of rows) — grouping by address simply isn't possible from what's synced today.
+**Property Coverage is grouped one row per address** (Building Limit / BPP Limit split columns, plus a blank "Description" column for staff to annotate by hand at the renewal meeting) — matching the client's own reference layout.
 
-**Driver schedule has no DOB or license number.** `afw_127driver`'s schema carries both columns, but they're locked down at the column-grant level for the `claude` role — same PII convention as `afw_applicant`/`afw_driver` (see `policies` skill). Only name, license state, and date hired are shown.
+**Driver schedule has no DOB or license number.** `afw_127driver`'s schema carries both columns, but they're locked down at the column-grant level for the `claude` role — same PII convention as `afw_applicant`/`afw_driver` (see `policies` skill). Only name and license state are shown.
 
 A section can legitimately come back empty even when raw row counts (e.g. from `run_query`) suggest otherwise — every query dedupes to each record's *latest* version by `effdate`, then drops it if that latest version is deleted (`status = 'D'`). A Workers' Comp classification that was set up and later fully superseded/removed shows real historical rows in the raw table but correctly produces no current WC section here.
 
 ### Archiving and the 24-hour link
 
-The response includes a `download_url` (same `/downloads/<token>` pattern as `download_report`/`download_report_workbook`) that expires after 24 hours. Separately, every generated document is also written to `scripts/output/cl-renewal-summaries/` (same convention as `scripts/morningDownload.ts`'s download-report `.xlsx`, gitignored) with a `manifest.json` entry — `filename`, `generated_at`, `csr_code`, `csr_name`, `client_name`, `polno`, `carrier_name`, `renewal_date` — backing the `/cl-renewal-summaries/` index page (`site/cl-renewal-summaries.html`, `reports.html`'s counterpart for these — same Auth0/PKCE-protected pattern, served via `src/routes/renewalSummaries.ts`). That page groups by CSR (alphabetical, unassigned last) and sorts each CSR's accounts by `renewal_date` ascending — soonest-due first, not `generated_at`. **At most one archived file per policy (`polid`), not per customer** — a customer can carry several distinct commercial policies at once (confirmed against real data: one account has 4), so the archive filename keys on `polid` (unique per term), not `custid` alone. Regenerating the exact same policy's packet overwrites its own prior copy; a different policy for the same customer gets its own separate file; a future renewal of the same policy (a new term, new `polid`, new `renewal_date`) becomes its own new file rather than clobbering the current one. Archived files are cleaned up after 30 days via a host crontab entry, same retention as the download report — note this does NOT prune the now-stale `manifest.json` entry for a deleted file, so the route filters out any manifest entry whose file no longer exists on disk before returning results.
+The response includes a `download_url` (same `/downloads/<token>` pattern as `download_report`/`download_report_workbook`) that expires after 24 hours. Separately, every generated document is also written to `scripts/output/cl-risk-profile/` (same convention as `scripts/morningDownload.ts`'s download-report `.xlsx`, gitignored) with a `manifest.json` entry — `filename`, `generated_at`, `csr_code`, `csr_name`, `client_name`, `polnos`, `renewal_date`, `renewal_date_label` — backing the `/cl-risk-profile/` index page (`site/cl-risk-profile.html`, `reports.html`'s counterpart for these — same Auth0/PKCE-protected pattern, served via `src/routes/riskProfile.ts`). That page groups by CSR (alphabetical, unassigned last) and sorts each CSR's accounts by `renewal_date` ascending — soonest-due first, not `generated_at`. **At most one archived file per policy (`polid`), or per exact combined policy set** — a customer can carry several distinct commercial policies at once (confirmed against real data: one account has 4), so a single-policy archive filename keys on `polid` (unique per term) and a combined document keys on the full matched `polno` set. Regenerating the exact same policy's packet, or the exact same combination, overwrites its own prior copy; a different policy or combination gets its own separate file; a future renewal of the same policy (a new term, new `polid`, new `renewal_date`) becomes its own new file rather than clobbering the current one. Archived files are cleaned up after 30 days via a host crontab entry, same retention as the download report — note this does NOT prune the now-stale `manifest.json` entry for a deleted file, so the route filters out any manifest entry whose file no longer exists on disk before returning results.
 
 ### Common questions → calls
 
-- "Build a renewal review for [client]" → `polno` or `custid` for that client, `send_email: true` (the default)
-- "Let me see it before it goes to the CSR" → `send_email: false`, then share the `download_url`
-- "Test this without bothering the real CSR" → `override_recipient: "<your address>"`
+- "Build a risk profile / pre-renewal review for [client]" → `polno` or `custid` for that client
+- "Build one for everything [client] has renewing in the next 90 days" → `custid`, `renewal_within_days: 90`
