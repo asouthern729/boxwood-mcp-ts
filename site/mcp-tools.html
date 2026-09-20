@@ -142,8 +142,8 @@
     <h2>Policies</h2>
     <div class="tool"><span class="tags"><span class="skill-name">/policies</span><span class="tool-name">policy_query</span></span><p class="tool-desc">Find a policy &mdash; <span>transactions, coverages, lines of business, coverage-line pricing, vehicles, workers' comp, forms, applicant detail, renewal-chain history.</span></p><p class="tool-hint">For any policy-specific question &mdash; coverage detail, an endorsement, or how a term compares to its renewal.</p></div>
     <div class="tool"><span class="tags"><span class="skill-name">/renewals</span><span class="tool-name">upcoming_renewals</span></span><p class="tool-desc">What's renewing soon and still needs outreach &mdash; <span>premium totals, renewal progress, with marketing shells and already-renewed terms filtered out.</span></p><p class="tool-hint">Use for renewal outreach planning, check what renewals are coming in the future up to 1-year out.</p></div>
-    <div class="tool"><span class="tags"><span class="tool-name">commercial_renewal_summary</span></span><p class="tool-desc">Branded Pre‑Renewal Review .docx for one or more commercial policies &mdash; <span>named insureds, locations, property (one row per address, Building/BPP limits split), GL and workers' comp exposure, equipment, vehicles, and drivers, pulled live from AMS360.</span></p><p class="tool-hint">Builds and emails the CSR a renewal-meeting packet ahead of a commercial client's renewal. Matching several current policies for the same customer (optionally scoped to a renewal window, e.g. the next 90 days) combines them into one document. Commercial lines only.</p></div>
-    <div class="tool"><span class="tags"><span class="tool-name">renewal_premium_summary</span></span><p class="tool-desc">Commercial Renewal Premium Overview .xlsx for an account &mdash; <span>one row per policy renewing in a given window (premium, carrier, lines of business bundled on it), plus a second table of the account's other current policies for later quote notes.</span></p><p class="tool-hint">Builds and emails the CSR a premium-comparison workbook ahead of a renewal. Reports premium per policy, not split by line of business &mdash; AMS360 bills most multi-line Package policies as one blended rate, so a per-LOB split would be unreliable exactly where it'd matter most. Commercial lines only, always account-scoped.</p></div>
+    <div class="tool"><span class="tags"><span class="skill-name">/renewals</span><span class="tool-name">risk_profile</span></span><p class="tool-desc">Branded Pre‑Renewal Review .docx for one or more commercial policies &mdash; <span>named insureds, locations, property (one row per address, Building/BPP limits split), GL and workers' comp exposure, equipment, vehicles, and drivers, pulled live from AMS360.</span></p><p class="tool-hint">Returns a download link only, no email. Matching several current policies for the same customer (optionally scoped to a renewal window, e.g. the next 90 days) combines them into one document. Exposures only, no premiums or coverages. Commercial lines only.</p></div>
+    <div class="tool"><span class="tags"><span class="tool-name">renewal_premium_summary</span></span><p class="tool-desc">Commercial Renewal Premium Summary .xlsx for an account &mdash; <span>one row per policy renewing in a given window (premium, carrier, lines of business bundled on it), plus a second table of the account's other current policies for later quote notes.</span></p><p class="tool-hint">Returns a download link for the CSR to review &mdash; CSR auto-emailing has been removed, send_email now only reaches a fixed test recipient. Reports premium per policy, not split by line of business &mdash; AMS360 bills most multi-line Package policies as one blended rate, so a per-LOB split would be unreliable exactly where it'd matter most. Commercial lines only, always account-scoped.</p></div>
   </section>
 
   <section class="group">
@@ -163,7 +163,7 @@
 
   <section class="group">
     <h2>Staff</h2>
-    <div class="tool"><span class="tags"><span class="tool-name">employee_lookup</span></span><p class="tool-desc">Find a staff member &mdash; <span>their full book of customers, policies, claims.</span></p><p class="tool-hint">Use when reviewing one producer's or CSR's full book of business.</p></div>
+    <div class="tool"><span class="tags"><span class="tool-name">employee_lookup</span></span><p class="tool-desc">Find a staff member &mdash; <span>their full book of customers, policies, claims, and invoices.</span></p><p class="tool-hint">Use when reviewing one producer's or CSR's full book of business.</p></div>
   </section>
 
   <section class="group">
@@ -193,9 +193,10 @@
     <nav class="sitemap" aria-label="Site pages">
       <a href="/mcp-tools/" aria-current="page">Tools &amp; Skills</a>
       <a href="/reports/">Download Reports</a>
-      <a href="/cl-renewal-summaries/">Commercial Pre‑Renewal Summaries</a>
+      <a href="/cl-risk-profile/">Commercial Pre‑Renewal Risk Profiles</a>
       <a href="/ams360-sync/">AMS360 Sync</a>
       <a href="/roadmap/">Roadmap</a>
+      <a href="/tools/">Boxwood Tools</a>
     </nav>
     Boxwood MCP &middot; AMS360
   </footer>

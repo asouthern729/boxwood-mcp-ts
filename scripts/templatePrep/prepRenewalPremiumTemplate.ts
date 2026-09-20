@@ -96,10 +96,13 @@ async function main() {
   // in the template itself, but exposed once row reordering (populated lines first) started moving
   // a different line's data onto row 15's incomplete style; (2) Market Options (I-N) were
   // consistently right-aligned everywhere, never center, including on the spare rows (20-22).
+  // Percent Change (G) has the exact same row-15 gap (missing `horizontal`, confirmed against the
+  // raw file) but was missed by this fix originally — reported 2026-09-20 as a right-aligned %
+  // Change on whichever line lands on row 15 in a given report. Included here now.
   const firstLobRow = LAST_KNOWN_LOB_ROW - 7 // 12 — General Liability's row
   const lastSpareRow = LAST_KNOWN_LOB_ROW + NUM_BLANK_ROWS // 22
   for(let row = firstLobRow; row <= lastSpareRow; row++) {
-    for(const col of ["C", "E", "I", "J", "K", "L", "M", "N"]) {
+    for(const col of ["C", "E", "G", "I", "J", "K", "L", "M", "N"]) {
       const cell = sheet.getCell(`${ col }${ row }`)
       cell.alignment = { ...cell.alignment, horizontal: "center" }
     }

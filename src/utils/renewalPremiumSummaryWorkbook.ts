@@ -37,9 +37,14 @@ const FIRST_SPARE_ROW = 20
 const OTHER_POLICIES_FIRST_ROW = 27
 const OTHER_POLICIES_MAX_ROWS = 6 // matches the template's 6 pre-styled "other" data rows (27-32)
 
-export type LobRowFill = { current: number | null; carrier: string; coverage: string; policyNos: string }
-export type ExtraRow = { coverage: string; policyNos: string; current: number | null; carrier: string }
+export type LobRowFill = { current: number | null; renewal: number | null; carrier: string; coverage: string; policyNos: string }
+export type ExtraRow = { coverage: string; policyNos: string; current: number | null; renewal: number | null; carrier: string }
 export type OtherPolicyRow = { coveragePolicy: string; expirationDate: string }
+export type PremiumAsOfNote = { polno: string; date: string }
+// Flags a policy whose Current premium didn't come from afw_basicpolinfo.fulltermpremium directly
+// (that read as 0/null) but was instead recovered from its own last real transaction — same
+// "visible caveat, not a silent substitution" philosophy as premiumAsOfNotes above.
+export type PremiumFallbackNote = { polno: string; amount: number }
 
 export type RenewalPremiumSummaryInput = {
   clientName: string
@@ -47,7 +52,30 @@ export type RenewalPremiumSummaryInput = {
   lobRows: Partial<Record<KnownLobCode, LobRowFill>>
   extraRows: ExtraRow[]
   otherPolicies: OtherPolicyRow[]
+  premiumAsOfNotes: PremiumAsOfNote[]
+  premiumFallbackNotes: PremiumFallbackNote[]
 }
+
+// Recorded per generation (in the archive manifest — see renewalPremiumSummaryArchive.ts) so the
+// Refresh path (renewalPremiumSummaryRefresh.ts) knows exactly which physical row each policy's
+// Current/Renewal cells ended up on, without re-deriving row order itself — Refresh must never
+// recompute layout (populated-first ordering, which extras made the cut), only recognize a row it
+// already committed to at generation time. Only "known"/"extra" rows are recorded — "empty" and
+// "blank" rows carry no policy-derived values, so there's nothing for Refresh to ever update there.
+export type RenewalPremiumSummaryCellMapEntry =
+  | { row: number; kind: "known"; code: KnownLobCode; polnos: string[] }
+  | { row: number; kind: "extra"; polnos: string[] }
+
+export type BuildRenewalPremiumSummaryWorkbookResult = {
+  buffer: Buffer
+  cellMap: RenewalPremiumSummaryCellMapEntry[]
+}
+
+// Everything from this row down is internal-only (per Patrick, 2026-09-16): AMs should delete these
+// rows before forwarding the workbook to a client. Left as its own clearly-labeled block below the
+// template's own last used row (32) rather than reusing the "Additional Quote Notes" cells, since
+// those are client-facing.
+const PREMIUM_AS_OF_FIRST_ROW = 34
 
 // Client feedback (2026-09-15): show Policy # to the right of the coverage text, in a smaller
 // italic font, rather than on its own line (which would need taller rows to avoid clipping).
@@ -65,7 +93,7 @@ function setCoverageCell(cell: ExcelJS.Cell, coverage: string, policyNos: string
   }
 }
 
-export async function buildRenewalPremiumSummaryWorkbook(input: RenewalPremiumSummaryInput): Promise<Buffer> {
+export async function buildRenewalPremiumSummaryWorkbook(input: RenewalPremiumSummaryInput): Promise<BuildRenewalPremiumSummaryWorkbookResult> {
   const workbook = new ExcelJS.Workbook()
   await workbook.xlsx.readFile(TEMPLATE_PATH)
   const sheet = workbook.getWorksheet(1)
@@ -106,9 +134,33 @@ export async function buildRenewalPremiumSummaryWorkbook(input: RenewalPremiumSu
   const blanks: RowEntry[] = Array.from({ length: Math.max(0, TOTAL_ROWS - mainEntries.length) }, () => ({ kind: "blank" }))
   const entries = [...mainEntries, ...blanks].slice(0, TOTAL_ROWS)
 
+  // Client feedback (2026-09-17): the Carrier column's fixed template width (32) was clipping long
+  // combined-carrier text (e.g. "Travelers Insurance Company; Grange") once the overflow guard below
+  // stopped it from visually spilling into Renewal — the fix for one problem exposed the other.
+  // Widened to fit the actual longest Carrier value this report is about to write, never narrower
+  // than the template's own original width (so a report with only short carrier names doesn't shrink
+  // the column from what it's always looked like).
+  const CARRIER_COL_MIN_WIDTH = 32
+  const CARRIER_COL_PADDING = 3
+  let maxCarrierLen = 0
+  const cellMap: RenewalPremiumSummaryCellMapEntry[] = []
+
   entries.forEach((entry, i) => {
     const row = FIRST_LOB_ROW + i
     const bCell = sheet.getCell(`B${ row }`)
+    const cCell = sheet.getCell(`C${ row }`)
+    const eCell = sheet.getCell(`E${ row }`)
+
+    // Guards against Excel's own overflow rendering: text in one cell spills visually across a
+    // neighbor to its right ONLY when that neighbor is truly empty (no cell content at all, not even
+    // an empty string) — confirmed against the raw XLSX XML (a written "" still gets its own <c>
+    // element, a genuinely untouched cell gets none). Coverage (B) and Carrier (D) are the only two
+    // columns whose text can realistically run long enough to matter (client feedback, 2026-09-17: a
+    // combined multi-policy carrier string like "Travelers Insurance Company; Grange" visibly spilled
+    // into the blank Renewal column) — Current (C) and Renewal (E) default to "" (no figure known),
+    // overwritten below with a real number when one is available, which still blocks overflow from
+    // its left neighbor exactly like the empty string did.
+    eCell.value = ""
 
     if(entry.kind === "known") {
       // Trending only applies to a known coverage line (it's an inherent property of the line
@@ -116,8 +168,11 @@ export async function buildRenewalPremiumSummaryWorkbook(input: RenewalPremiumSu
       // the reader still sees the benchmark range for a line this account doesn't currently carry.
       sheet.getCell(`H${ row }`).value = LOB_TRENDING[entry.code]
       setCoverageCell(bCell, entry.fill.coverage, entry.fill.policyNos)
-      if(entry.fill.current !== null) sheet.getCell(`C${ row }`).value = entry.fill.current
+      cCell.value = entry.fill.current !== null ? entry.fill.current : ""
+      if(entry.fill.renewal !== null) eCell.value = entry.fill.renewal
       sheet.getCell(`D${ row }`).value = entry.fill.carrier
+      maxCarrierLen = Math.max(maxCarrierLen, entry.fill.carrier.length)
+      cellMap.push({ row, kind: "known", code: entry.code, polnos: entry.fill.policyNos.split(", ") })
     } else if(entry.kind === "extra") {
       // No Trending — an extra/unmatched policy isn't one of the 8 tracked lines, so no benchmark
       // range applies. Explicitly cleared, not just left unwritten: this row may now land on a
@@ -125,20 +180,28 @@ export async function buildRenewalPremiumSummaryWorkbook(input: RenewalPremiumSu
       // baked in from the template's default layout, which would otherwise leak through untouched.
       sheet.getCell(`H${ row }`).value = null
       setCoverageCell(bCell, entry.extra.coverage, entry.extra.policyNos)
-      if(entry.extra.current !== null) sheet.getCell(`C${ row }`).value = entry.extra.current
+      cCell.value = entry.extra.current !== null ? entry.extra.current : ""
+      if(entry.extra.renewal !== null) eCell.value = entry.extra.renewal
       sheet.getCell(`D${ row }`).value = entry.extra.carrier
+      maxCarrierLen = Math.max(maxCarrierLen, entry.extra.carrier.length)
+      cellMap.push({ row, kind: "extra", polnos: entry.extra.policyNos.split(", ") })
     } else if(entry.kind === "blank") {
       // Explicitly cleared (not just left unwritten) for the same reason as the "extra" case above —
       // this row may land on a template position that already has default label/Trending content.
       bCell.value = null
-      sheet.getCell(`C${ row }`).value = null
+      cCell.value = ""
       sheet.getCell(`D${ row }`).value = null
       sheet.getCell(`H${ row }`).value = null
     } else {
       sheet.getCell(`H${ row }`).value = LOB_TRENDING[entry.code]
       bCell.value = LOB_LABEL[entry.code]
+      cCell.value = ""
     }
   })
+
+  if(maxCarrierLen > 0) {
+    sheet.getColumn("D").width = Math.max(CARRIER_COL_MIN_WIDTH, maxCarrierLen + CARRIER_COL_PADDING)
+  }
 
   const otherPolicies = input.otherPolicies.slice(0, OTHER_POLICIES_MAX_ROWS)
   otherPolicies.forEach((other, i) => {
@@ -171,6 +234,33 @@ export async function buildRenewalPremiumSummaryWorkbook(input: RenewalPremiumSu
     }
   }
 
+  // Internal-only note (Patrick, 2026-09-16): each main-table policy's premium is a point-in-time
+  // fulltermpremium snapshot, not itself a transaction, so an AM needs to know how current it is —
+  // if AMS360 has since received something newer, they know to check it and update the figure by
+  // hand until there's an automated way to do that. Deliberately excludable: it's its own clearly
+  // labeled block below the template's last used row, easy for an AM to delete before forwarding the
+  // workbook to the client.
+  const noteHeaderCell = sheet.getCell(`A${ PREMIUM_AS_OF_FIRST_ROW }`)
+  noteHeaderCell.value = "Internal note — remove before sending to client:"
+  noteHeaderCell.font = { italic: true, size: 9, color: { argb: "FF808080" } }
+
+  input.premiumAsOfNotes.forEach((note, i) => {
+    const row = PREMIUM_AS_OF_FIRST_ROW + 1 + i
+    const cell = sheet.getCell(`A${ row }`)
+    cell.value = `Policy ${ note.polno } — premium as of ${ note.date } (latest transaction on file)`
+    cell.font = { italic: true, size: 9, color: { argb: "FF808080" } }
+  })
+
+  // Flags any Current premium recovered from a transaction rather than read directly off the policy
+  // record (see renewalPremiumSummary.ts) — continues the same internal note block/row numbering
+  // rather than a separate section, since it's the same "verify before sending to client" audience.
+  input.premiumFallbackNotes.forEach((note, i) => {
+    const row = PREMIUM_AS_OF_FIRST_ROW + 1 + input.premiumAsOfNotes.length + i
+    const cell = sheet.getCell(`A${ row }`)
+    cell.value = `Policy ${ note.polno } — Current premium ($${ note.amount.toLocaleString() }) came from AMS360's last recorded transaction, not the policy record itself (which doesn't currently show a premium) — verify in AMS360 before relying on this figure.`
+    cell.font = { italic: true, size: 9, color: { argb: "FF808080" } }
+  })
+
   const rawBuffer = await workbook.xlsx.writeBuffer()
-  return Buffer.from(rawBuffer as unknown as ArrayBuffer)
+  return { buffer: Buffer.from(rawBuffer as unknown as ArrayBuffer), cellMap }
 }
