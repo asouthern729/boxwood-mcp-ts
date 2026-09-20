@@ -3,6 +3,7 @@ import type { Request, Response } from "express"
 import { existsSync, readdirSync, readFileSync, statSync } from "node:fs"
 import path from "node:path"
 import auth0 from "../middleware/auth/auth0/index.js"
+import { readDownloadReportWatermark } from "../utils/downloadReportWatermark.js"
 
 export const router = Router()
 
@@ -13,9 +14,18 @@ const BASE = "/api/v1/boxwood-mcp" as const
 const REPORT_FILENAME_PATTERN = /^\d{4}-\d{2}-\d{2}_download_report\.xlsx$/
 const XLSX_MIME_TYPE = "application/vnd.openxmlformats-officedocument.spreadsheetml.sheet"
 
+// lastSync reflects only the most recently generated report (the watermark is overwritten each
+// run, not kept per report date) — a status summary alongside the list, not per-row metadata.
 router.get(`${ BASE }/reports/manifest`, auth0, (_req, res) => {
+  const watermark = readDownloadReportWatermark()
+  const lastSync = watermark && {
+    syncedUntil: watermark.syncedUntil.toISOString(),
+    tablesTouched: watermark.tablesTouched,
+    rowsEntered: watermark.rowsEntered
+  }
+
   if(!existsSync(OUTPUT_DIR)) {
-    res.json({ reports: [] })
+    res.json({ reports: [], lastSync })
     return
   }
 
@@ -28,7 +38,7 @@ router.get(`${ BASE }/reports/manifest`, auth0, (_req, res) => {
     }))
     .sort((a, b) => b.date.localeCompare(a.date))
 
-  res.json({ reports })
+  res.json({ reports, lastSync })
 })
 
 // filename is user-supplied (URL param) — validated against the exact naming convention before

@@ -18,13 +18,30 @@ import path from "node:path"
 // skipped by the next day's run.
 const WATERMARK_PATH = path.join(import.meta.dirname, "..", "..", "scripts", "state", "download-report-watermark.json")
 
-export function readDownloadReportWatermark(): Date | null {
+export interface DownloadReportWatermark {
+  syncedUntil: Date
+  // Which synced tables actually contributed a row to the report that advanced this watermark,
+  // and how many rows total — carried over from download_report's own sync_metadata (see
+  // src/tools/downloads/downloadReport.ts) so a stalled/empty-looking run is visible here without
+  // having to go dig up that day's report separately.
+  tablesTouched: string[]
+  rowsEntered: number
+}
+
+export function readDownloadReportWatermark(): DownloadReportWatermark | null {
   if(!existsSync(WATERMARK_PATH)) return null
 
   try {
-    const { syncedUntil } = JSON.parse(readFileSync(WATERMARK_PATH, "utf-8"))
+    const { syncedUntil, tablesTouched, rowsEntered } = JSON.parse(readFileSync(WATERMARK_PATH, "utf-8"))
     const parsed = new Date(syncedUntil)
-    return Number.isNaN(parsed.getTime()) ? null : parsed
+    if(Number.isNaN(parsed.getTime())) return null
+
+    return {
+      syncedUntil: parsed,
+      // Defensive against a watermark file written before these fields existed.
+      tablesTouched: Array.isArray(tablesTouched) ? tablesTouched : [],
+      rowsEntered: typeof rowsEntered === "number" ? rowsEntered : 0
+    }
   } catch {
     return null
   }
@@ -33,7 +50,10 @@ export function readDownloadReportWatermark(): Date | null {
 // Only call this after a report has actually been generated successfully — advancing the
 // watermark on a failed/partial run would make the next run silently skip whatever that run was
 // supposed to cover.
-export function writeDownloadReportWatermark(syncedUntil: Date): void {
+export function writeDownloadReportWatermark({ syncedUntil, tablesTouched, rowsEntered }: DownloadReportWatermark): void {
   mkdirSync(path.dirname(WATERMARK_PATH), { recursive: true })
-  writeFileSync(WATERMARK_PATH, JSON.stringify({ syncedUntil: syncedUntil.toISOString() }, null, 2))
+  writeFileSync(
+    WATERMARK_PATH,
+    JSON.stringify({ syncedUntil: syncedUntil.toISOString(), tablesTouched, rowsEntered }, null, 2)
+  )
 }

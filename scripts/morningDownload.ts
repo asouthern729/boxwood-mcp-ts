@@ -66,7 +66,7 @@ if(!isExplicitOverride) {
     // skipped. +1 day of slack on top of the watermark's own age covers a transaction entered in
     // AMS360 shortly before the watermark but not synced until after it (exactly what happened
     // 2026-09-17).
-    const lookbackDays = Math.max(1, Math.ceil((runStartedAt.getTime() - watermark.getTime()) / 86_400_000) + 1)
+    const lookbackDays = Math.max(1, Math.ceil((runStartedAt.getTime() - watermark.syncedUntil.getTime()) / 86_400_000) + 1)
     since = `${ lookbackDays }d`
     syncedSince = watermark.toISOString()
   }
@@ -181,13 +181,30 @@ async function main() {
   // pull a token out of *that* call's own tool_result.
   const workbookToolUseIds = new Set<string>()
 
+  // For the same reason, sync_metadata (tables_touched/rows_entered, see downloadReport.ts) must
+  // come from the specific download_report call that actually produced the report the workbook was
+  // built from — not just "whichever download_report call ran most recently" (the agent's stray
+  // exploratory calls after the workbook is built would win otherwise). Correlated via report_token:
+  // recorded per download_report tool_result keyed by its own report_token, then looked up using the
+  // report_token the winning download_report_workbook tool_use call actually passed in as input.
+  const downloadReportToolUseIds = new Set<string>()
+  const workbookInputReportTokens = new Map<string, string>()
+  const syncMetadataByReportToken = new Map<string, { tablesTouched: string[]; rowsEntered: number }>()
+  let usedReportToken: string | undefined
+
   for await (const message of result) {
     if(message.type === "assistant") {
       for(const block of message.message.content) {
         if(block.type === "tool_use") {
           const inputSize = JSON.stringify(block.input).length
           console.log(`[morningDownload] tool_use: ${ block.name } (input ${ inputSize } chars)`)
-          if(block.name.endsWith("download_report_workbook")) workbookToolUseIds.add(block.id)
+          if(block.name.endsWith("download_report_workbook")) {
+            workbookToolUseIds.add(block.id)
+            const reportToken = (block.input as { report_token?: string } | undefined)?.report_token
+            if(reportToken) workbookInputReportTokens.set(block.id, reportToken)
+          } else if(block.name.endsWith("download_report")) {
+            downloadReportToolUseIds.add(block.id)
+          }
         } else if(block.type === "text") {
           console.log(`[morningDownload] assistant text: ${ block.text.slice(0, 200) }`)
         }
@@ -202,7 +219,28 @@ async function main() {
 
             if(!block.is_error && workbookToolUseIds.has(block.tool_use_id)) {
               const found = findDownloadToken(block.content)
-              if(found) token = found
+              if(found) {
+                token = found
+                usedReportToken = workbookInputReportTokens.get(block.tool_use_id)
+              }
+            }
+
+            if(!block.is_error && downloadReportToolUseIds.has(block.tool_use_id)) {
+              try {
+                const parsed = JSON.parse(text)
+                const reportToken: string | undefined = parsed?.report_token
+                const syncMetadata = parsed?.sync_metadata
+                if(reportToken && syncMetadata) {
+                  syncMetadataByReportToken.set(reportToken, {
+                    tablesTouched: Array.isArray(syncMetadata.tables_touched) ? syncMetadata.tables_touched : [],
+                    rowsEntered: typeof syncMetadata.rows_entered === "number" ? syncMetadata.rows_entered : 0
+                  })
+                }
+              } catch {
+                // download_report's tool_result isn't guaranteed to be bare JSON (MCP content
+                // blocks vary) — sync_metadata is diagnostic, not correctness-critical, so a parse
+                // miss here just falls back to recording nothing rather than failing the run.
+              }
             }
           }
         }
@@ -245,8 +283,17 @@ async function main() {
   // watermark alone so the next run's lookback naturally widens to cover what was missed instead
   // of silently skipping it.
   if(succeeded && !isExplicitOverride) {
-    writeDownloadReportWatermark(runStartedAt)
-    console.log(`[morningDownload] advanced watermark to ${ runStartedAt.toISOString() }`)
+    const syncMetadata = usedReportToken ? syncMetadataByReportToken.get(usedReportToken) : undefined
+    if(!syncMetadata) {
+      console.log("[morningDownload] no sync_metadata found for the report the workbook was built from — recording empty tables_touched/rows_entered")
+    }
+
+    writeDownloadReportWatermark({
+      syncedUntil: runStartedAt,
+      tablesTouched: syncMetadata?.tablesTouched ?? [],
+      rowsEntered: syncMetadata?.rowsEntered ?? 0
+    })
+    console.log(`[morningDownload] advanced watermark to ${ runStartedAt.toISOString() } (tables_touched=${ JSON.stringify(syncMetadata?.tablesTouched ?? []) }, rows_entered=${ syncMetadata?.rowsEntered ?? 0 })`)
   }
 
   process.exit(succeeded ? 0 : 1)
