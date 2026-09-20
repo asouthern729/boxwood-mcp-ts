@@ -3,17 +3,16 @@ import * as z from "zod"
 import { publicBaseUrl } from "../../config/config.js"
 import { runReadOnlyQuery } from "../../db.js"
 import { storeDownload } from "../../utils/downloadStore.js"
-import { sendMailWithAttachment } from "../../utils/mailer.js"
-import { archiveRenewalSummary, sanitizeForFilename } from "../../utils/renewalSummaryArchive.js"
+import { archiveRiskProfile, sanitizeForFilename } from "../../utils/riskProfileArchive.js"
 import { errorResult, textResult } from "../../utils/mcpHelpers.js"
 import { logger } from "../../utils/logger.js"
 import { fetchPolicyLobInfo } from "../../utils/policyLineOfBusiness.js"
-import { money } from "../../utils/renewalSummaryDoc.js"
+import { money } from "../../utils/riskProfileDoc.js"
 import type {
   DriverRow, EquipmentBlanket, EquipmentItemRow, GlExposureRow, LocationRow, PolicySummaryRow,
   PropertyRow, VehicleRow, WcExposureRow
-} from "../../utils/renewalSummaryDoc.js"
-import { buildRenewalSummaryDoc } from "../../utils/renewalSummaryDoc.js"
+} from "../../utils/riskProfileDoc.js"
+import { buildRiskProfileDoc } from "../../utils/riskProfileDoc.js"
 
 const DOCX_MIME_TYPE = "application/vnd.openxmlformats-officedocument.wordprocessingml.document"
 
@@ -44,7 +43,6 @@ const RESOLVE_POLICY_QUERY = `
   SELECT p.polid, p.polno, p.poleffdate, p.polexpdate, p.custid, p.csrcode,
     ${ CUSTOMER_NAME_EXPR } AS customer_name,
     co.name AS carrier_name,
-    csr.email AS csr_email,
     COALESCE(NULLIF(TRIM(CONCAT_WS(' ', csr.firstname, csr.lastname)), ''), p.csrcode) AS csr_name,
     p.fulltermpremium
   FROM afw_basicpolinfo p
@@ -77,7 +75,6 @@ type ResolvedPolicy = {
   csrcode: string | null
   customer_name: string | null
   carrier_name: string | null
-  csr_email: string | null
   csr_name: string | null
   fulltermpremium: string | number | null
 }
@@ -546,7 +543,7 @@ type PolicyData = {
 // Runs the full set of per-policy section queries and maps them to doc-builder row shapes, with no
 // named-insureds/client-name filtering applied yet — that happens once in the caller after every
 // matched policy's data is in hand, so a single-policy call and a combined multi-policy call (see
-// registerCommercialRenewalSummaryTool below) share this exact same mapping.
+// registerRiskProfileTool below) share this exact same mapping.
 async function fetchPolicyData(policy: ResolvedPolicy): Promise<PolicyData> {
   const [
     namedInsuredRows, locationRows, propertyRows, glRows,
@@ -619,21 +616,18 @@ async function fetchPolicyData(policy: ResolvedPolicy): Promise<PolicyData> {
   }
 }
 
-export function registerCommercialRenewalSummaryTool(server: McpServer) {
+export function registerRiskProfileTool(server: McpServer) {
   server.registerTool(
-    "commercial_renewal_summary",
+    "risk_profile",
     {
-      description: "Builds a branded \"Pre-Renewal Review\" Word document (.docx) for one or more commercial-lines policies — the current expiring program's exposure schedules (Named Insureds, Locations, Property Coverage, General Liability Exposure, Equipment, Vehicles, Drivers, Workers' Comp Exposure), for the CSR and client to review together ahead of the renewal. Called ad hoc (not tied to download_report) — pass polno and/or custid to identify the policy/policies. Commercial lines only (typeofbus=2); resolves to the customer's current in-force term(s) (poleffdate/polexpdate bracketing today — not the renewalrptflag column, which can lag behind a term already bound early for next year). Sections with no data are omitted entirely rather than shown empty. The General Liability and Workers' Comp tables carry an intentionally blank \"Renewal Exposure\"/\"Renewal Payroll\" column for the live meeting — never populate these. Property Coverage is one row per address (Building Limit / BPP Limit split columns, plus a blank \"Description\" column for staff to annotate by hand at the renewal meeting) — not policy-wide coverage lines. MULTIPLE POLICIES IN ONE DOCUMENT: if the polno/custid filters resolve to more than one current commercial policy for the SAME customer (e.g. custid alone, or a polno fragment matching several of that customer's policies), they're combined into a single .docx instead of erroring — one cover page with a policy summary table (policy #, type, premium, renewal date) replacing the single current-period/renewal-date line, and Named Insureds merged and deduped across policies (up to 12 policies at once). Every other section's rows are simply combined with no per-row \"Policy #\" tag, since in practice each section's data only ever comes from one of the combined policies anyway. If the filters instead match several policies across DIFFERENT customers (an ambiguous polno with no custid), that's treated as ambiguous as before — no document is built; narrow with a more specific polno or add custid. By default the finished document is emailed to the policy's CSR (resolved from csrcode) and a 24-hour download link is also returned; pass send_email=false to skip the email and just get the link, or override_recipient to send to a specific address (e.g. for testing) instead of the real CSR — when combining policies that resolve to more than one distinct CSR, override_recipient becomes required (no single real CSR to default to). Every generated document is also archived to scripts/output/cl-renewal-summaries/ (kept 30 days) with a manifest.json entry (csr_code, csr_name, client_name, polno, carrier_name, generated_at, renewal_date) that backs the CSR-grouped renewal-summaries index page — at most one archived file per policy (polid) at a time, or per exact combined policy set — regenerating the same single policy, or the same combination of policies, overwrites its own prior copy rather than accumulating.",
+      description: "Builds a branded \"Pre-Renewal Review\" Word document (.docx) for one or more commercial-lines policies — the current expiring program's exposure schedules (Named Insureds, Locations, Property Coverage, General Liability Exposure, Equipment, Vehicles, Drivers, Workers' Comp Exposure), for the CSR and client to review together ahead of the renewal. Called ad hoc (not tied to download_report) — pass polno and/or custid to identify the policy/policies. Commercial lines only (typeofbus=2); resolves to the customer's current in-force term(s) (poleffdate/polexpdate bracketing today — not the renewalrptflag column, which can lag behind a term already bound early for next year). Sections with no data are omitted entirely rather than shown empty. The General Liability and Workers' Comp tables carry an intentionally blank \"Renewal Exposure\"/\"Renewal Payroll\" column for the live meeting — never populate these. Property Coverage is one row per address (Building Limit / BPP Limit split columns, plus a blank \"Description\" column for staff to annotate by hand at the renewal meeting) — not policy-wide coverage lines. MULTIPLE POLICIES IN ONE DOCUMENT: if the polno/custid filters resolve to more than one current commercial policy for the SAME customer (e.g. custid alone, or a polno fragment matching several of that customer's policies), they're combined into a single .docx instead of erroring — one cover page with a policy summary table (policy #, type, premium, renewal date) replacing the single current-period/renewal-date line, and Named Insureds merged and deduped across policies (up to 12 policies at once). Every other section's rows are simply combined with no per-row \"Policy #\" tag, since in practice each section's data only ever comes from one of the combined policies anyway. If the filters instead match several policies across DIFFERENT customers (an ambiguous polno with no custid), that's treated as ambiguous as before — no document is built; narrow with a more specific polno or add custid. A 24-hour download link is always returned — there is no email-sending here; share the link with the CSR directly. Every generated document is also archived to scripts/output/cl-risk-profile/ (kept 30 days) with a manifest.json entry (csr_code, csr_name, client_name, polnos, generated_at, renewal_date, renewal_date_label) that backs the CSR-grouped risk-profile index page — at most one archived file per policy (polid) at a time, or per exact combined policy set — regenerating the same single policy, or the same combination of policies, overwrites its own prior copy rather than accumulating.",
       inputSchema: {
         polno: z.string().describe("Partial match against policy number or short policy number — narrows to one customer's current, in-force commercial policy/policies (combine with custid to disambiguate if needed). Matching more than one policy for the same customer combines them into one document; matching across different customers is treated as ambiguous.").optional(),
         custid: z.string().uuid().describe("Filter to a specific customer's current commercial policy/policies — with no polno, ALL of that customer's current commercial policies (optionally further scoped by renewal_within_days) are combined into one document").optional(),
-        renewal_within_days: z.number().int().positive().describe("Only include policies whose renewal (polexpdate) falls within this many days from today — e.g. 90 for \"renewing over the next 3 months.\" Use this to scope a combined document to the policies actually renewing soon rather than every current commercial policy the customer has, which can include lines of business (e.g. a Workers' Comp or Employee Benefits policy still coded typeofbus=2) irrelevant to the renewal conversation at hand. Omit for no date scoping (today's default).").optional(),
-        send_email: z.boolean().default(true).describe("Email the finished .docx to the policy's CSR. When false, only a download link is returned — useful for a quick preview without notifying the CSR."),
-        cc: z.array(z.string().email()).describe("Additional email addresses to CC alongside the CSR").optional(),
-        override_recipient: z.string().email().describe("Send to this address INSTEAD of the policy's CSR — use for testing/QA so a real CSR doesn't get a test email. Ignored if send_email is false.").optional()
+        renewal_within_days: z.number().int().positive().describe("Only include policies whose renewal (polexpdate) falls within this many days from today — e.g. 90 for \"renewing over the next 3 months.\" Use this to scope a combined document to the policies actually renewing soon rather than every current commercial policy the customer has, which can include lines of business (e.g. a Workers' Comp or Employee Benefits policy still coded typeofbus=2) irrelevant to the renewal conversation at hand. Omit for no date scoping (today's default).").optional()
       }
     },
-    async ({ polno, custid, renewal_within_days, send_email, cc, override_recipient }) => {
+    async ({ polno, custid, renewal_within_days }) => {
       try {
         if(!polno && !custid) {
           return errorResult(new Error("Pass at least one of polno or custid to identify the commercial policy"))
@@ -747,7 +741,7 @@ export function registerCommercialRenewalSummaryTool(server: McpServer) {
             }))
           : undefined
 
-        const { buffer, includedSections } = await buildRenewalSummaryDoc({
+        const { buffer, includedSections } = await buildRiskProfileDoc({
           clientName,
           additionalNamedInsureds,
           currentPeriod: `${ formatDate(primaryPolicy.poleffdate) } – ${ formatDate(primaryPolicy.polexpdate) }`,
@@ -789,54 +783,32 @@ export function registerCommercialRenewalSummaryTool(server: McpServer) {
         // index page's "soonest-due renewal first" intent for a single policy.
         const earliestRenewalDate = matches.reduce((earliest, m) => (m.polexpdate < earliest ? m.polexpdate : earliest), primaryPolicy.polexpdate)
 
-        archiveRenewalSummary(buffer, {
+        // Same single-date-vs-range label logic as renewalPremiumSummary.ts's renewalDateLabel —
+        // a combined document's policies can have different renewal dates, so this shows the full
+        // span rather than just the earliest (which renewal_date, the sort key, already captures).
+        const renewalDates = [...new Set(matches.map((m) => formatDate(m.polexpdate)))]
+        const renewalDateLabel = renewalDates.length === 1 ? renewalDates[0] : `${ renewalDates[0] } – ${ renewalDates[renewalDates.length - 1] }`
+
+        archiveRiskProfile(buffer, {
           filename: archiveFilename,
           generated_at: new Date().toISOString(),
           csr_code: primaryPolicy.csrcode,
           csr_name: primaryPolicy.csr_name,
           client_name: clientName,
-          polno: polnoLabel,
-          carrier_name: primaryPolicy.carrier_name,
-          renewal_date: formatDate(earliestRenewalDate)
+          polnos: polnoLabel,
+          renewal_date: formatDate(earliestRenewalDate),
+          renewal_date_label: renewalDateLabel
         })
-
-        let emailStatus = "Not sent (send_email=false)."
-
-        if(send_email) {
-          const distinctCsrEmails = new Set(matches.map((m) => m.csr_email).filter((e): e is string => !!e))
-
-          if(!override_recipient && combining && distinctCsrEmails.size > 1) {
-            emailStatus = `Not sent — the combined policies resolve to ${ distinctCsrEmails.size } different CSRs; pass override_recipient to choose one, or send_email=false to just get the link.`
-          } else {
-            const recipient = override_recipient ?? primaryPolicy.csr_email
-
-            if(!recipient) {
-              emailStatus = `Not sent — no email on file for CSR ${ primaryPolicy.csr_name ?? primaryPolicy.csrcode ?? "(unassigned)" }.`
-            } else {
-              await sendMailWithAttachment({
-                to: cc && cc.length > 0 ? [recipient, ...cc] : recipient,
-                subject: `Boxwood Pre-Renewal Review — ${ clientName }`,
-                text: combining
-                  ? `Attached is the combined Pre-Renewal Review for ${ clientName } (policies ${ polnoLabel }).`
-                  : `Attached is the Pre-Renewal Review for ${ clientName } (policy ${ primaryPolicy.polno }), ahead of the ${ formatDate(primaryPolicy.polexpdate) } renewal.`,
-                attachment: { filename, content: buffer, contentType: DOCX_MIME_TYPE }
-              })
-              emailStatus = override_recipient
-                ? `Emailed to ${ recipient } (override — CSR ${ primaryPolicy.csr_name ?? primaryPolicy.csrcode ?? "unassigned" } was NOT emailed).`
-                : `Emailed to ${ primaryPolicy.csr_name ?? recipient } (${ recipient }).`
-            }
-          }
-        }
 
         return textResult({
           message: combining
-            ? `Built the combined Pre-Renewal Review for ${ clientName } (${ matches.length } policies: ${ polnoLabel }) — ${ includedSections.length } section(s) included: ${ includedSections.join(", ") }. ${ emailStatus }`
-            : `Built the Pre-Renewal Review for ${ clientName } (policy ${ primaryPolicy.polno }) — ${ includedSections.length } section(s) included: ${ includedSections.join(", ") }. ${ emailStatus }`,
+            ? `Built the combined Pre-Renewal Review for ${ clientName } (${ matches.length } policies: ${ polnoLabel }) — ${ includedSections.length } section(s) included: ${ includedSections.join(", ") }.`
+            : `Built the Pre-Renewal Review for ${ clientName } (policy ${ primaryPolicy.polno }) — ${ includedSections.length } section(s) included: ${ includedSections.join(", ") }.`,
           download_url: downloadUrl,
           included_sections: includedSections
         })
       } catch(error) {
-        logger.error({ err: error, polno, custid, send_email }, "commercial_renewal_summary failed")
+        logger.error({ err: error, polno, custid }, "risk_profile failed")
         return errorResult(error)
       }
     }

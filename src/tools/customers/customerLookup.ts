@@ -108,7 +108,7 @@ const INCLUDE_QUERIES: Record<Include, string> = {
   // the underlying coverage-line breakdown or to see expired/prior terms — this is current-only.
   //
   // Deliberately does NOT filter on renewalrptflag='A' (client-corrected 2026-09-14, Defatta Custom
-  // Homes LLC — see commercialRenewalSummary.ts's RESOLVE_POLICY_QUERY comment for the full story):
+  // Homes LLC — see riskProfile.ts's RESOLVE_POLICY_QUERY comment for the full story):
   // the flag can read 'R' for a term that's genuinely in force today, once its successor term is
   // bound ahead of its own effective date. The poleffdate/polexpdate bounds below are what actually
   // define "in force," with or without the flag.

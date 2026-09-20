@@ -18,7 +18,7 @@ export type PolicyLobInfo = { lobCodes: string[]; lobDescriptions: string[]; cla
 
 // afw_basicpolinfo.polsubtype is NOT a Monoline/Package indicator, despite reading that way from its
 // name — confirmed against the real _code_lookup table (2026-09-11, investigating a "Policy" label
-// bug in commercial_renewal_summary/renewal_premium_summary): it's a fixed 4-value record-type enum
+// bug in risk_profile/renewal_premium_summary): it's a fixed 4-value record-type enum
 // (A=Accounting, B=Service Agreement, P=Policy, S=Submission), hardcoded in the AMS360 Design Guide,
 // not PRCode-backed. Every real in-force commercial policy just reads "Policy" — that's exactly what
 // the `polsubtype != 'S'` filter elsewhere in this codebase excludes (submission shells), not a

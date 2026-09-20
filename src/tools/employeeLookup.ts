@@ -89,7 +89,7 @@ function attachRoles(
 // employee's current book, matching book_summary's customer_count exactly.
 //
 // Deliberately does NOT also require renewalrptflag='A' (client-corrected 2026-09-14, Defatta Custom
-// Homes LLC — see commercialRenewalSummary.ts's RESOLVE_POLICY_QUERY comment for the full story):
+// Homes LLC — see riskProfile.ts's RESOLVE_POLICY_QUERY comment for the full story):
 // AMS360 can flip a term's flag to 'R' the moment its successor is bound, weeks before that
 // successor's own poleffdate arrives, so the flag alone can miss the term genuinely in force today.
 // The date bounds below already fully define "in force," with or without the flag.

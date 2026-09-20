@@ -10,7 +10,7 @@ import { registerEmployeeLookupTool } from "./tools/employeeLookup.js"
 import { registerCertificateLookupTool } from "./tools/certificates/certificateLookup.js"
 import { registerDownloadReportTool } from "./tools/downloads/downloadReport.js"
 import { registerDownloadReportWorkbookTool } from "./tools/downloads/downloadReportWorkbook.js"
-import { registerCommercialRenewalSummaryTool } from "./tools/policies/commercialRenewalSummary.js"
+import { registerRiskProfileTool } from "./tools/policies/riskProfile.js"
 import { registerRenewalPremiumSummaryTool } from "./tools/policies/renewalPremiumSummary.js"
 import { registerBoardSummaryTool } from "./tools/board/boardSummary.js"
 import { registerBoardUpdateItemTool } from "./tools/board/boardUpdateItem.js"
@@ -37,7 +37,7 @@ export function createServer() {
   registerCertificateLookupTool(server)
   registerDownloadReportTool(server)
   registerDownloadReportWorkbookTool(server)
-  registerCommercialRenewalSummaryTool(server)
+  registerRiskProfileTool(server)
   registerRenewalPremiumSummaryTool(server)
   registerBoardSummaryTool(server)
   registerBoardUpdateItemTool(server)

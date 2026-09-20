@@ -4,7 +4,7 @@
 <meta charset="UTF-8">
 <meta name="viewport" content="width=device-width, initial-scale=1.0">
 <link rel="icon" href="./assets/boxwood-favicon.ico">
-<title>Boxwood Commercial Pre‑Renewal Summaries</title>
+<title>Boxwood Commercial Pre‑Renewal Risk Profiles</title>
 <link rel="preconnect" href="https://fonts.googleapis.com">
 <link rel="preconnect" href="https://fonts.gstatic.com" crossorigin>
 <link href="https://fonts.googleapis.com/css2?family=Play:wght@400;700&display=swap" rel="stylesheet">
@@ -101,7 +101,7 @@
     <img src="./assets/boxwood-logo.png" alt="Boxwood Insurance Group">
     <div class="heading">
       <p class="kicker">Boxwood Insurance Group</p>
-      <h1>Commercial Pre‑Renewal Summaries</h1>
+      <h1>Commercial Pre‑Renewal Risk Profiles</h1>
     </div>
   </div>
 
@@ -113,9 +113,10 @@
     <nav class="sitemap" aria-label="Site pages">
       <a href="/mcp-tools/">Tools &amp; Skills</a>
       <a href="/reports/">Download Reports</a>
-      <a href="/cl-renewal-summaries/" aria-current="page">Commercial Pre‑Renewal Summaries</a>
+      <a href="/cl-risk-profile/" aria-current="page">Commercial Pre‑Renewal Risk Profiles</a>
       <a href="/ams360-sync/">AMS360 Sync</a>
       <a href="/roadmap/">Roadmap</a>
+      <a href="/tools/">Boxwood Tools</a>
     </nav>
     Boxwood MCP &middot; AMS360
   </footer>
@@ -244,7 +245,7 @@
     button.disabled = true;
     button.textContent = "Downloading…";
 
-    fetch(API_BASE + "/renewal-summaries/files/" + encodeURIComponent(filename), {
+    fetch(API_BASE + "/risk-profile/files/" + encodeURIComponent(filename), {
       headers: { Authorization: "Bearer " + token }
     })
       .then(function (res) {
@@ -300,8 +301,7 @@
 
         var metaSpan = document.createElement("span");
         metaSpan.className = "meta";
-        var metaParts = ["Policy " + summary.polno];
-        if (summary.carrier_name) metaParts.push(summary.carrier_name);
+        var metaParts = ["Policy " + summary.polnos];
         metaParts.push(formatSize(summary.sizeBytes));
         metaSpan.textContent = metaParts.join(" · ");
 
@@ -323,7 +323,7 @@
   }
 
   function loadSummaries(token) {
-    return fetch(API_BASE + "/renewal-summaries/manifest", { headers: { Authorization: "Bearer " + token } })
+    return fetch(API_BASE + "/risk-profile/manifest", { headers: { Authorization: "Bearer " + token } })
       .then(function (res) {
         if (res.status === 401) {
           sessionStorage.removeItem(TOKEN_KEY);

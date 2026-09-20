@@ -18,7 +18,7 @@ import {
 //     awkwardly across a page boundary — layoutSections() estimates each section's height and only
 //     breaks when the next section genuinely won't fit in what's left.
 // Unlike the original template, section data here comes from already-queried Postgres rows (see
-// src/tools/policies/commercialRenewalSummary.ts), not a `data` JSON blob read from disk.
+// src/tools/policies/riskProfile.ts), not a `data` JSON blob read from disk.
 
 const GREEN = "459361"
 const NEARBLACK = "231F20"
@@ -295,11 +295,11 @@ function layoutSections(sectionList: DocSection[]): (Paragraph | Table)[] {
 
 // ---------- SECTION INPUT TYPES ----------
 // No per-row "Policy #" tag — even when combining several monoline policies into one document (see
-// commercialRenewalSummary.ts), each section's rows only ever come from one of those policies in
+// riskProfile.ts), each section's rows only ever come from one of those policies in
 // practice (Property/GL from the property policy, Vehicles/Drivers from auto, etc.), so the column
 // was pure noise. The cover-page policy summary table is still the reader's guide to what's combined.
 export type LocationRow = { locNo: string; address: string; city: string; state: string; zip: string }
-// One row per premise/address (see PROPERTY_QUERY in commercialRenewalSummary.ts for how Building vs
+// One row per premise/address (see PROPERTY_QUERY in riskProfile.ts for how Building vs
 // BPP limits and the Causes of Loss Form/Deductible pairing are derived) — Building/BPP limits are
 // summed separately per address, but Causes of Loss Form and Deductible are shared columns across
 // both, since AMS360 doesn't split those by subject of insurance the way it does the limit itself.
@@ -324,7 +324,7 @@ export type WcExposureRow = { classCode: string; classification: string; payroll
 // into one document; absent/empty for the single-policy case (see coverPageChildren).
 export type PolicySummaryRow = { polNo: string; type: string; premium: string; renewalDate: string }
 
-export type RenewalSummaryInput = {
+export type RiskProfileInput = {
   clientName: string
   additionalNamedInsureds: string[]
   currentPeriod: string
@@ -367,7 +367,7 @@ function locationsSection(rows: LocationRow[]): DocSection | null {
 }
 
 // One row per premise/address — see PropertyRow's own comment and PROPERTY_QUERY in
-// commercialRenewalSummary.ts for how this is derived (afw_cprem.attachid -> afw_140subofins.soiid
+// riskProfile.ts for how this is derived (afw_cprem.attachid -> afw_140subofins.soiid
 // -> afw_140premiseinfo.piid -> afw_clocation, discovered after the originally-assumed clocid link
 // turned out to be permanently unpopulated).
 function propertySection(rows: PropertyRow[]): DocSection | null {
@@ -474,7 +474,7 @@ const LOGO_PATH = path.join(import.meta.dirname, "..", "..", "assets", "boxwood-
 // The "Current Policy Period"/"Renewal Effective" subheader always shows (client feedback,
 // 2026-09-15 — matches the employee's own reference layout), even when combining several policies
 // into one document: it reflects the primary (first-matched) policy's dates specifically, same as
-// currentPeriod/renewalDate's source in commercialRenewalSummary.ts. When combining, the policy
+// currentPeriod/renewalDate's source in riskProfile.ts. When combining, the policy
 // summary table is added below it — one row per combined policy, so any OTHER policy's differing
 // dates are still visible there, and it remains the reader's key to the "Policy #" column added
 // throughout the rest of the document.
@@ -527,7 +527,7 @@ function coverPageChildren(clientName: string, currentPeriod: string, renewalDat
 // Returns the section names actually included, in document order — the caller reports this back to
 // the user so they know which sections were present in the source data (never surfaced in the
 // document itself, matching the skill's own "no commentary in the deliverable" rule).
-export async function buildRenewalSummaryDoc(input: RenewalSummaryInput): Promise<{ buffer: Buffer; includedSections: string[] }> {
+export async function buildRiskProfileDoc(input: RiskProfileInput): Promise<{ buffer: Buffer; includedSections: string[] }> {
   const sections: { name: string; section: DocSection | null }[] = [
     { name: "Named Insureds", section: namedInsuredsSection(input.clientName, input.additionalNamedInsureds) },
     { name: "Locations Schedule", section: locationsSection(input.locations) },

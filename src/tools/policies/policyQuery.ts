@@ -322,7 +322,7 @@ export function registerPolicyQueryTool(server: McpServer) {
           if(renewalrptflag === "A") {
             // "A" is specifically a request for "the current/active term" (see tool description),
             // NOT a literal filter on the raw renewalrptflag column (client-corrected 2026-09-14,
-            // Defatta Custom Homes LLC — see commercialRenewalSummary.ts's RESOLVE_POLICY_QUERY
+            // Defatta Custom Homes LLC — see riskProfile.ts's RESOLVE_POLICY_QUERY
             // comment for the full story): AMS360 can flip a term's flag to 'R' the moment its
             // successor is bound, weeks before that successor's own poleffdate arrives, so the term
             // genuinely in force today can carry 'R', not 'A'. Matching literally on
