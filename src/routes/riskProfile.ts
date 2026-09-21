@@ -6,7 +6,7 @@ import auth0 from "../middleware/auth/auth0/index.js"
 import asyncHandler from "../middleware/async/index.js"
 import { ErrorResponse } from "../utils/errorResponse.js"
 import type { RiskProfileManifestEntry } from "../utils/riskProfileArchive.js"
-import { RISK_PROFILE_OUTPUT_DIR, readManifest } from "../utils/riskProfileArchive.js"
+import { RISK_PROFILE_OUTPUT_DIR, deleteRiskProfile, readManifest } from "../utils/riskProfileArchive.js"
 import { runRiskProfileChatTurn } from "../utils/riskProfileChat.js"
 
 export const router = Router()
@@ -81,6 +81,22 @@ router.get(`${ BASE }/risk-profile/files/:filename`, auth0, (req: Request<{ file
   res.setHeader("Content-Type", DOCX_MIME_TYPE)
   res.setHeader("Content-Disposition", `attachment; filename="${ filename }"`)
   res.send(readFileSync(filePath))
+})
+
+// Deletes the archived file and its manifest entry — the frontend's own two-click confirm is the
+// only guard against an accidental call; nothing else here asks for confirmation. filename is
+// validated against the manifest first, same pattern as the routes above (deleteRiskProfile itself
+// also checks, but checking here first keeps the 404 branch explicit rather than inferred from a
+// boolean return). Mirrors renewal-premium-summaries' DELETE route exactly.
+router.delete(`${ BASE }/risk-profile/files/:filename`, auth0, (req: Request<{ filename: string }>, res: Response) => {
+  const { filename } = req.params
+
+  if(!deleteRiskProfile(filename)) {
+    res.status(404).json({ error: "not_found", error_description: "This risk profile doesn't exist." })
+    return
+  }
+
+  res.status(200).json({ filename })
 })
 
 router.post(`${ BASE }/risk-profile/chat`, auth0, asyncHandler(async(req: Request, res: Response, next: NextFunction) => {

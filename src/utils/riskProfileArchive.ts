@@ -1,4 +1,4 @@
-import { existsSync, mkdirSync, readFileSync, writeFileSync } from "node:fs"
+import { existsSync, mkdirSync, readFileSync, unlinkSync, writeFileSync } from "node:fs"
 import path from "node:path"
 
 // Same on-disk convention as scripts/morningDownload.ts's download-report .xlsx: written under
@@ -56,4 +56,21 @@ export function archiveRiskProfile(buffer: Buffer, entry: RiskProfileManifestEnt
   const manifest = readManifest().filter((existing) => existing.filename !== entry.filename)
   manifest.push(entry)
   writeFileSync(MANIFEST_PATH, JSON.stringify(manifest, null, 2))
+}
+
+// Removes both the archived .docx and its manifest entry. Returns false (no-op, nothing written)
+// when there was no manifest entry for this filename to begin with, so the route can 404 instead of
+// silently succeeding on a filename that was never archived. Tolerant of the file itself already
+// being gone from disk (manifest entry present, file missing) — still removes the manifest entry
+// rather than treating that mismatch as an error, since the end state the caller wants either way is
+// "this filename is gone." Same pattern as renewalPremiumSummaryArchive.ts's deleteRenewalPremiumSummary.
+export function deleteRiskProfile(filename: string): boolean {
+  const manifest = readManifest()
+  if(!manifest.some((existing) => existing.filename === filename)) return false
+
+  const filePath = path.join(RISK_PROFILE_OUTPUT_DIR, filename)
+  if(existsSync(filePath)) unlinkSync(filePath)
+
+  writeFileSync(MANIFEST_PATH, JSON.stringify(manifest.filter((existing) => existing.filename !== filename), null, 2))
+  return true
 }
