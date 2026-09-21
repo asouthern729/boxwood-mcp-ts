@@ -91,7 +91,7 @@ async function main() {
 
   for(const { custid, customer_name } of accounts) {
     try {
-      const result = await generateRenewalPremiumSummary({ custid, renewalWithinDays, windowStartDate: startDate, sendEmail: false })
+      const result = await generateRenewalPremiumSummary({ custid, renewalWithinDays, windowStartDate: startDate })
 
       if(result.status === "no_policies_in_window") {
         // Shouldn't normally happen given the discovery query mirrors generation's own filter, but

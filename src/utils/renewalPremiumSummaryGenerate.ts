@@ -4,17 +4,11 @@ import { archiveRenewalPremiumSummary } from "./renewalPremiumSummaryArchive.js"
 import { computeCurrentRenewal } from "./renewalPremiumSummaryPolicyValues.js"
 import { fetchPolicyLobInfo } from "./policyLineOfBusiness.js"
 import { sanitizeForFilename } from "./riskProfileArchive.js"
-import { sendMailWithAttachment } from "./mailer.js"
 import { storeDownload } from "./downloadStore.js"
 import type { ExtraRow, KnownLobCode, LobRowFill, OtherPolicyRow, PremiumFallbackNote } from "./renewalPremiumSummaryWorkbook.js"
 import { LOB_ROW_ORDER, buildRenewalPremiumSummaryWorkbook } from "./renewalPremiumSummaryWorkbook.js"
 
 const XLSX_MIME_TYPE = "application/vnd.openxmlformats-officedocument.spreadsheetml.sheet"
-
-// Placeholder recipient until reports are published to a OneDrive-based file system CSRs browse
-// directly instead of being emailed individually (Andrew, 2026-09-16) — send_email is for review in
-// the meantime, not a real distribution path, so it never resolves/sends to an actual CSR.
-const DEFAULT_TEST_RECIPIENT = "andrew@tyneside.io"
 
 const CUSTOMER_NAME_EXPR = "COALESCE(c.dba, NULLIF(TRIM(CONCAT_WS(' ', c.firstname, c.lastname)), ''), c.firmnamecust)"
 
@@ -102,9 +96,6 @@ export type GenerateRenewalPremiumSummaryParams = {
   // two-months-out target month would also sweep in that account's own sooner renewals (e.g. next
   // month's) into the same report, which isn't what "generate December's renewal summaries" means.
   windowStartDate?: string
-  sendEmail: boolean
-  cc?: string[]
-  overrideRecipient?: string
 }
 
 export type GenerateRenewalPremiumSummaryResult =
@@ -123,7 +114,6 @@ export type GenerateRenewalPremiumSummaryResult =
       otherCount: number
       filename: string
       downloadUrl: string
-      emailStatus: string
       includedPolicies: { coverage: string; current_premium: number | null; carrier: string }[]
       otherPolicies: OtherPolicyRow[]
     }
@@ -134,7 +124,7 @@ export type GenerateRenewalPremiumSummaryResult =
 // this in an MCP result envelope. Keep both callers' behavior identical: any change here changes
 // what the interactive tool returns too.
 export async function generateRenewalPremiumSummary(params: GenerateRenewalPremiumSummaryParams): Promise<GenerateRenewalPremiumSummaryResult> {
-  const { custid, renewalWithinDays, windowStartDate, sendEmail, cc, overrideRecipient } = params
+  const { custid, renewalWithinDays, windowStartDate } = params
 
   const policies = await runReadOnlyQuery(ACCOUNT_POLICIES_QUERY, [custid]) as AccountPolicy[]
 
@@ -236,20 +226,6 @@ export async function generateRenewalPremiumSummary(params: GenerateRenewalPremi
     cell_map: cellMap
   })
 
-  let emailStatus = "Not sent (send_email=false)."
-
-  if(sendEmail) {
-    const recipient = overrideRecipient ?? DEFAULT_TEST_RECIPIENT
-
-    await sendMailWithAttachment({
-      to: cc && cc.length > 0 ? [recipient, ...cc] : recipient,
-      subject: `Boxwood Renewal Premium Summary — ${ clientName }`,
-      text: `Attached is the Renewal Premium Summary for ${ clientName } (${ included.length } polic${ included.length === 1 ? "y" : "ies" } renewing within ${ renewalWithinDays } days).`,
-      attachment: { filename, content: buffer, contentType: XLSX_MIME_TYPE }
-    })
-    emailStatus = `Emailed to ${ recipient } (test recipient — no per-CSR send).`
-  }
-
   return {
     status: "generated",
     custid,
@@ -258,7 +234,6 @@ export async function generateRenewalPremiumSummary(params: GenerateRenewalPremi
     otherCount: other.length,
     filename,
     downloadUrl,
-    emailStatus,
     includedPolicies: [
       ...Object.entries(lobRows).map(([code, r]) => ({ coverage: code, current_premium: r!.current, carrier: r!.carrier })),
       ...extraRows.map((r) => ({ coverage: r.coverage, current_premium: r.current, carrier: r.carrier }))
