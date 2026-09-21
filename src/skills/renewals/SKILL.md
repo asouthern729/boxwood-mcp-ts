@@ -1,6 +1,6 @@
 ---
 name: renewals
-description: Domain knowledge for boxwood-mcp-ts's renewal-related MCP tools — upcoming_renewals (Boxwood Insurance's AMS360 book of business filtered to active policy terms expiring within a day window, with marketing shells, expired terms, and already-renewed terms excluded) and risk_profile (builds a branded Pre-Renewal Review .docx, exposures only, for one or more commercial policies). Use when answering questions about what's renewing soon, a producer's or carrier's upcoming renewal book, which accounts need renewal outreach, or building a renewal-meeting packet for a commercial client.
+description: Domain knowledge for boxwood-mcp-ts's renewal-related MCP tools — upcoming_renewals (Boxwood Insurance's AMS360 book of business filtered to active policy terms expiring within a day window, with marketing shells and, by default, already-renewed terms excluded — pass include_already_renewed for a calendar/exposure view instead) and risk_profile (builds a branded Pre-Renewal Review .docx, exposures only, for one or more commercial policies). Use when answering questions about what's renewing soon, a producer's or carrier's upcoming renewal book, which accounts need renewal outreach, or building a renewal-meeting packet for a commercial client.
 ---
 
 # Boxwood renewals
@@ -27,12 +27,21 @@ The window is either `within_days` (default 30, max 365 — a rolling window fro
 
 ### What's excluded, and why
 
-Every result satisfies all four of these, unconditionally — they aren't optional filters:
+Two exclusions are unconditional, always applied regardless of `include_already_renewed`:
+
+- **`polsubtype != 'S'`** — excludes marketing/submission shells (see `policies` skill), which have a `polexpdate` but represent a shopped quote, not a real bound risk.
+- **`status != 'D'`** — excludes deleted rows.
+
+By default (`include_already_renewed: false`, the default), two more are applied on top — together these turn the tool into a "needs action" pipeline view (what hasn't been handled yet), which is the primary use case:
 
 - **`renewalrptflag = 'A'`** — only the currently-active term in each renewal chain. `afw_basicpolinfo.status` looks like it should mean this but doesn't: in this data most currently-in-force terms carry `status = 'C'`, not `'A'` — `status='A'` alone undercounts the true active book by roughly 8x. `renewalrptflag` is the field that actually tracks renewal-chain lifecycle (`A`=active/current, `R`=renewed-over, `C`=cancelled, `E`=expired, plus a few rarer codes).
-- **`polsubtype != 'S'`** — excludes marketing/submission shells (see `policies` skill), which have a `polexpdate` but represent a shopped quote, not a real bound risk.
 - **Already-renewed exclusion** — a term is dropped if any other `afw_basicpolinfo` row's `priorpolid` already points back at its `polid` (i.e. a successor term already exists via `NOT EXISTS (... WHERE bp2.priorpolid = p.polid)`). **This is the load-bearing filter, not a nice-to-have**: a naive `status='A' AND polsubtype != 'S'` query in a 30-day window returns ~5x more rows than after this exclusion — the difference is entirely policies that already have a booked renewal term sitting in the data, just not the one that's technically "expiring."
-- **`polexpdate` within the window** — `BETWEEN now() AND now() + within_days`.
+
+Pass **`include_already_renewed: true`** to drop both of the above and get a calendar/exposure view instead — every term whose `polexpdate` is in the window, whether or not its renewal has already been bound. Verified against real data via `EPP 0764015`: its expiring term already had a bound successor with `renewalrptflag: 'R'` ten days before anyone asked about it, and the default view correctly excludes it as already-handled.
+
+The Pre-Renewal Risk Profile and Renewal Premium Summary chats (client decision, 2026-09-21) do NOT default their main query to `include_already_renewed: true` — both worksheets are meant to surface accounts still being shopped at renewal, so the default "needs action" list stays primary. Instead, when browsing a date range, each chat calls `upcoming_renewals` a second time with `include_already_renewed: true` for the same window, diffs the two result sets, and appends a short closing note naming any accounts that were excluded because they'd already renewed — visible as an FYI without cluttering the main action list.
+
+`polexpdate` within the window is always required — `BETWEEN now() AND now() + within_days` (or the exact `start_date`/`end_date` range).
 
 Note: `policy_query`'s `renewalrptflag: "A"` filter and `book_summary` both additionally require `poleffdate <= today` (client-confirmed 2026-08-27, so a bound-but-not-yet-started renewal doesn't count as part of the "current" book). This tool deliberately does **not** apply that restriction — a future-dated renewal that's already bound is precisely what makes an about-to-expire term excluded here via the already-renewed exclusion above, and is exactly the kind of row this tool's own purpose requires being able to detect.
 
