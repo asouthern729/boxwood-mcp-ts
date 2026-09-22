@@ -14,6 +14,7 @@ import { router as downloadsRouter } from "./routes/downloads.js"
 import { router as employeesRouter } from "./routes/employees.js"
 import { router as reportsRouter } from "./routes/reports.js"
 import { router as riskProfileRouter } from "./routes/riskProfile.js"
+import { router as clRenewalSummaryRouter } from "./routes/clRenewalSummary.js"
 import { router as renewalPremiumSummariesRouter } from "./routes/renewalPremiumSummaries.js"
 import { router as boardRouter } from "./routes/board.js"
 
@@ -27,6 +28,7 @@ app.use(downloadsRouter)
 app.use(employeesRouter)
 app.use(reportsRouter)
 app.use(riskProfileRouter)
+app.use(clRenewalSummaryRouter)
 app.use(renewalPremiumSummariesRouter)
 app.use(boardRouter)
 

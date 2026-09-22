@@ -1,12 +1,13 @@
 ---
 name: renewals
-description: Domain knowledge for boxwood-mcp-ts's renewal-related MCP tools — upcoming_renewals (Boxwood Insurance's AMS360 book of business filtered to active policy terms expiring within a day window, with marketing shells and, by default, already-renewed terms excluded — pass include_already_renewed for a calendar/exposure view instead) and risk_profile (builds a branded Pre-Renewal Review .docx, exposures only, for one or more commercial policies). Use when answering questions about what's renewing soon, a producer's or carrier's upcoming renewal book, which accounts need renewal outreach, or building a renewal-meeting packet for a commercial client.
+description: Domain knowledge for boxwood-mcp-ts's renewal-related MCP tools — upcoming_renewals (Boxwood Insurance's AMS360 book of business filtered to active policy terms expiring within a day window, with marketing shells and, by default, already-renewed terms excluded — pass include_already_renewed for a calendar/exposure view instead) risk_profile (builds a branded Pre-Renewal Review .docx, exposures only, for one or more commercial policies), and cl_renewal_summary (the same document plus current coverage limits/deductibles by line of business). Use when answering questions about what's renewing soon, a producer's or carrier's upcoming renewal book, which accounts need renewal outreach, or building a renewal-meeting packet for a commercial client.
 ---
 
 # Boxwood renewals
 
-Two tools cover renewal work today: `upcoming_renewals` (find what's coming due) and
-`risk_profile` (build the renewal-meeting document for one or more commercial accounts). More
+Three tools cover renewal work today: `upcoming_renewals` (find what's coming due),
+`risk_profile` (build the exposures-only renewal-meeting document for one or more commercial
+accounts), and `cl_renewal_summary` (that same document plus the current coverage limits). More
 renewal-related tools will land in this same skill over time rather than each getting its own skill
 — check here first for anything renewal-shaped.
 
@@ -74,7 +75,7 @@ There are three other renewal-adjacent `trantype` codes in the data (`RWX`, `RRQ
 
 ## risk_profile
 
-Builds a branded "Pre-Renewal Review" Word document (`.docx`) for one or more commercial-lines policies — the current expiring program's exposure schedules ONLY (Named Insureds, Locations, Property Coverage, General Liability Exposure, Equipment, Vehicles, Drivers, Workers' Comp Exposure) — deliberately no premiums or coverage limits (that's the separate, not-yet-built "CL Renewal Summary" tool). Meant for the CSR and client to review together ahead of the renewal meeting. Called ad hoc, not tied to `download_report` or any other tool — a rep can ask for one for any commercial account at any time.
+Builds a branded "Pre-Renewal Review" Word document (`.docx`) for one or more commercial-lines policies — the current expiring program's exposure schedules ONLY (Named Insureds, Locations, Property Coverage, General Liability Exposure, Equipment, Vehicles, Drivers, Workers' Comp Exposure) — deliberately no premiums or coverage limits (coverage limits are `cl_renewal_summary`, below). Meant for the CSR and client to review together ahead of the renewal meeting. Called ad hoc, not tied to `download_report` or any other tool — a rep can ask for one for any commercial account at any time.
 
 ### Calling the tool
 
@@ -104,3 +105,33 @@ The response includes a `download_url` (same `/downloads/<token>` pattern as `do
 
 - "Build a risk profile / pre-renewal review for [client]" → `polno` or `custid` for that client
 - "Build one for everything [client] has renewing in the next 90 days" → `custid`, `renewal_within_days: 90`
+
+## cl_renewal_summary
+
+Builds a branded "Renewal Summary" Word document (`.docx`) — everything `risk_profile` produces, plus the current coverage limits and deductibles for each line of business. Client definition (9/11/2026): "Pre Renewal Risk Profile — only exposures and building limits, veh, driver etc. CL Renewal Summary — incl all that plus coverage limits for liability etc." Use this whenever limits are wanted; use `risk_profile` for the exposures-only version. **No premiums** — those are `renewal_premium_summary`'s job.
+
+### Calling the tool
+
+Identical inputs and policy resolution to `risk_profile` (`polno` and/or `custid`, optional `renewal_within_days`) — both tools share the same resolution/combine code (`src/utils/clPolicyData.ts`), so they always cover the same in-force terms, combine the same way for one customer, and treat cross-customer matches as ambiguous the same way. Download link only, no email.
+
+### What's added on top of the risk profile
+
+All limits come from `afw_cprem`, deduped to each coverage line's latest non-deleted version. Each section is omitted when there's no data for it.
+
+- **Property Coverage** is one row per *subject of insurance* (Address / Subject of Insurance / Limit / Valuation / Cause of Loss / Deductible) rather than the risk profile's one row per address — the layout Boxwood's own staff produce from AMS360's proposal builder. Wind/hail deductibles are shown inline, e.g. "$1,000 ($100,000 Wind/Hail)". Additional coverages that some carriers rate on the same subject (Ordinance or Law, Demolition, Tenants Improvements) get their own row under the same address; rating markers ("RC", "Inflation guard", "Theft extension") are dropped. Policy-level property coverages with a limit go in "Additional Property Coverages".
+- **General Liability Limits** — the policy-level GL lines (Each Occurrence, General Aggregate, Products/Completed Ops, Personal & Advertising Injury, Fire Damage, Medical Expense first, then anything else with a limit). The per-hazard rated lines never carry a limit in this data.
+- **Vehicle Coverages** — a per-vehicle table keyed by Veh # (Liability/CSL, Med Pay, UM/UIM/UMPD, Comp and Collision deductibles, etc. — only columns with a value on some vehicle are shown), plus **Hired & Non-Owned Auto**. A separate table rather than extra Vehicle List columns: VIN plus the coverage columns doesn't fit the page.
+- **Workers' Compensation – Employer's Liability** — Each Accident / Disease–Policy Limit / Disease–Each Employee (`ilimit1/2/3`, confirmed against the tenant's one non-uniform 100k/500k/100k combination).
+- **Umbrella Liability Limits** — Each Occurrence / Aggregate / Self-Insured Retention only; no schedule of underlying policies (client decision).
+- **Inland Marine** and every other line (Crime, EPLI, Cyber, BOP, ...) — every coverage line carrying a limit, under that line's own heading.
+
+**Carrier-internal coverage codes.** Some carriers record coverages under a bare code (e.g. `WTRBN`, `DPPRM`, `FORMR`) with no description anywhere in the synced AMS360 data. They stay in the document as-is (dropping them would hide a real limit) and come back in the tool's `unresolved_coverage_codes` so the CSR can relabel them by hand — mention them when reporting the result.
+
+### Archiving
+
+Same manifest shape and keying rules as `risk_profile`, under `scripts/output/cl-renewal-summary/`, backing `GET /api/v1/boxwood-mcp/cl-renewal-summary/manifest`, `GET`/`DELETE .../cl-renewal-summary/files/:filename`, and `POST .../cl-renewal-summary/chat` (`src/routes/clRenewalSummary.ts`, mirroring the risk-profile routes). The client's requirement is that these be filed to SharePoint (Commercial Lines/Client Renewal Info/<client>/<year>/), not emailed — the local archive is the interim until that Graph access exists.
+
+### Common questions → calls
+
+- "Build a renewal summary for [client]" / "risk profile with limits" → `cl_renewal_summary` with `polno` or `custid`
+- "What are [client]'s GL limits?" as a quick question → `policy_query` is lighter; build this document only when they want the deliverable

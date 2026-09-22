@@ -478,7 +478,7 @@ const LOGO_PATH = path.join(import.meta.dirname, "..", "..", "assets", "boxwood-
 // summary table is added below it — one row per combined policy, so any OTHER policy's differing
 // dates are still visible there, and it remains the reader's key to the "Policy #" column added
 // throughout the rest of the document.
-function coverPageChildren(clientName: string, currentPeriod: string, renewalDate: string, policySummary?: PolicySummaryRow[]): (Paragraph | Table)[] {
+function coverPageChildren(title: string, clientName: string, currentPeriod: string, renewalDate: string, policySummary?: PolicySummaryRow[]): (Paragraph | Table)[] {
   const logoData = readFileSync(LOGO_PATH)
 
   const dateBlock: (Paragraph | Table)[] = [
@@ -512,7 +512,7 @@ function coverPageChildren(clientName: string, currentPeriod: string, renewalDat
     new Paragraph({
       alignment: AlignmentType.CENTER,
       spacing: { before: 480, after: 240 },
-      children: [new TextRun({ text: "PRE-RENEWAL REVIEW", bold: true, color: GREEN, size: 72, font: "Arial" })]
+      children: [new TextRun({ text: title, bold: true, color: GREEN, size: 72, font: "Arial" })]
     }),
     new Paragraph({
       alignment: AlignmentType.CENTER,
@@ -524,21 +524,11 @@ function coverPageChildren(clientName: string, currentPeriod: string, renewalDat
   ]
 }
 
-// Returns the section names actually included, in document order — the caller reports this back to
-// the user so they know which sections were present in the source data (never surfaced in the
-// document itself, matching the skill's own "no commentary in the deliverable" rule).
-export async function buildRiskProfileDoc(input: RiskProfileInput): Promise<{ buffer: Buffer; includedSections: string[] }> {
-  const sections: { name: string; section: DocSection | null }[] = [
-    { name: "Named Insureds", section: namedInsuredsSection(input.clientName, input.additionalNamedInsureds) },
-    { name: "Locations Schedule", section: locationsSection(input.locations) },
-    { name: "Property Coverage", section: propertySection(input.property) },
-    { name: "General Liability Exposure", section: glSection(input.glExposure) },
-    { name: "Equipment List & Value", section: equipmentSection(input.equipmentBlanket, input.equipmentItems) },
-    { name: "Vehicle List", section: vehiclesSection(input.vehicles) },
-    { name: "Driver Information Schedule", section: driversSection(input.drivers) },
-    { name: "Workers' Compensation Exposure", section: wcSection(input.wcExposure) }
-  ]
+type CoverFields = { clientName: string; currentPeriod: string; renewalDate: string; policySummary?: PolicySummaryRow[] }
 
+// Shared by both document types — same styles, page setup, cover page, and page-fit layout; only
+// the cover title and the section list differ.
+async function renderDocument(title: string, cover: CoverFields, sections: { name: string; section: DocSection | null }[]): Promise<{ buffer: Buffer; includedSections: string[] }> {
   const included = sections.filter((s): s is { name: string; section: DocSection } => s.section !== null)
 
   const doc = new Document({
@@ -570,7 +560,7 @@ export async function buildRiskProfileDoc(input: RiskProfileInput): Promise<{ bu
         }
       },
       children: [
-        ...coverPageChildren(input.clientName, input.currentPeriod, input.renewalDate, input.policySummary),
+        ...coverPageChildren(title, cover.clientName, cover.currentPeriod, cover.renewalDate, cover.policySummary),
         ...layoutSections(included.map((s) => s.section))
       ]
     }]
@@ -579,4 +569,126 @@ export async function buildRiskProfileDoc(input: RiskProfileInput): Promise<{ bu
   const rawBuffer = await Packer.toBuffer(doc)
 
   return { buffer: Buffer.from(rawBuffer as unknown as Uint8Array), includedSections: included.map((s) => s.name) }
+}
+
+// Returns the section names actually included, in document order — the caller reports this back to
+// the user so they know which sections were present in the source data (never surfaced in the
+// document itself, matching the skill's own "no commentary in the deliverable" rule).
+export async function buildRiskProfileDoc(input: RiskProfileInput): Promise<{ buffer: Buffer; includedSections: string[] }> {
+  return renderDocument("PRE-RENEWAL REVIEW", input, [
+    { name: "Named Insureds", section: namedInsuredsSection(input.clientName, input.additionalNamedInsureds) },
+    { name: "Locations Schedule", section: locationsSection(input.locations) },
+    { name: "Property Coverage", section: propertySection(input.property) },
+    { name: "General Liability Exposure", section: glSection(input.glExposure) },
+    { name: "Equipment List & Value", section: equipmentSection(input.equipmentBlanket, input.equipmentItems) },
+    { name: "Vehicle List", section: vehiclesSection(input.vehicles) },
+    { name: "Driver Information Schedule", section: driversSection(input.drivers) },
+    { name: "Workers' Compensation Exposure", section: wcSection(input.wcExposure) }
+  ])
+}
+
+// ---------- CL RENEWAL SUMMARY (exposures + coverage limits) ----------
+// Same document as the Pre-Renewal Review above, plus a limits table next to each line of
+// business's exposure schedule. See clCoverageData.ts for where each limit comes from in AMS360.
+
+export type CoverageLimitRow = { coverage: string; limit: string; deductible: string }
+export type CoverageSection = { title: string; rows: CoverageLimitRow[] }
+// One row per subject of insurance (not per address, unlike the Risk Profile's PropertyRow) —
+// matches the AMS360 proposal-builder layout the client's own staff produce (Sarah Schultz's
+// Defatta version, 9/14/2026). A peril deductible (wind/hail) rides along in `deductible`, e.g.
+// "$1,000 ($100,000 Wind/Hail)", the same way that reference document shows it.
+export type PropertySubjectRow = { address: string; subject: string; limit: string; valuation: string; causeOfLoss: string; deductible: string }
+// Keyed by vehNo so it lines up with the Vehicle List above it; `values` keys are the column keys
+// passed alongside in RenewalSummaryInput.vehicleCoverageColumns.
+export type VehicleCoverageRow = { vehNo: string; description: string; values: Record<string, string> }
+export type HiredNonOwnedRow = { exposure: string; coverage: string; limit: string; deductible: string }
+
+export type CoverageSectionSlot = "property" | "liability" | "inlandMarine" | "auto" | "workersComp" | "umbrella" | "other"
+
+export type RenewalSummaryInput = Omit<RiskProfileInput, "property"> & {
+  propertySubjects: PropertySubjectRow[]
+  vehicleCoverages: VehicleCoverageRow[]
+  // Only the columns that have a value on at least one vehicle, in display order.
+  vehicleCoverageColumns: { key: string; label: string }[]
+  hiredNonOwned: HiredNonOwnedRow[]
+  coverageSections: (CoverageSection & { key: CoverageSectionSlot })[]
+}
+
+function propertySubjectSection(rows: PropertySubjectRow[]): DocSection | null {
+  if(rows.length === 0) return null
+
+  const headers = ["Address", "Subject of Insurance", "Limit", "Valuation", "Cause of Loss", "Deductible"]
+  const tableRows = rows.map((p) => [p.address, p.subject, p.limit, p.valuation, p.causeOfLoss, p.deductible])
+
+  return {
+    height: H1_HEIGHT + estimateTableHeight(headers, tableRows),
+    blocks: [h1("Property Coverage"), buildTable(headers, tableRows)]
+  }
+}
+
+// Deductible column only when at least one row has one — most liability limits tables never do.
+function coverageSection(section: CoverageSection): DocSection | null {
+  if(section.rows.length === 0) return null
+
+  const withDeductible = section.rows.some((r) => r.deductible !== "")
+  const headers = withDeductible ? ["Coverage", "Limit", "Deductible"] : ["Coverage", "Limit"]
+  const tableRows = section.rows.map((r) => withDeductible ? [r.coverage, r.limit, r.deductible] : [r.coverage, r.limit])
+
+  return {
+    height: H1_HEIGHT + estimateTableHeight(headers, tableRows),
+    blocks: [h1(section.title), buildTable(headers, tableRows)]
+  }
+}
+
+// A separate table keyed by Veh # rather than extra columns on the Vehicle List — the VIN column
+// plus five or more coverage columns doesn't fit portrait Letter at this font size.
+function vehicleCoverageSection(rows: VehicleCoverageRow[], columns: { key: string; label: string }[]): DocSection | null {
+  if(rows.length === 0 || columns.length === 0) return null
+
+  const headers = ["Veh #", "Vehicle", ...columns.map((c) => c.label)]
+  const tableRows = rows.map((v) => [v.vehNo, v.description, ...columns.map((c) => v.values[c.key] ?? "")])
+
+  return {
+    height: H1_HEIGHT + estimateTableHeight(headers, tableRows),
+    blocks: [h1("Vehicle Coverages"), buildTable(headers, tableRows)]
+  }
+}
+
+function hiredNonOwnedSection(rows: HiredNonOwnedRow[]): DocSection | null {
+  if(rows.length === 0) return null
+
+  const withDeductible = rows.some((r) => r.deductible !== "")
+  const headers = withDeductible ? ["Exposure", "Coverage", "Limit", "Deductible"] : ["Exposure", "Coverage", "Limit"]
+  const tableRows = rows.map((r) => withDeductible ? [r.exposure, r.coverage, r.limit, r.deductible] : [r.exposure, r.coverage, r.limit])
+
+  return {
+    height: H1_HEIGHT + estimateTableHeight(headers, tableRows),
+    blocks: [h1("Hired & Non-Owned Auto"), buildTable(headers, tableRows)]
+  }
+}
+
+export async function buildRenewalSummaryDoc(input: RenewalSummaryInput): Promise<{ buffer: Buffer; includedSections: string[] }> {
+  const slot = (key: CoverageSectionSlot) => input.coverageSections
+    .filter((s) => s.key === key)
+    .map((s) => ({ name: s.title, section: coverageSection(s) }))
+
+  return renderDocument("RENEWAL SUMMARY", input, [
+    { name: "Named Insureds", section: namedInsuredsSection(input.clientName, input.additionalNamedInsureds) },
+    { name: "Locations Schedule", section: locationsSection(input.locations) },
+    { name: "Property Coverage", section: propertySubjectSection(input.propertySubjects) },
+    ...slot("property"),
+    ...slot("liability"),
+    { name: "General Liability Exposure", section: glSection(input.glExposure) },
+    ...slot("inlandMarine"),
+    { name: "Equipment List & Value", section: equipmentSection(input.equipmentBlanket, input.equipmentItems) },
+    { name: "Vehicle List", section: vehiclesSection(input.vehicles) },
+    { name: "Vehicle Coverages", section: vehicleCoverageSection(input.vehicleCoverages, input.vehicleCoverageColumns) },
+    { name: "Hired & Non-Owned Auto", section: hiredNonOwnedSection(input.hiredNonOwned) },
+    ...slot("auto"),
+    { name: "Driver Information Schedule", section: driversSection(input.drivers) },
+    ...slot("workersComp"),
+    { name: "Workers' Compensation Exposure", section: wcSection(input.wcExposure) },
+    ...slot("umbrella"),
+    ...slot("other")
+  ])
 }
