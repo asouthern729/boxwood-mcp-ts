@@ -68,7 +68,7 @@ if(!isExplicitOverride) {
     // 2026-09-17).
     const lookbackDays = Math.max(1, Math.ceil((runStartedAt.getTime() - watermark.syncedUntil.getTime()) / 86_400_000) + 1)
     since = `${ lookbackDays }d`
-    syncedSince = watermark.toISOString()
+    syncedSince = watermark.syncedUntil.toISOString()
   }
   // No watermark yet (first run ever) — leave since/until/syncedSince all unset, so
   // download_report falls back to its own default (today's fixed entereddate window). The
