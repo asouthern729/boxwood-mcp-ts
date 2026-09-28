@@ -35,12 +35,12 @@ function getTransporter(): nodemailer.Transporter {
 
 export type MailAttachment = { filename: string; content: Buffer; contentType: string }
 
-export async function sendMailWithAttachment(opts: {
+export async function sendMail(opts: {
   to: string | string[]
   cc?: string | string[]
   subject: string
   text?: string
-  attachment: MailAttachment
+  attachments?: MailAttachment[]
 }): Promise<void> {
   const from = process.env.MAIL_FROM
 
@@ -54,6 +54,17 @@ export async function sendMailWithAttachment(opts: {
     cc: opts.cc,
     subject: opts.subject,
     text: opts.text,
-    attachments: [opts.attachment]
+    attachments: opts.attachments
   })
+}
+
+export async function sendMailWithAttachment(opts: {
+  to: string | string[]
+  cc?: string | string[]
+  subject: string
+  text?: string
+  attachment: MailAttachment
+}): Promise<void> {
+  const { attachment, ...rest } = opts
+  await sendMail({ ...rest, attachments: [attachment] })
 }

@@ -4,6 +4,7 @@ import { registerPolicyQueryTool } from "./tools/policies/policyQuery.js"
 import { registerInvoiceLookupTool } from "./tools/invoices/invoiceLookup.js"
 import { registerActivityFeedTool } from "./tools/activity/activityFeed.js"
 import { registerUpcomingRenewalsTool } from "./tools/renewals/upcomingRenewals.js"
+import { registerPlRenewalPremiumChangeTool } from "./tools/renewals/plRenewalPremiumChange.js"
 import { registerClaimLookupTool } from "./tools/claims/claimLookup.js"
 import { registerBookSummaryTool } from "./tools/bookSummary.js"
 import { registerEmployeeLookupTool } from "./tools/employeeLookup.js"
@@ -32,6 +33,7 @@ export function createServer() {
   registerInvoiceLookupTool(server)
   registerActivityFeedTool(server)
   registerUpcomingRenewalsTool(server)
+  registerPlRenewalPremiumChangeTool(server)
   registerClaimLookupTool(server)
   registerBookSummaryTool(server)
   registerEmployeeLookupTool(server)

@@ -1,13 +1,14 @@
 ---
 name: renewals
-description: Domain knowledge for boxwood-mcp-ts's renewal-related MCP tools — upcoming_renewals (Boxwood Insurance's AMS360 book of business filtered to active policy terms expiring within a day window, with marketing shells and, by default, already-renewed terms excluded — pass include_already_renewed for a calendar/exposure view instead) risk_profile (builds a branded Pre-Renewal Review .docx, exposures only, for one or more commercial policies), and cl_renewal_summary (the same document plus current coverage limits/deductibles by line of business). Use when answering questions about what's renewing soon, a producer's or carrier's upcoming renewal book, which accounts need renewal outreach, or building a renewal-meeting packet for a commercial client.
+description: Domain knowledge for boxwood-mcp-ts's renewal-related MCP tools — upcoming_renewals (Boxwood Insurance's AMS360 book of business filtered to active policy terms expiring within a day window, with marketing shells and, by default, already-renewed terms excluded — pass include_already_renewed for a calendar/exposure view instead) risk_profile (builds a branded Pre-Renewal Review .docx, exposures only, for one or more commercial policies), cl_renewal_summary (the same document plus current coverage limits/deductibles by line of business), and pl_renewal_premium_change (personal-lines renewal premium change vs the expiring term, as tab-delimited lines for an AMS activity note). Use when answering questions about what's renewing soon, a producer's or carrier's upcoming renewal book, which accounts need renewal outreach, building a renewal-meeting packet for a commercial client, or how much a personal-lines renewal went up or down.
 ---
 
 # Boxwood renewals
 
-Three tools cover renewal work today: `upcoming_renewals` (find what's coming due),
+Four tools cover renewal work today: `upcoming_renewals` (find what's coming due),
 `risk_profile` (build the exposures-only renewal-meeting document for one or more commercial
-accounts), and `cl_renewal_summary` (that same document plus the current coverage limits). More
+accounts), `cl_renewal_summary` (that same document plus the current coverage limits), and
+`pl_renewal_premium_change` (how much a downloaded personal-lines renewal changed in premium). More
 renewal-related tools will land in this same skill over time rather than each getting its own skill
 — check here first for anything renewal-shaped.
 
@@ -137,3 +138,26 @@ Same manifest shape and keying rules as `risk_profile`, under `scripts/output/cl
 
 - "Build a renewal summary for [client]" / "risk profile with limits" → `cl_renewal_summary` with `polno` or `custid`
 - "What are [client]'s GL limits?" as a quick question → `policy_query` is lighter; build this document only when they want the deliverable
+
+## pl_renewal_premium_change
+
+For every personal-lines renewal a carrier downloaded (`afw_policytransaction` `trantype='RWL'`, `source='D'`, `typeofbus=1`), compares the renewal term's premium with the term it replaces and returns the $ and % change, plus one tab-delimited line per policy (`activity_lines`, header in `activity_header`) for pasting into an AMS activity note. A daily email (`scripts/dailyPlRenewalPremiumChange.ts`) sends the same lines to personal@boxwoodins.com. It is not in cron yet and will be switched on once the note format is confirmed. Nothing is archived.
+
+### Calling the tool
+
+- Scope by `customer_name` (partial match), `custid`, or `policy_no`, plus `start_date`/`end_date`: the date the renewal *downloaded*, end inclusive. The default is the last 30 days.
+- Present `activity_lines` inside a code block so the tabs survive copy/paste.
+- The column layout is a placeholder until Patrick confirms the real one.
+
+### How the premiums are chosen (confirmed against 171 real renewals, 2026-09-24)
+
+- **Expiring premium** is the prior term's `fulltermpremium`, the endorsed figure at expiration. It is not the original bound premium, and the difference matters: one Homeowners renewal reads +9.3% against the endorsed figure but −1.5% against the original.
+- **Renewal premium** is the new term's `fulltermpremium`.
+- **Never `annualizedpremium`.** It's truly annualized, so a 6-month auto term reads about 2×. It's also missing on most prior terms, because AMS360 only started filling it on downloads around Q1 2026.
+- **Prior term** is found by `priorpolid`, falling back to same custid + polno only when `priorpolid` is empty (seen on Flood). Don't match terms by polno alone: about 1 in 7 PL renewals change polno (e.g. `HO252129001` → `HO252129002`).
+- **Missing premium.** When either side is $0 or missing (every Flood/NFIP renewal so far, plus the odd auto policy), the change is left blank and `note` says why. Report "unavailable", never an infinite or made-up change.
+
+### Common questions → calls
+
+- "How much did [client]'s renewal go up?" → `pl_renewal_premium_change` with `customer_name`
+- "Which PL renewals came in this week with big increases?" → `pl_renewal_premium_change` with `start_date`, then sort by `change_percent`

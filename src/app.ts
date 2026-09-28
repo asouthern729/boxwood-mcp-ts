@@ -17,6 +17,7 @@ import { router as riskProfileRouter } from "./routes/riskProfile.js"
 import { router as clRenewalSummaryRouter } from "./routes/clRenewalSummary.js"
 import { router as renewalPremiumSummariesRouter } from "./routes/renewalPremiumSummaries.js"
 import { router as boardRouter } from "./routes/board.js"
+import { router as plRenewalPremiumChangeRouter } from "./routes/plRenewalPremiumChange.js"
 
 const app = createMcpExpressApp({ allowedHosts })
 
@@ -31,6 +32,7 @@ app.use(riskProfileRouter)
 app.use(clRenewalSummaryRouter)
 app.use(renewalPremiumSummariesRouter)
 app.use(boardRouter)
+app.use(plRenewalPremiumChangeRouter)
 
 app.use(csp)
 app.use(inputSanitation)
