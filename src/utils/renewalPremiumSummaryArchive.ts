@@ -64,18 +64,33 @@ export function archiveRenewalPremiumSummary(buffer: Buffer, entry: RenewalPremi
   writeFileSync(MANIFEST_PATH, JSON.stringify(manifest, null, 2))
 }
 
-// Overwrites just the archived file's bytes and stamps last_refreshed_at on its manifest entry —
-// used by the Refresh path (renewalPremiumSummaryRefresh.ts), which only ever touches a handful of
-// value cells in the existing workbook rather than rebuilding it, so every other manifest field
-// (cell_map, csr_code, polnos, etc.) stays exactly as it was at original generation.
-export function recordRenewalPremiumSummaryRefresh(filename: string, buffer: Buffer, refreshedAt: string): void {
+// Overwrites just the archived file's bytes, stamps last_refreshed_at, and saves the updated cell_map
+// (same rows/polnos, just the tool-written current/renewal values brought up to date) — used by the
+// Refresh path (renewalPremiumSummaryRefresh.ts), which only ever touches a handful of value cells in
+// the existing workbook rather than rebuilding it, so every other manifest field (csr_code, polnos,
+// etc.) stays exactly as it was at original generation.
+export function recordRenewalPremiumSummaryRefresh(filename: string, buffer: Buffer, refreshedAt: string, cellMap: RenewalPremiumSummaryCellMapEntry[]): void {
   writeFileSync(path.join(RENEWAL_PREMIUM_SUMMARY_OUTPUT_DIR, filename), buffer)
 
   const manifest = readManifest()
   const index = manifest.findIndex((existing) => existing.filename === filename)
   if(index === -1) throw new Error(`No manifest entry for ${ filename } — cannot record refresh`)
 
-  manifest[index] = { ...manifest[index], last_refreshed_at: refreshedAt }
+  manifest[index] = { ...manifest[index], cell_map: cellMap, last_refreshed_at: refreshedAt }
+  writeFileSync(MANIFEST_PATH, JSON.stringify(manifest, null, 2))
+}
+
+// Saves just an updated cell_map — no file write, no last_refreshed_at — for when Refresh has
+// recorded the tool-written Current/Renewal values of an entry archived before cell_map carried them
+// (see renewalPremiumSummaryRefresh.ts) but had no cell to change. Persisting that baseline now,
+// while the server copies still can't be edited by anyone, is what lets later refreshes tell a
+// tool-written figure from an employee's once the files are shared.
+export function recordRenewalPremiumSummaryCellMap(filename: string, cellMap: RenewalPremiumSummaryCellMapEntry[]): void {
+  const manifest = readManifest()
+  const index = manifest.findIndex((existing) => existing.filename === filename)
+  if(index === -1) throw new Error(`No manifest entry for ${ filename } — cannot record cell map`)
+
+  manifest[index] = { ...manifest[index], cell_map: cellMap }
   writeFileSync(MANIFEST_PATH, JSON.stringify(manifest, null, 2))
 }
 

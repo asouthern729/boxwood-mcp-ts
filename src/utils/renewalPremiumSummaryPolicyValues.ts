@@ -9,6 +9,9 @@ import { runReadOnlyQuery } from "../db.js"
 // (customer/company/employee joins, premium_as_of) is pulled here.
 export const ACCOUNT_POLICY_PREMIUMS_QUERY = `
   SELECT p.polno,
+    -- Plain YYYY-MM-DD text, not a timestamp — Refresh only compares it against the report's
+    -- generation date to spot a polno that has since rolled into a new term.
+    p.poleffdate::date::text AS poleffdate,
     p.fulltermpremium,
     -- 2026-09-19 finding: a real, non-trivial share of "current" commercial terms carry
     -- fulltermpremium=0/null at the header even though their own bind/renewal transaction already
@@ -90,11 +93,13 @@ export function computeCurrentRenewal(policy: AccountPolicyPremiums): PolicyCurr
   return { current, renewal, usedFallback, fallbackAmount: usedFallback ? fallbackCurrent : null }
 }
 
+export type CurrentTermValues = PolicyCurrentRenewal & { poleffdate: string }
+
 // Fetches every current, in-force commercial policy on the account and keys its Current/Renewal
 // values by polno — the shape Refresh needs to look up "what should policy X's Current/Renewal read
 // right now," without re-running any of the line-of-business/row-layout logic that only full
 // generation cares about.
-export async function fetchCurrentRenewalByPolno(custid: string): Promise<Map<string, PolicyCurrentRenewal>> {
-  const policies = await runReadOnlyQuery(ACCOUNT_POLICY_PREMIUMS_QUERY, [custid]) as AccountPolicyPremiums[]
-  return new Map(policies.map((p) => [p.polno, computeCurrentRenewal(p)]))
+export async function fetchCurrentRenewalByPolno(custid: string): Promise<Map<string, CurrentTermValues>> {
+  const policies = await runReadOnlyQuery(ACCOUNT_POLICY_PREMIUMS_QUERY, [custid]) as (AccountPolicyPremiums & { poleffdate: string })[]
+  return new Map(policies.map((p) => [p.polno, { ...computeCurrentRenewal(p), poleffdate: p.poleffdate }]))
 }

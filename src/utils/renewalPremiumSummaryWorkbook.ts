@@ -62,9 +62,15 @@ export type RenewalPremiumSummaryInput = {
 // recompute layout (populated-first ordering, which extras made the cut), only recognize a row it
 // already committed to at generation time. Only "known"/"extra" rows are recorded — "empty" and
 // "blank" rows carry no policy-derived values, so there's nothing for Refresh to ever update there.
+//
+// current/renewal record what the tool itself last wrote to that row's C/E cells (at generation, then
+// updated by each Refresh that writes) — Refresh only overwrites Current while the cell still holds
+// exactly that value, so a figure an employee typed in by hand is never replaced. Optional: entries
+// archived before this existed don't carry them (see renewalPremiumSummaryRefresh.ts for how those
+// are seeded).
 export type RenewalPremiumSummaryCellMapEntry =
-  | { row: number; kind: "known"; code: KnownLobCode; polnos: string[] }
-  | { row: number; kind: "extra"; polnos: string[] }
+  | { row: number; kind: "known"; code: KnownLobCode; polnos: string[]; current?: number | null; renewal?: number | null }
+  | { row: number; kind: "extra"; polnos: string[]; current?: number | null; renewal?: number | null }
 
 export type BuildRenewalPremiumSummaryWorkbookResult = {
   buffer: Buffer
@@ -172,7 +178,7 @@ export async function buildRenewalPremiumSummaryWorkbook(input: RenewalPremiumSu
       if(entry.fill.renewal !== null) eCell.value = entry.fill.renewal
       sheet.getCell(`D${ row }`).value = entry.fill.carrier
       maxCarrierLen = Math.max(maxCarrierLen, entry.fill.carrier.length)
-      cellMap.push({ row, kind: "known", code: entry.code, polnos: entry.fill.policyNos.split(", ") })
+      cellMap.push({ row, kind: "known", code: entry.code, polnos: entry.fill.policyNos.split(", "), current: entry.fill.current, renewal: entry.fill.renewal })
     } else if(entry.kind === "extra") {
       // No Trending — an extra/unmatched policy isn't one of the 8 tracked lines, so no benchmark
       // range applies. Explicitly cleared, not just left unwritten: this row may now land on a
@@ -184,7 +190,7 @@ export async function buildRenewalPremiumSummaryWorkbook(input: RenewalPremiumSu
       if(entry.extra.renewal !== null) eCell.value = entry.extra.renewal
       sheet.getCell(`D${ row }`).value = entry.extra.carrier
       maxCarrierLen = Math.max(maxCarrierLen, entry.extra.carrier.length)
-      cellMap.push({ row, kind: "extra", polnos: entry.extra.policyNos.split(", ") })
+      cellMap.push({ row, kind: "extra", polnos: entry.extra.policyNos.split(", "), current: entry.extra.current, renewal: entry.extra.renewal })
     } else if(entry.kind === "blank") {
       // Explicitly cleared (not just left unwritten) for the same reason as the "extra" case above —
       // this row may land on a template position that already has default label/Trending content.
