@@ -20,9 +20,9 @@ import {
 // Unlike the original template, section data here comes from already-queried Postgres rows (see
 // src/tools/policies/riskProfile.ts), not a `data` JSON blob read from disk.
 
-const GREEN = "459361"
-const NEARBLACK = "231F20"
-const LIGHTGREEN = "E3F0E7"
+export const GREEN = "459361"
+export const NEARBLACK = "231F20"
+export const LIGHTGREEN = "E3F0E7"
 const BORDERGRAY = "CCCCCC"
 
 export function money(v: number | string | null | undefined): string {
@@ -469,7 +469,7 @@ function wcSection(rows: WcExposureRow[]): DocSection | null {
   }
 }
 
-const LOGO_PATH = path.join(import.meta.dirname, "..", "..", "assets", "boxwood-logo.png")
+export const LOGO_PATH = path.join(import.meta.dirname, "..", "..", "assets", "boxwood-logo.png")
 
 // The "Current Policy Period"/"Renewal Effective" subheader always shows (client feedback,
 // 2026-09-15 — matches the employee's own reference layout), even when combining several policies

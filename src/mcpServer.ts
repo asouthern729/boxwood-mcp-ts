@@ -13,6 +13,7 @@ import { registerDownloadReportTool } from "./tools/downloads/downloadReport.js"
 import { registerDownloadReportWorkbookTool } from "./tools/downloads/downloadReportWorkbook.js"
 import { registerRiskProfileTool } from "./tools/policies/riskProfile.js"
 import { registerClRenewalSummaryTool } from "./tools/policies/clRenewalSummary.js"
+import { registerPlRenewalSummaryTool } from "./tools/policies/plRenewalSummary.js"
 import { registerRenewalPremiumSummaryTool } from "./tools/policies/renewalPremiumSummary.js"
 import { registerBoardSummaryTool } from "./tools/board/boardSummary.js"
 import { registerBoardUpdateItemTool } from "./tools/board/boardUpdateItem.js"
@@ -42,6 +43,7 @@ export function createServer() {
   registerDownloadReportWorkbookTool(server)
   registerRiskProfileTool(server)
   registerClRenewalSummaryTool(server)
+  registerPlRenewalSummaryTool(server)
   registerRenewalPremiumSummaryTool(server)
   registerBoardSummaryTool(server)
   registerBoardUpdateItemTool(server)

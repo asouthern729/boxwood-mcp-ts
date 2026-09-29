@@ -40,12 +40,16 @@ export const RESOLVE_POLICY_QUERY = `
     ${ CUSTOMER_NAME_EXPR } AS customer_name,
     co.name AS carrier_name,
     COALESCE(NULLIF(TRIM(CONCAT_WS(' ', csr.firstname, csr.lastname)), ''), p.csrcode) AS csr_name,
-    p.fulltermpremium
+    p.fulltermpremium,
+    NULLIF(TRIM(prod.email), '') AS producer_email
   FROM afw_basicpolinfo p
   LEFT JOIN afw_customer c ON c.custid = p.custid
   LEFT JOIN afw_company co ON co.cocode = p.cocode
   LEFT JOIN afw_employee csr ON csr.empcode = p.csrcode
-  WHERE p.typeofbus = 2
+  LEFT JOIN afw_employee prod ON prod.empcode = p.execcode
+  -- $5 is the book: 2 = commercial (risk_profile, cl_renewal_summary), 1 = personal
+  -- (pl_renewal_summary). Everything else below applies the same to both.
+  WHERE p.typeofbus = $5
     AND p.polsubtype != 'S'
     AND p.status != 'D'
     AND p.poleffdate <= now()
@@ -58,7 +62,7 @@ export const RESOLVE_POLICY_QUERY = `
     -- current commercial policies regardless of how far out its renewal is, which isn't what "give me
     -- their upcoming renewals" actually means. NULL (the default) keeps today's unscoped behavior.
     AND ($3::int IS NULL OR p.polexpdate <= now() + ($3::int * INTERVAL '1 day'))
-    -- Name match lives HERE, behind the typeofbus = 2 filter above, rather than going through
+    -- Name match lives HERE, behind the typeofbus filter above, rather than going through
     -- customer_lookup first (client-reported 2026-09-22, Defatta Custom Homes LLC): AMS360 keeps a
     -- commercial client's employee-benefits book as a SEPARATE customer record with a near-identical
     -- name ("DeFatta Custom Homes", typeofbus 4 only — dental/vision/life/disability), so a name
@@ -69,7 +73,7 @@ export const RESOLVE_POLICY_QUERY = `
     AND ($4::text IS NULL OR c.dba ILIKE $4 OR c.firmnamecust ILIKE $4
       OR TRIM(CONCAT_WS(' ', c.firstname, c.lastname)) ILIKE $4)
   ORDER BY customer_name, p.polexpdate
-  LIMIT 12
+  LIMIT $6
 `
 
 export type ResolvedPolicy = {
@@ -83,6 +87,7 @@ export type ResolvedPolicy = {
   carrier_name: string | null
   csr_name: string | null
   fulltermpremium: string | number | null
+  producer_email: string | null
 }
 
 // Every dedup query below follows the same convention as policyQuery.ts's includes: ROW_NUMBER()
@@ -627,6 +632,16 @@ export const DEFAULT_RENEWAL_WINDOW_DAYS = 90
 
 export type ClPolicyFilters = { polno?: string; custid?: string; customer_name?: string; renewal_within_days?: number }
 
+// Which book to resolve against. The defaults are the commercial tools' behavior; pl_renewal_summary
+// passes the personal book with no default window (Andrew, 2026-09-28: a personal "Portfolio
+// Summary" covers every in-force PL policy, and PL auto's 6-month terms rarely line up with home's).
+// maxPolicies caps how many terms one document combines: 12 for commercial, 20 for personal (the
+// largest personal household had 18 in-force policies, 2026-09-29; p99 is 9).
+export type PolicyBook = { typeofbus: number; label: string; defaultWindowDays: number | undefined; maxPolicies: number }
+
+export const COMMERCIAL_BOOK: PolicyBook = { typeofbus: 2, label: "commercial", defaultWindowDays: DEFAULT_RENEWAL_WINDOW_DAYS, maxPolicies: 12 }
+export const PERSONAL_BOOK: PolicyBook = { typeofbus: 1, label: "personal", defaultWindowDays: undefined, maxPolicies: 20 }
+
 // Either the matched policies to build from, or a result the tool should hand straight back — an
 // error (nothing matched / no filters) or the ambiguous-across-customers candidate list.
 export type ClPolicyResolution =
@@ -634,11 +649,11 @@ export type ClPolicyResolution =
   | { kind: "ambiguous"; payload: { message: string; matches: { customer_name: string | null; polno: string; carrier_name: string | null; csr_name: string | null }[] } }
   | { kind: "ok"; matches: ResolvedPolicy[]; combining: boolean; primaryPolicy: ResolvedPolicy; clientName: string }
 
-export async function resolveClPolicies({ polno, custid, customer_name, renewal_within_days }: ClPolicyFilters): Promise<ClPolicyResolution> {
+export async function resolveClPolicies({ polno, custid, customer_name, renewal_within_days }: ClPolicyFilters, book: PolicyBook = COMMERCIAL_BOOK): Promise<ClPolicyResolution> {
   const customerName = customer_name?.trim() || undefined
 
   if(!polno && !custid && !customerName) {
-    return { kind: "error", error: new Error("Pass at least one of polno, custid, or customer_name to identify the commercial policy") }
+    return { kind: "error", error: new Error(`Pass at least one of polno, custid, or customer_name to identify the ${ book.label } policy`) }
   }
 
   const polnoParam = polno ? `%${ polno }%` : null
@@ -651,24 +666,24 @@ export async function resolveClPolicies({ polno, custid, customer_name, renewal_
   // the account, including bonds and other lines not renewing until next spring (client-reported
   // 2026-09-22: a 5/2027 surety bond on Defatta's combined document). A specific polno is taken as an
   // explicit ask for that policy whenever it renews, so gets no default window.
-  const renewalWindow = renewal_within_days ?? (polno ? undefined : DEFAULT_RENEWAL_WINDOW_DAYS)
+  const renewalWindow = renewal_within_days ?? (polno ? undefined : book.defaultWindowDays)
   const renewalWindowParam = renewalWindow ?? null
 
-  const matches = await runReadOnlyQuery(RESOLVE_POLICY_QUERY, [polnoParam, custidParam, renewalWindowParam, customerNameParam]) as ResolvedPolicy[]
+  const matches = await runReadOnlyQuery(RESOLVE_POLICY_QUERY, [polnoParam, custidParam, renewalWindowParam, customerNameParam, book.typeofbus, book.maxPolicies]) as ResolvedPolicy[]
 
   if(matches.length === 0 && renewalWindow !== undefined) {
     // Distinguish "nothing renewing in the window" from "no such commercial account" — the former
     // is the common case when someone asks about an account renewing later in the year.
-    const unwindowed = await runReadOnlyQuery(RESOLVE_POLICY_QUERY, [polnoParam, custidParam, null, customerNameParam]) as ResolvedPolicy[]
+    const unwindowed = await runReadOnlyQuery(RESOLVE_POLICY_QUERY, [polnoParam, custidParam, null, customerNameParam, book.typeofbus, book.maxPolicies]) as ResolvedPolicy[]
 
     if(unwindowed.length > 0) {
       const soonest = unwindowed.reduce((earliest, m) => (m.polexpdate < earliest.polexpdate ? m : earliest), unwindowed[0])
-      return { kind: "error", error: new Error(`${ soonest.customer_name?.trim() || "This account" } has current commercial policies, but none renew within ${ renewalWindow } days. Soonest renewal: ${ formatDate(soonest.polexpdate) } (policy ${ soonest.polno }). Pass a larger renewal_within_days, or that polno, to build it anyway.`) }
+      return { kind: "error", error: new Error(`${ soonest.customer_name?.trim() || "This account" } has current ${ book.label } policies, but none renew within ${ renewalWindow } days. Soonest renewal: ${ formatDate(soonest.polexpdate) } (policy ${ soonest.polno }). Pass a larger renewal_within_days, or that polno, to build it anyway.`) }
     }
   }
 
   if(matches.length === 0) {
-    return { kind: "error", error: new Error("No matching current, in-force commercial policy found for those filters. Check the policy is commercial lines (not personal), currently in force (poleffdate <= today <= polexpdate), and that polno/custid/customer_name are correct.") }
+    return { kind: "error", error: new Error(`No matching current, in-force ${ book.label } policy found for those filters. Check the policy is ${ book.label } lines (not ${ book.label === "commercial" ? "personal" : "commercial" }), currently in force (poleffdate <= today <= polexpdate), and that polno/custid/customer_name are correct.`) }
   }
 
   const distinctCustomers = new Set(matches.map((m) => m.custid))
@@ -681,7 +696,7 @@ export async function resolveClPolicies({ polno, custid, customer_name, renewal_
     return {
       kind: "ambiguous",
       payload: {
-        message: `${ matches.length } commercial policies matched across ${ distinctCustomers.size } different customers — narrow with a more specific polno or customer_name, or add custid.`,
+        message: `${ matches.length } ${ book.label } policies matched across ${ distinctCustomers.size } different customers — narrow with a more specific polno or customer_name, or add custid.`,
         matches: matches.map((m) => ({
           customer_name: m.customer_name, polno: m.polno, carrier_name: m.carrier_name, csr_name: m.csr_name
         }))

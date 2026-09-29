@@ -1,13 +1,14 @@
 ---
 name: renewals
-description: Domain knowledge for boxwood-mcp-ts's renewal-related MCP tools — upcoming_renewals (Boxwood Insurance's AMS360 book of business filtered to active policy terms expiring within a day window, with marketing shells and, by default, already-renewed terms excluded — pass include_already_renewed for a calendar/exposure view instead) risk_profile (builds a branded Pre-Renewal Review .docx, exposures only, for one or more commercial policies), cl_renewal_summary (the same document plus current coverage limits/deductibles by line of business), and pl_renewal_premium_change (personal-lines renewal premium change vs the expiring term, as tab-delimited lines for an AMS activity note). Use when answering questions about what's renewing soon, a producer's or carrier's upcoming renewal book, which accounts need renewal outreach, building a renewal-meeting packet for a commercial client, or how much a personal-lines renewal went up or down.
+description: Domain knowledge for boxwood-mcp-ts's renewal-related MCP tools — upcoming_renewals (Boxwood Insurance's AMS360 book of business filtered to active policy terms expiring within a day window, with marketing shells and, by default, already-renewed terms excluded — pass include_already_renewed for a calendar/exposure view instead) risk_profile (builds a branded Pre-Renewal Review .docx, exposures only, for one or more commercial policies), cl_renewal_summary (the same document plus current coverage limits/deductibles by line of business), pl_renewal_summary (the personal-lines Personal Insurance Portfolio Summary .docx — auto, home, personal articles, umbrella limits), and pl_renewal_premium_change (personal-lines renewal premium change vs the expiring term, as tab-delimited lines for an AMS activity note). Use when answering questions about what's renewing soon, a producer's or carrier's upcoming renewal book, which accounts need renewal outreach, building a renewal-meeting packet for a commercial client, building a personal-lines coverage summary for a household, or how much a personal-lines renewal went up or down.
 ---
 
 # Boxwood renewals
 
-Four tools cover renewal work today: `upcoming_renewals` (find what's coming due),
+Five tools cover renewal work today: `upcoming_renewals` (find what's coming due),
 `risk_profile` (build the exposures-only renewal-meeting document for one or more commercial
-accounts), `cl_renewal_summary` (that same document plus the current coverage limits), and
+accounts), `cl_renewal_summary` (that same document plus the current coverage limits),
+`pl_renewal_summary` (the personal-lines coverage summary for a household), and
 `pl_renewal_premium_change` (how much a downloaded personal-lines renewal changed in premium). More
 renewal-related tools will land in this same skill over time rather than each getting its own skill
 — check here first for anything renewal-shaped.
@@ -138,6 +139,36 @@ Same manifest shape and keying rules as `risk_profile`, under `scripts/output/cl
 
 - "Build a renewal summary for [client]" / "risk profile with limits" → `cl_renewal_summary` with `polno` or `custid`
 - "What are [client]'s GL limits?" as a quick question → `policy_query` is lighter; build this document only when they want the deliverable
+
+## pl_renewal_summary
+
+Builds a branded "Personal Insurance Portfolio Summary" Word document (`.docx`) for a personal-lines client — the personal counterpart to `cl_renewal_summary`, laid out after the client-supplied sample (Patrick Baggett, 2026-09-28): letterhead with the producer's email, "Insured:" and (when there's one carrier) "Carrier:" lines, an Important Notice disclaimer, then short sections. **No premiums.**
+
+### Calling the tool
+
+Same inputs as `cl_renewal_summary` (`customer_name`, `polno`, and/or `custid`, optional `renewal_within_days`) and the same resolution code (`resolveClPolicies` in `src/utils/clPolicyData.ts`, called with `PERSONAL_BOOK`): `typeofbus = 1`, current in-force terms only, `customer_name` matched only among customers with a current personal policy, cross-customer matches ambiguous. The one difference: **no default renewal window** — an account-level request combines every in-force personal policy on the account (up to 20), since PL auto's 6-month terms rarely line up with the home's annual term. Download link only, no email.
+
+### Sections
+
+All coverages come from `afw_coverage` (deduped to each coverage's latest non-deleted row; `afw_cprem` is commercial-only). Rows with no limit and no deductible are rating artifacts (peril premiums, credits, counts) and are skipped.
+
+- **Automobile Insurance** (AUTOP; per-vehicle rows, attachtype 121 → `afw_vehicle.vehid`) — Coverage Highlights: Liability (CSL, or split BI per person / per accident / PD), Uninsured/Underinsured Motorist, UM PD (only alongside a split UM limit), Medical Payments, PIP, Comprehensive and Collision deductibles, Rental Reimbursement, Roadside Assistance. A coverage identical on every vehicle is a highlight; one that differs moves to its own column in the Scheduled Vehicles table (Year / Make & Model / VIN), with "None" where a vehicle lacks it.
+- **Homeowners Insurance** / **Dwelling Fire Insurance** (HOME / DFIRE; attachtype 86 → `afw_location.locid`, one table per property address) — Dwelling, Other Structures, Personal Property, Loss of Use (shown as "Actual Loss Sustained" when the HOME row carries no limit, as in the client's sample) or Fair Rental Value, Medical Payments, Personal or Premises Liability, Deductible (the Dwelling row's), Wind/Hail Deductible ("1% of Dwelling" for a percentage). Other home endorsements (service line, fungi, loss assessment) are left out, matching the sample.
+- **Personal Articles Coverage** (INMRP) — the total scheduled limit only (sum of the scheduled-personal-property rows, falling back to `afw_sppsummary.spplimit`); the item schedule stays in the policy.
+- **Umbrella Liability Insurance** (PUMBR) — Personal Liability, Excess Uninsured/Underinsured Motorist, Self-Insured Retention; no underlying schedule.
+- **Any other personal line** (boat, etc.) — a generic Coverage / Limit / Deductible table.
+- A line with no coverage detail on file at all (every current FLOOD policy, as of 2026-09-29) still gets its heading, with a note to see the policy documents.
+
+With several carriers (or the same line on two policies), each section shows its own Carrier / Policy # / Term line and the header's "Carrier:" line is dropped. Carrier-internal codes with no description come back in `unresolved_coverage_codes`, same as `cl_renewal_summary`.
+
+### Archiving
+
+Same manifest shape and keying as `cl_renewal_summary`, under `scripts/output/pl-renewal-summary/`, backing `GET /api/v1/boxwood-mcp/pl-renewal-summary/manifest`, `GET`/`DELETE .../pl-renewal-summary/files/:filename`, and `POST .../pl-renewal-summary/chat` (`src/routes/plRenewalSummary.ts`), consumed by the employee dashboard's /personal/renewal-summary page.
+
+### Common questions → calls
+
+- "Build a personal insurance summary / PL renewal summary for [client]" → `pl_renewal_summary` with `customer_name`
+- "Just the policies renewing in the next 60 days" → add `renewal_within_days: 60`
 
 ## pl_renewal_premium_change
 
