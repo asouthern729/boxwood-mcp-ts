@@ -18,7 +18,7 @@ import type { ResolvedPolicy } from "./clPolicyData.js"
 // Personal Articles total scheduled limit, and Umbrella limits. Andrew's decisions (2026-09-28): DFIRE
 // reuses the Homeowners table; any other personal line (boat, flood, ...) gets a generic
 // Coverage/Limit/Deductible table; an auto coverage goes in the highlights only when it's identical
-// on every vehicle, otherwise it becomes a per-vehicle column in the Scheduled Vehicles table.
+// on every vehicle, otherwise it goes in the Coverage by Vehicle table below the vehicle list.
 
 const COVERAGE_QUERY = `
   SELECT lob.lineofbus, lob.descriptionlobs, c.lobid, c.attachtype, c.attachid,
@@ -50,10 +50,13 @@ const LOB_QUERY = `
 `
 
 // Explicit column list only, never v.* (column-level grants on afw_vehicle, see policyQuery.ts).
+// lobid matters: an auto + umbrella policy (one polid, AUTOP and PUMBR lines) carries a second copy
+// of the vehicle schedule on the umbrella line, with its own vehids and no coverages attached (Ashley
+// Breeding's VU0158, 2026-09-29). Only the auto line's own vehicles belong in its section.
 const VEHICLE_QUERY = `
-  SELECT v.vehid, v.vehicleno, v.vehyear, v.make, v.model, v.vin
+  SELECT v.lobid, v.vehid, v.vehicleno, v.vehyear, v.make, v.model, v.vin
   FROM (
-    SELECT v.vehid, v.vehicleno, v.vehyear, v.make, v.model, v.vin, v.status,
+    SELECT v.lobid, v.vehid, v.vehicleno, v.vehyear, v.make, v.model, v.vin, v.status,
       ROW_NUMBER() OVER (PARTITION BY v.polid, v.lobid, v.vehid ORDER BY v.effdate DESC) AS rn
     FROM afw_vehicle v
     WHERE v.polid = $1
@@ -93,7 +96,7 @@ type CoverageRow = {
   limit1: Money; limit2: Money; limit3: Money; deduct1: Money; deducttype1: string | null
 }
 
-type VehicleQueryRow = { vehid: string; vehicleno: string | null; vehyear: string | number | null; make: string | null; model: string | null; vin: string | null }
+type VehicleQueryRow = { lobid: string; vehid: string; vehicleno: string | null; vehyear: string | number | null; make: string | null; model: string | null; vin: string | null }
 type LocationQueryRow = { locid: string; locno: string | null; addr1: string | null; addr2: string | null; city: string | null; state: string | null; zipcode: string | null }
 type SppSummaryRow = { lobid: string; class: string | null; spplimit: Money }
 type LobQueryRow = { lobid: string; lineofbus: string | null; descriptionlobs: string | null }
@@ -150,7 +153,12 @@ function windHailDeductibleText(raw: Money, type: string | null): string {
   return deductibleText(raw, type)
 }
 
+// Rating counts, not coverages. Some carriers put a number in limit1 ("Number of Autos" and "Number
+// of Residences" on an Acuity umbrella both carry 500000), which would otherwise render as a limit.
+const COUNT_ROW_PATTERN = /^number of\b/i
+
 function carriesValue(r: CoverageRow): boolean {
+  if(COUNT_ROW_PATTERN.test(clean(r.coveragecode))) return false
   return hasValue(r.limit1) || hasValue(r.limit2) || hasValue(r.limit3) || hasValue(r.deduct1)
 }
 
@@ -164,12 +172,42 @@ const CARRIER_CODE_PATTERN = /^[A-Z0-9]{4,6}$/
 function coverageLabel(r: CoverageRow): string {
   const code = clean(r.coveragecode)
   const descr = clean(r.descrcov)
-  if(CARRIER_CODE_PATTERN.test(code) && descr) return descr
-  return code || descr
+  if(CARRIER_CODE_PATTERN.test(code) && descr) return headlineCase(descr)
+  return headlineCase(code || descr)
+}
+
+const MINOR_WORDS = new Set(["a", "an", "and", "as", "at", "by", "for", "if", "in", "of", "on", "or", "per", "the", "to", "with"])
+
+// AMS360's standard coverage names are sentence case ("Auto death indemnity or benefits"), which
+// looks out of place next to the document's title-cased labels. Only an all-lowercase tail is
+// converted, so carrier text that already has its own capitals ("Medical Payments if Wearing a Seat
+// Belt", "UM/UIM") is left exactly as written.
+function headlineCase(label: string): string {
+  if(label.slice(1) !== label.slice(1).toLowerCase()) return label
+  return label.split(" ").map((word, i) => (i > 0 && MINOR_WORDS.has(word) ? word : word.charAt(0).toUpperCase() + word.slice(1))).join(" ")
 }
 
 function titleCase(value: string): string {
   return value.toLowerCase().replace(/\b([a-z])/g, (m) => m.toUpperCase())
+}
+
+// AMS360 carrier downloads often truncate the make to 4 or 5 letters ("SUBA", "TOYT", "LNDR"). Taken
+// from every make on current personal auto policies, 2026-09-29. MERC and RIVA read as Mercedes-Benz
+// and Rivian (Andrew, 2026-09-29) rather than Mercury or the Riva boat builder.
+const MAKE_NAMES: Record<string, string> = {
+  ACUR: "Acura", BUIC: "Buick", CADI: "Cadillac", CHEV: "Chevrolet", CHEVR: "Chevrolet", CHEVY: "Chevrolet",
+  CHRY: "Chrysler", DODG: "Dodge", GENE: "Genesis", GENS: "Genesis", HARLE: "Harley-Davidson", HOND: "Honda",
+  HYUN: "Hyundai", HYUND: "Hyundai", INFI: "Infiniti", INFIN: "Infiniti", JAGU: "Jaguar", KAWAS: "Kawasaki",
+  KAWSKI: "Kawasaki", LEXS: "Lexus", LINC: "Lincoln", LNDR: "Land Rover", MAZD: "Mazda", MERCB: "Mercedes-Benz",
+  MERC: "Mercedes-Benz", MERCU: "Mercury", MERZ: "Mercedes-Benz", MITS: "Mitsubishi", MNNI: "Mini", NISS: "Nissan", NISSA: "Nissan",
+  OLDS: "Oldsmobile", POLA: "Polaris", POLAR: "Polaris", PORS: "Porsche", RIVA: "Rivian", SUBA: "Subaru", SUBAR: "Subaru",
+  TESL: "Tesla", TOYO: "Toyota", TOYOT: "Toyota", TOYT: "Toyota", VOLK: "Volkswagen", VOLV: "Volvo", YAMAH: "Yamaha"
+}
+
+function expandMake(make: string | null): string {
+  const [first, ...rest] = clean(make).split(/\s+/)
+  const expanded = first ? MAKE_NAMES[first.toUpperCase()] : undefined
+  return expanded ? [expanded, ...rest].join(" ") : clean(make)
 }
 
 // Short vehicle words that are ordinary words rather than trim/drive acronyms.
@@ -179,7 +217,7 @@ const VEHICLE_WORDS = new Set(["CAB", "VAN", "CAR", "BUS", "BED", "BOX", "TOP", 
 // and matches the client's sample ("GMC Sierra 1500 Crew Cab"). Short tokens stay capitalised, since
 // they're almost always acronyms (GMC, BMW, XL, SLT, AWD), as do tokens with digits (F150, 4WD).
 function vehicleName(make: string | null, model: string | null): string {
-  return [clean(make), clean(model)].filter(Boolean).join(" ")
+  return [expandMake(make), clean(model)].filter(Boolean).join(" ")
     .split(/\s+/)
     .map((word) => ((/^[A-Z]{2,3}$/.test(word) && !VEHICLE_WORDS.has(word)) || /\d/.test(word) ? word : titleCase(word)))
     .join(" ")
@@ -196,7 +234,7 @@ function formatPropertyAddress(loc: LocationQueryRow | undefined): string {
 
 // ---------- AUTO ----------
 
-// Display order for the highlights list and any per-vehicle columns. Liability, UM/UIM and UM PD are
+// Display order for the highlights list and the Coverage by Vehicle rows. Liability, UM/UIM and UM PD are
 // assembled from several rows (see autoValues), so they aren't matched directly here.
 const AUTO_DISPLAY_ORDER: { key: string; label: string }[] = [
   { key: "liability", label: "Liability" },
@@ -312,15 +350,30 @@ function autoValues(rows: CoverageRow[]): { values: Record<string, string>; extr
   return { values, extraLabels }
 }
 
+// A safety net behind VEHICLE_QUERY's lobid scoping: one entry per VIN (or per year/make/model when
+// there's no VIN), keeping the copy with the most coverage values, and the first of equals. Replacing a
+// Map entry keeps its original position, so vehicle order doesn't change.
+function dedupeVehicles(vehicles: PlVehicle[]): PlVehicle[] {
+  const byKey = new Map<string, PlVehicle>()
+
+  for(const v of vehicles) {
+    const key = v.vin ? v.vin.toUpperCase() : `${ v.year }|${ v.makeModel.toLowerCase() }`
+    const existing = byKey.get(key)
+    if(!existing || Object.keys(v.values).length > Object.keys(existing.values).length) byKey.set(key, v)
+  }
+
+  return [...byKey.values()]
+}
+
 function buildAutoSection(rows: CoverageRow[], vehicles: VehicleQueryRow[], source: PlSectionSource, title: string): PlSection {
   const vehicleRows = rows.filter((r) => r.attachtype === 121)
   const extraLabels = new Map<string, string>()
 
-  const perVehicle: PlVehicle[] = vehicles.map((v) => {
+  const perVehicle = dedupeVehicles(vehicles.map((v) => {
     const { values, extraLabels: labels } = autoValues(vehicleRows.filter((r) => r.attachid === v.vehid))
     for(const [k, l] of labels) extraLabels.set(k, l)
     return { year: clean(String(v.vehyear ?? "")), makeModel: vehicleName(v.make, v.model), vin: clean(v.vin), values }
-  })
+  }))
 
   // Policy-level auto rows (attachtype 85 etc.) that carry a real value, e.g. an endorsement limit —
   // they apply to every vehicle, so they go straight into the highlights.
@@ -343,7 +396,7 @@ function buildAutoSection(rows: CoverageRow[], vehicles: VehicleQueryRow[], sour
       highlights.push({ label, value: policyValue })
     } else if(vehicleValues.some(Boolean)) {
       if(new Set(vehicleValues).size === 1) highlights.push({ label, value: vehicleValues[0] })
-      else vehicleColumns.push({ key, label: label.replace(/ Deductible$/, " Ded") })
+      else vehicleColumns.push({ key, label })
     }
   }
 
@@ -491,7 +544,7 @@ export async function fetchPlPolicyCoverage(policy: ResolvedPolicy): Promise<PlP
     }
 
     if(lineofbus === "AUTOP") {
-      const section = buildAutoSection(lobRows, vehicles, source, title)
+      const section = buildAutoSection(lobRows, vehicles.filter((v) => v.lobid === lobid), source, title)
       if(section.kind === "auto") renderedLabels.push(...section.highlights.map((h) => h.label), ...section.vehicleColumns.map((c) => c.label))
       sections.push(section)
     } else if(lineofbus === "HOME" || lineofbus === "DFIRE") {

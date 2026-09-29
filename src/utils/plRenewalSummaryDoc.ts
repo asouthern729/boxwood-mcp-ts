@@ -81,13 +81,26 @@ function labeledValueTable(headers: [string, string], rows: LabeledValue[], spli
   return table(headers, rows.map((r) => [r.label, r.value]), split)
 }
 
-// Year | Make & Model | VIN, plus one column per coverage that differs between vehicles (Andrew,
-// 2026-09-28). The sample's 12/48/40 split, with the extra columns taken out of Make & Model and VIN.
-function vehicleFractions(extraColumns: number): number[] {
-  if(extraColumns === 0) return [0.12, 0.48, 0.40]
-  const extra = Math.min(0.14, 0.5 / extraColumns)
-  const rest = 1 - 0.08 - extra * extraColumns
-  return [0.08, rest * 0.52, rest * 0.48, ...Array(extraColumns).fill(extra)]
+// Coverages that differ between vehicles go in their own table below the vehicle list: one row per
+// coverage, one column per vehicle (Andrew, 2026-09-29 — it grows downward, not sideways). Past
+// MAX_MATRIX_VEHICLES the vehicle columns get too narrow to read, so larger fleets are split across
+// several tables of up to that many vehicles each.
+const MAX_MATRIX_VEHICLES = 4
+
+function coverageByVehicleTables(section: Extract<PlSection, { kind: "auto" }>): (Paragraph | Table)[] {
+  const blocks: (Paragraph | Table)[] = []
+
+  for(let start = 0; start < section.vehicles.length; start += MAX_MATRIX_VEHICLES) {
+    const chunk = section.vehicles.slice(start, start + MAX_MATRIX_VEHICLES)
+    if(start > 0) blocks.push(new Paragraph({ spacing: { after: 80 }, children: [] }))
+    blocks.push(table(
+      ["Coverage", ...chunk.map((v) => [v.year, v.makeModel].filter(Boolean).join(" "))],
+      section.vehicleColumns.map((c) => [c.label, ...chunk.map((v) => v.values[c.key] ?? "")]),
+      [0.28, ...Array(chunk.length).fill(0.72 / chunk.length)]
+    ))
+  }
+
+  return blocks
 }
 
 // The policy/carrier line under a section heading, shown only when the reader needs it to tell
@@ -115,11 +128,11 @@ function sectionBlocks(section: PlSection, showSource: boolean): (Paragraph | Ta
       }
       if(section.vehicles.length > 0) {
         blocks.push(subheading("Scheduled Vehicles:"))
-        blocks.push(table(
-          ["Year", "Make & Model", "VIN", ...section.vehicleColumns.map((c) => c.label)],
-          section.vehicles.map((v) => [v.year, v.makeModel, v.vin, ...section.vehicleColumns.map((c) => v.values[c.key] ?? "")]),
-          vehicleFractions(section.vehicleColumns.length)
-        ))
+        blocks.push(table(["Year", "Make & Model", "VIN"], section.vehicles.map((v) => [v.year, v.makeModel, v.vin]), [0.12, 0.48, 0.40]))
+      }
+      if(section.vehicleColumns.length > 0 && section.vehicles.length > 0) {
+        blocks.push(subheading("Coverage by Vehicle:"))
+        blocks.push(...coverageByVehicleTables(section))
       }
       break
     }
