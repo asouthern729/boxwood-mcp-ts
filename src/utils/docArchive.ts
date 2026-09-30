@@ -28,15 +28,15 @@ export type DocArchiveEntry = {
   renewal_date_label: string
 }
 
-export function createDocArchive(subdir: string) {
+export function createDocArchive<Entry extends DocArchiveEntry = DocArchiveEntry>(subdir: string) {
   const outputDir = path.join(import.meta.dirname, "..", "..", "scripts", "output", subdir)
   const manifestPath = path.join(outputDir, "manifest.json")
 
-  function readManifest(): DocArchiveEntry[] {
+  function readManifest(): Entry[] {
     if(!existsSync(manifestPath)) return []
 
     try {
-      return JSON.parse(readFileSync(manifestPath, "utf8")) as DocArchiveEntry[]
+      return JSON.parse(readFileSync(manifestPath, "utf8")) as Entry[]
     } catch {
       return []
     }
@@ -44,7 +44,7 @@ export function createDocArchive(subdir: string) {
 
   // Regenerating the same document overwrites both the file and its manifest entry (matched on
   // filename) rather than accumulating duplicates.
-  function archive(buffer: Buffer, entry: DocArchiveEntry): void {
+  function archive(buffer: Buffer, entry: Entry): void {
     mkdirSync(outputDir, { recursive: true })
     writeFileSync(path.join(outputDir, entry.filename), buffer)
 

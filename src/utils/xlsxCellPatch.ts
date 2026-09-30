@@ -144,3 +144,164 @@ export async function patchNumericCells(buffer: Buffer, sheetIndex: number, edit
   const out = await zip.generateAsync({ type: "nodebuffer", compression: "DEFLATE" })
   return { buffer: out, applied, missing }
 }
+
+// ---------- Row-level sheet editing (PL Renewal Calculator) ----------
+//
+// Same no-ExcelJS, patch-the-XML approach as patchNumericCells above, for a template that needs more
+// than numbers written: labels, formulas with cached values, and whole blocks of cells cleared. Edits
+// work on a row's cell list rather than on individual <c> strings, so a cell that doesn't exist yet is
+// inserted in column order and a cleared range simply drops its cells — which is only safe because
+// callers that clear or rewrite formula cells also drop calcChain.xml (Excel rebuilds it silently) and
+// never leave a shared-formula follower (<f t="shared" si=".."/>) behind without its master.
+
+export type CellEdit =
+  | { kind: "number"; value: number; style?: string }
+  | { kind: "text"; text: string; style?: string }
+  // Index into the workbook's existing sharedStrings.xml — reuses the template's own strings.
+  | { kind: "shared"; index: number; style?: string }
+  // A plain (non-shared) formula plus the value Excel would compute for it, so previews that don't
+  // recalculate (Outlook, OneDrive thumbnails, client-side xlsx parsers) still show real numbers.
+  | { kind: "formula"; formula: string; cached: number | { error: string } | string; style?: string }
+  | { kind: "blank"; style?: string }
+
+export type SheetEditor = {
+  set: (ref: string, edit: CellEdit) => void
+  // Removes every cell in rows fromRow..toRow whose column falls in fromCol..toCol (letters).
+  clear: (fromRow: number, toRow: number, fromCol: string, toCol: string) => void
+  // Keeps an existing formula cell's <f> exactly (e.g. structured table references) and replaces only
+  // its cached result; a non-finite value is cached as #DIV/0!. Throws if the cell has no formula.
+  setCachedValue: (ref: string, value: number) => void
+}
+
+function escapeXml(text: string): string {
+  return text.replace(/&/g, "&amp;").replace(/</g, "&lt;").replace(/>/g, "&gt;").replace(/"/g, "&quot;")
+}
+
+export function columnNumber(letters: string): number {
+  return [...letters.toUpperCase()].reduce((n, ch) => n * 26 + ch.charCodeAt(0) - 64, 0)
+}
+
+function splitRef(ref: string): { col: string; row: number } {
+  const match = ref.match(/^([A-Z]+)(\d+)$/)
+  if(!match) throw new Error(`Bad cell reference ${ ref }`)
+  return { col: match[1], row: Number(match[2]) }
+}
+
+function cellXml(ref: string, edit: CellEdit): string {
+  const s = edit.style !== undefined ? ` s="${ edit.style }"` : ""
+  switch(edit.kind) {
+    case "number":
+      if(!Number.isFinite(edit.value)) throw new Error(`Refusing to write non-finite value to ${ ref }`)
+      return `<c r="${ ref }"${ s }><v>${ edit.value }</v></c>`
+    case "text":
+      return `<c r="${ ref }"${ s } t="inlineStr"><is><t xml:space="preserve">${ escapeXml(edit.text) }</t></is></c>`
+    case "shared":
+      return `<c r="${ ref }"${ s } t="s"><v>${ edit.index }</v></c>`
+    case "formula": {
+      const f = `<f>${ escapeXml(edit.formula) }</f>`
+      if(typeof edit.cached === "number") {
+        return Number.isFinite(edit.cached) ? `<c r="${ ref }"${ s }>${ f }<v>${ edit.cached }</v></c>` : `<c r="${ ref }"${ s } t="e">${ f }<v>#DIV/0!</v></c>`
+      }
+      if(typeof edit.cached === "string") return `<c r="${ ref }"${ s } t="str">${ f }<v>${ escapeXml(edit.cached) }</v></c>`
+      return `<c r="${ ref }"${ s } t="e">${ f }<v>${ escapeXml(edit.cached.error) }</v></c>`
+    }
+    case "blank":
+      return `<c r="${ ref }"${ s }/>`
+  }
+}
+
+type ParsedRow = { open: string; cells: { col: string; xml: string }[] }
+
+function parseRow(rowXml: string): ParsedRow {
+  const open = rowXml.match(/^<row\b[^>]*?(?=\/?>)/)![0]
+  const cells = [...rowXml.matchAll(/<c\b[^>]*?(?:\/>|>[\s\S]*?<\/c>)/g)].map((m) => ({
+    col: m[0].match(/\br="([A-Z]+)\d+"/)![1],
+    xml: m[0]
+  }))
+  return { open, cells }
+}
+
+function renderRow(row: ParsedRow): string {
+  const sorted = [...row.cells].sort((a, b) => columnNumber(a.col) - columnNumber(b.col))
+  // spans is only an optimisation hint; dropping it is always valid and avoids it going stale.
+  const open = row.open.replace(/\s+spans="[^"]*"/, "")
+  return sorted.length ? `${ open }>${ sorted.map((c) => c.xml).join("") }</row>` : `${ open }/>`
+}
+
+// Applies `edit` to one sheet of an .xlsx and returns the new package. Every other part is left
+// untouched except: calcChain.xml (always dropped, with its rel and content-type override, since
+// edits can move or remove formula cells) and workbook.xml's calcPr (fullCalcOnLoad="1").
+export async function editSheet(buffer: Buffer, sheetIndex: number, edit: (sheet: SheetEditor) => void): Promise<Buffer> {
+  const zip = await JSZip.loadAsync(buffer)
+  const sheetPath = await resolveSheetPath(zip, sheetIndex)
+  let sheetXml = await zip.file(sheetPath)!.async("string")
+
+  const rows = new Map<number, ParsedRow>()
+  for(const m of sheetXml.matchAll(/<row\b[^>]*?(?:\/>|>[\s\S]*?<\/row>)/g)) {
+    const rowNumber = Number(m[0].match(/\br="(\d+)"/)![1])
+    rows.set(rowNumber, parseRow(m[0]))
+  }
+
+  function rowOf(rowNumber: number): ParsedRow {
+    let row = rows.get(rowNumber)
+    if(!row) {
+      row = { open: `<row r="${ rowNumber }"`, cells: [] }
+      rows.set(rowNumber, row)
+    }
+    return row
+  }
+
+  const editor: SheetEditor = {
+    set(ref, cellEdit) {
+      const { col, row: rowNumber } = splitRef(ref)
+      const row = rowOf(rowNumber)
+      const existing = row.cells.find((c) => c.col === col)
+      // Default to the template cell's own style, so a value lands with the template's formatting.
+      const style = cellEdit.style ?? existing?.xml.match(/^<c\b[^>]*?\bs="(\d+)"/)?.[1]
+      const xml = cellXml(ref, { ...cellEdit, style } as CellEdit)
+      if(existing) existing.xml = xml
+      else row.cells.push({ col, xml })
+    },
+    setCachedValue(ref, value) {
+      const { col, row: rowNumber } = splitRef(ref)
+      const existing = rows.get(rowNumber)?.cells.find((c) => c.col === col)
+      const formula = existing?.xml.match(/<f\b[\s\S]*?(?:<\/f>|\/>)/)?.[0]
+      if(!existing || !formula) throw new Error(`No formula cell at ${ ref } to cache a value on`)
+      const style = existing.xml.match(/^<c\b[^>]*?\bs="(\d+)"/)?.[1]
+      const s = style !== undefined ? ` s="${ style }"` : ""
+      existing.xml = Number.isFinite(value)
+        ? `<c r="${ ref }"${ s }>${ formula }<v>${ value }</v></c>`
+        : `<c r="${ ref }"${ s } t="e">${ formula }<v>#DIV/0!</v></c>`
+    },
+    clear(fromRow, toRow, fromCol, toCol) {
+      const lo = columnNumber(fromCol)
+      const hi = columnNumber(toCol)
+      for(let r = fromRow; r <= toRow; r++) {
+        const row = rows.get(r)
+        if(row) row.cells = row.cells.filter((c) => columnNumber(c.col) < lo || columnNumber(c.col) > hi)
+      }
+    }
+  }
+
+  edit(editor)
+
+  const rendered = [...rows.entries()].sort(([a], [b]) => a - b).map(([, row]) => renderRow(row)).join("")
+  sheetXml = sheetXml.replace(/<sheetData\b[^>]*?(?:\/>|>[\s\S]*?<\/sheetData>)/, () => `<sheetData>${ rendered }</sheetData>`)
+  zip.file(sheetPath, sheetXml)
+
+  const workbookXml = await zip.file("xl/workbook.xml")!.async("string")
+  if(/<calcPr\b/.test(workbookXml)) {
+    zip.file("xl/workbook.xml", workbookXml.replace(/<calcPr\b([^>]*?)(\/?)>/, (_all, attrs: string, selfClose: string) =>
+      `<calcPr${ attrs.replace(/\s*\bfullCalcOnLoad="[^"]*"/, "") } fullCalcOnLoad="1"${ selfClose }>`))
+  }
+
+  if(zip.file("xl/calcChain.xml")) {
+    zip.remove("xl/calcChain.xml")
+    const relsXml = await zip.file("xl/_rels/workbook.xml.rels")!.async("string")
+    zip.file("xl/_rels/workbook.xml.rels", relsXml.replace(/<Relationship\b[^>]*calcChain[^>]*\/>/g, ""))
+    const typesXml = await zip.file("[Content_Types].xml")!.async("string")
+    zip.file("[Content_Types].xml", typesXml.replace(/<Override\b[^>]*calcChain[^>]*\/>/g, ""))
+  }
+
+  return zip.generateAsync({ type: "nodebuffer", compression: "DEFLATE" })
+}
