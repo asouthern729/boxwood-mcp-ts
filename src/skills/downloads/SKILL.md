@@ -139,11 +139,13 @@ description says so explicitly rather than silently dropping them:
   **Both signals** share the same `NOT EXISTS` attribution pattern: two closely-spaced but genuinely
   separate transactions on the same policy (confirmed real: two vehicle-add transactions 2 seconds
   apart on the same policy) would double-count under a naive window join, so each query attributes
-  every matched audit row to only the *nearest* transaction at or after it, never both. Each side is
-  independently capped (`MAX_REPORTED_VEHICLES`/`MAX_REPORTED_COVERAGE_CHANGES`, both 6) with a
-  "too many to list, review in AMS360" fallback — a full rewrite/new-business/reissue transaction can
-  legitimately touch 90-160+ coverage rows, all reading as "Added" against no prior coverageid, which
-  would otherwise flood the cell. Null whenever a transaction has neither kind of activity — most
+  every matched audit row to only the *nearest* transaction at or after it, never both. Both are
+  capped at 6 (`MAX_REPORTED_VEHICLES`/`MAX_REPORTED_COVERAGE_CHANGES`). Past 6, coverages list
+  the first 6 then "+N more coverage changes" (since 2026-09-30; before that the whole cell became
+  "too many to list"). Vehicles past 6 still collapse to a count. A full new-business/rewrite image
+  reads "Coverage detail first received from carrier (N coverages)" rather than N "Added" lines —
+  see the 2026-09-30 expansion above for the current vehicle/coverage rules, which supersede the
+  older details in this paragraph. Null whenever a transaction has neither kind of activity — most
   transactions will have this as null; don't read null as "nothing changed," only as "no vehicle or
   coverage change this field tracks happened on this transaction specifically." Rendered as its own
   "Policy Changes" column in the finished workbook (`downloadWorkbook.ts`), between Detail and Next
@@ -318,9 +320,9 @@ description says so explicitly rather than silently dropping them:
   `entereddate`/`changeddate` are essentially always identical — no real drift there either way, but
   switched for consistency).
 - `csr_code` — scope to one representative.
-- `lookback_days` (default 60) — how far back to search for candidate staff notes on flagged
-  items; this was the value used in the original hand-built report, with the same caveat that
-  applied there: a legitimate request documented further back won't surface as a candidate.
+- `lookback_days` (default 30, was 60 until 2026-09-30 per Patrick) — how far back, from when the
+  download was entered, to search for candidate staff notes on flagged items (by the note's
+  `trandate`). A legitimate request documented further back won't surface as a candidate.
 
 **Response is compact, not the full dataset.** A busy day's full item list (every rep's routine
 *and* flagged items) can exceed the MCP tool-result size cap on its own — confirmed: 119
