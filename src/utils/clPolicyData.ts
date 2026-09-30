@@ -1,3 +1,4 @@
+import { CUSTOMER_SORT_NAME_EXPR } from "./customerNames.js"
 import { runReadOnlyQuery } from "../db.js"
 import { fetchPolicyLobInfo } from "./policyLineOfBusiness.js"
 import { money } from "./riskProfileDoc.js"
@@ -38,6 +39,7 @@ export const CUSTOMER_NAME_EXPR = "COALESCE(c.dba, NULLIF(TRIM(CONCAT_WS(' ', c.
 export const RESOLVE_POLICY_QUERY = `
   SELECT p.polid, p.polno, p.poleffdate, p.polexpdate, p.custid, p.csrcode,
     ${ CUSTOMER_NAME_EXPR } AS customer_name,
+    ${ CUSTOMER_SORT_NAME_EXPR } AS customer_sort_name,
     co.name AS carrier_name,
     COALESCE(NULLIF(TRIM(CONCAT_WS(' ', csr.firstname, csr.lastname)), ''), p.csrcode) AS csr_name,
     p.fulltermpremium,
@@ -84,6 +86,9 @@ export type ResolvedPolicy = {
   custid: string
   csrcode: string | null
   customer_name: string | null
+  // "Last, First" (businesses keep their name) — for staff-facing lists; customer_name stays the
+  // natural-order name printed in client documents.
+  customer_sort_name: string | null
   carrier_name: string | null
   csr_name: string | null
   fulltermpremium: string | number | null

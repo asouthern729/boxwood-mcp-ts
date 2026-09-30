@@ -1,5 +1,6 @@
 import { runReadOnlyQuery } from "../db.js"
 import { CUSTOMER_NAME_EXPR } from "./clPolicyData.js"
+import { CUSTOMER_SORT_NAME_EXPR } from "./customerNames.js"
 import type { ResolvedPolicy } from "./clPolicyData.js"
 
 // PL Renewal Summary shows the RENEWAL term for any policy whose renewal has already downloaded
@@ -20,6 +21,7 @@ const DOWNLOADED_SUCCESSOR_QUERY = `
     cur.polid AS current_polid,
     s.polid, s.polno, s.poleffdate, s.polexpdate, s.custid, s.csrcode,
     ${ CUSTOMER_NAME_EXPR } AS customer_name,
+    ${ CUSTOMER_SORT_NAME_EXPR } AS customer_sort_name,
     co.name AS carrier_name,
     COALESCE(NULLIF(TRIM(CONCAT_WS(' ', csr.firstname, csr.lastname)), ''), s.csrcode) AS csr_name,
     s.fulltermpremium,

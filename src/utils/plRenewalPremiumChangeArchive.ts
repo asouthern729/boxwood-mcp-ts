@@ -53,7 +53,7 @@ export async function archivePlRenewalChange(group: PlRenewalChangeGroup): Promi
     generated_at: new Date().toISOString(),
     csr_code: group.csr_code,
     csr_name: group.csr_name,
-    client_name: group.client_name,
+    client_name: group.client_sort_name,
     polnos: group.polnos.join(", "),
     renewal_date: group.renewal_date,
     renewal_date_label: group.renewal_date_label,

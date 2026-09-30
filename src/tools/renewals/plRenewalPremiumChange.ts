@@ -45,7 +45,7 @@ export function registerPlRenewalPremiumChangeTool(server: McpServer) {
         for(const group of groups.slice(0, MAX_WORKBOOKS_PER_CALL)) {
           const archived = await archivePlRenewalChange(group)
           if(!archived) {
-            skipped.push({ client_name: group.client_name, renewal_date: group.renewal_date_label, excluded: group.excluded })
+            skipped.push({ client_name: group.client_sort_name, renewal_date: group.renewal_date_label, excluded: group.excluded })
             continue
           }
 

@@ -1,5 +1,6 @@
 import { runReadOnlyQuery } from "../db.js"
 import { CUSTOMER_NAME_EXPR } from "./clPolicyData.js"
+import { CUSTOMER_SORT_NAME_EXPR } from "./customerNames.js"
 import { toNumber } from "./renewalPremiumSummaryPolicyValues.js"
 import type { PlCalculatorLine, PlCalculatorLob, PlCalculatorTerm } from "./plRenewalPremiumChangeWorkbook.js"
 
@@ -28,6 +29,7 @@ const PL_RENEWALS_QUERY = `
     to_char(bp.poleffdate, 'YYYY-MM-DD') AS poleffdate, to_char(bp.polexpdate, 'YYYY-MM-DD') AS polexpdate,
     bp.fulltermpremium AS renewal_premium,
     ${ CUSTOMER_NAME_EXPR } AS customer_name,
+    ${ CUSTOMER_SORT_NAME_EXPR } AS customer_sort_name,
     co.name AS carrier_name,
     bp.csrcode AS csr_code,
     NULLIF(TRIM(CONCAT_WS(' ', csr.firstname, csr.lastname)), '') AS csr_name,
@@ -130,6 +132,7 @@ type PlRenewalRow = {
   polexpdate: string | null
   renewal_premium: Money
   customer_name: string | null
+  customer_sort_name: string | null
   carrier_name: string | null
   csr_code: string | null
   csr_name: string | null
@@ -148,6 +151,8 @@ export type PlRenewalChangeLine = PlCalculatorLine & { polno: string }
 export type PlRenewalChangeGroup = {
   custid: string
   client_name: string
+  // "Last, First" (businesses keep their name) — what the tool page lists and sorts by.
+  client_sort_name: string
   renewal_date: string // YYYY-MM-DD effective date
   renewal_date_label: string // M/D/YYYY
   carriers: string
@@ -311,6 +316,7 @@ function buildGroups(rows: PlRenewalRow[], lines: LinePremiumRow[], spp: SppPrem
     groups.push({
       custid: first.custid,
       client_name: first.customer_name?.trim() ?? "",
+      client_sort_name: first.customer_sort_name?.trim() || first.customer_name?.trim() || "",
       renewal_date: first.poleffdate,
       renewal_date_label: dateLabel(first.poleffdate),
       carriers: carriers.join(" / ") || "Carrier",
@@ -323,7 +329,7 @@ function buildGroups(rows: PlRenewalRow[], lines: LinePremiumRow[], spp: SppPrem
     })
   }
 
-  return groups.sort((a, b) => a.client_name.localeCompare(b.client_name) || a.renewal_date.localeCompare(b.renewal_date))
+  return groups.sort((a, b) => a.client_sort_name.localeCompare(b.client_sort_name) || a.renewal_date.localeCompare(b.renewal_date))
 }
 
 function queryParams(filters: PlRenewalFilters, custids: string[] | null): unknown[] {

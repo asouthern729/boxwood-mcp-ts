@@ -4,6 +4,7 @@ import { publicBaseUrl } from "../../config/config.js"
 import { runReadOnlyQuery } from "../../db.js"
 import { categorizeTransaction, claimNextStep } from "../../utils/downloadCategorization.js"
 import { storeDownload } from "../../utils/downloadStore.js"
+import { CUSTOMER_SORT_NAME_EXPR } from "../../utils/customerNames.js"
 import { systemEmployeeCondition } from "../../utils/employeeClassification.js"
 import { agencyWallClockParts, bindableAgencyDate, formatTimestampColumn, mostRecentAgencySyncWindow } from "../../utils/localTime.js"
 import { logger } from "../../utils/logger.js"
@@ -46,22 +47,7 @@ function formatMissingDownloadDetail(commenttran: string | null): string {
   return lines.length > 0 ? lines.join(" ") : "Carrier download landed with no other detail recorded in AMS360's processing log — review directly in AMS360."
 }
 
-// "Last, First" for a person (Patrick, 2026-09-29: "Switch to customer last name, First name in first
-// column"), otherwise the business name. Keyed on which name fields are filled rather than
-// afw_customer.typename, which isn't reliable (~72 typename='I' customers are really LLCs/trusts/
-// HOAs with only firmnamecust set). Checked against every customer with a carrier download in the
-// prior 90 days (2026-09-30): no business has first+last without a firm name, all 6 individuals with
-// a dba are real business DBAs, and joint households keep both names in firstname ("Carney, Addison &
-// Grace"). A generational suffix kept in lastname ("Pratt Jr") moves after the first name ("Pratt,
-// Paul Jr").
-const NAME_SUFFIX_PATTERN = "[ ,]+((?:jr|sr)\\.?|ii|iii|iv)$"
-const CUSTOMER_NAME_EXPR = `CASE
-  WHEN NULLIF(TRIM(c.dba), '') IS NULL AND NULLIF(TRIM(c.firmnamecust), '') IS NULL
-    AND NULLIF(TRIM(c.firstname), '') IS NOT NULL AND NULLIF(TRIM(c.lastname), '') IS NOT NULL
-  THEN regexp_replace(TRIM(c.lastname), '${ NAME_SUFFIX_PATTERN }', '', 'i') || ', ' || TRIM(c.firstname)
-    || COALESCE(' ' || substring(TRIM(c.lastname) FROM '(?i)${ NAME_SUFFIX_PATTERN }'), '')
-  ELSE COALESCE(c.dba, NULLIF(TRIM(CONCAT_WS(' ', c.firstname, c.lastname)), ''), c.firmnamecust)
-END`
+const CUSTOMER_NAME_EXPR = CUSTOMER_SORT_NAME_EXPR
 const REP_NAME_EXPR = "COALESCE(NULLIF(TRIM(CONCAT_WS(' ', csr.firstname, csr.lastname)), ''), c.csrcode)"
 
 // afw_policytransaction/afw_claim store naive local wall-clock timestamps (see src/utils/localTime.ts),

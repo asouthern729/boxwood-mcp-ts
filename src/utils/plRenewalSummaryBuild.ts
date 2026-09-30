@@ -19,6 +19,8 @@ export type PlRenewalSummaryBuild =
     buffer: Buffer
     filename: string
     clientName: string
+    // "Last, First" for the tool page list and chat (the document itself prints clientName).
+    clientSortName: string
     polnos: string[]
     renewedPolnos: string[]
     // Policy numbers with more than one current term AMS360 couldn't tell apart — a rep should check.
@@ -72,14 +74,14 @@ export async function buildAndArchivePlRenewalSummary(filters: ClPolicyFilters):
     generated_at: new Date().toISOString(),
     csr_code: primaryPolicy.csrcode,
     csr_name: primaryPolicy.csr_name,
-    client_name: clientName,
+    client_name: primaryPolicy.customer_sort_name?.trim() || clientName,
     polnos: matches.map((m) => m.polno).join(", "),
     renewal_date: soonestRenewal,
     renewal_date_label: renewalDates.length === 1 ? renewalDates[0] : `${ renewalDates[0] } – ${ renewalDates[renewalDates.length - 1] }`
   })
 
   return {
-    kind: "ok", buffer, filename, clientName,
+    kind: "ok", buffer, filename, clientName, clientSortName: primaryPolicy.customer_sort_name?.trim() || clientName,
     polnos: matches.map((m) => m.polno),
     renewedPolnos, duplicateTermPolnos: deduped.unresolvedPolnos, includedSections, carrierCodes, combining
   }

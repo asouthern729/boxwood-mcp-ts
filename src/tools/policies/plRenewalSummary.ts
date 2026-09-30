@@ -38,7 +38,7 @@ export function registerPlRenewalSummaryTool(server: McpServer) {
         const policyLabel = built.combining ? `${ built.polnos.length } policies: ${ built.polnos.join(", ") }` : `policy ${ built.polnos[0] }`
 
         return textResult({
-          message: `Built the Personal Insurance Portfolio Summary for ${ built.clientName } (${ policyLabel }) — ${ built.includedSections.length } section(s) included: ${ built.includedSections.join(", ") }.`,
+          message: `Built the Personal Insurance Portfolio Summary for ${ built.clientSortName } (${ policyLabel }) — ${ built.includedSections.length } section(s) included: ${ built.includedSections.join(", ") }.`,
           download_url: `${ publicBaseUrl }/downloads/${ token }`,
           included_sections: built.includedSections,
           ...(built.renewedPolnos.length > 0 ? { shown_on_renewal_term: built.renewedPolnos } : {}),
