@@ -69,28 +69,40 @@ description says so explicitly rather than silently dropping them:
      "No premium change", from `afw_policytranpremium`. Each premium row belongs to the latest
      transaction entered at or before it. The full-term part is dropped when a line has nothing
      earlier to compare against (a $0 placeholder on a commercial package).
-  2. **Vehicles** added/removed (below), with their per-vehicle coverages folded into the line
-     ("(and its 8 coverages)"). A/D rows only count when the VIN is really new to the policy or
-     really gone from it within the window, because carriers re-send unchanged vehicles.
-  3. **Additional interests** (`afw_commaddotherint`): mortgagees, lienholders, loss payees and
+  2. **Vehicles** added/removed, as a VIN set diff of the vehicle schedule just before vs just after
+     the transaction, *as known when the download was entered*. Row status can't be trusted:
+     carriers re-send unchanged vehicles, re-mint vehicle ids, re-slot a new VIN onto an existing
+     vehicle id as a 'C' row (Hake's "Repl.26 Rogue W/ 26 Rogue" — the old status-based logic named
+     the wrong VIN), and reverse an earlier swap with a backdated download (Johnson's Telluride).
+     Per-vehicle coverages are folded into the line ("(and its 8 coverages)"). A first image lists
+     "Vehicle on policy: …" on new business/rewrite/reissue only, and nothing on a policy change.
+  3. **Drivers** (`afw_driver` PL, `afw_127driver` CA): added/removed by driver id (stable across
+     terms), or re-rated (excluded ↔ rated, relation changed). Only name, relation and the rating
+     flag are read; DOB, license number and SSN aren't in the app role's column grant (checked as
+     `claude`, 2026-09-30) and are never selected, so a DOB or license correction produces nothing.
+  4. **Additional interests** (`afw_commaddotherint`): mortgagees, lienholders, loss payees and
      additional insureds added/removed, loan-number changes, and label-only changes. This is a set
      diff of active interests before vs after, NOT row status, because carriers re-send every
      interest as 'A'. An interest with no earlier image anywhere reads "… on file: …", and is only
      shown when the carrier's description is about an interest.
-  4. **Named insured / mailing address / email** (`afw_applicant`, column-granted, so never
+  5. **Named insured / mailing address / email** (`afw_applicant`, column-granted, so never
      `SELECT *`). Values are compared as normalized word sets, so re-casing, middle initials,
      truncation and street-abbreviation changes produce nothing.
-  5. **Coverages** (below). Churn-proof: a coverage re-sent under a new coverageid (or on a re-sent
+  6. **Insured locations** (`afw_location` PL, `afw_clocation` CL) added/removed, as a set diff on a
+     normalized address, only when the term already had locations. A same-house-number-and-zip
+     remove+add (a carrier spelling fix) reads as one "Location address updated" line.
+  7. **Coverages** (below). Churn-proof: a coverage re-sent under a new coverageid (or on a re-sent
      unit) with identical values cancels out; a C row with nothing earlier is skipped; every
      coverage on one unit added/removed together reads as one line ("Removed coverages for 1987 AMC
      WRANGLER (7)"); and a policy whose carrier is sending coverage detail for the first time reads
      "Coverage detail first received from carrier (N coverages)" instead of N "Added" lines. Past 6
      changes the first 6 are listed, then "+N more coverage changes".
 
-  Result on the same 30 days: blank policy changes 213 → 11, "too many" 53 → 1, specific 56 → 159,
+  Result on the same 30 days: blank policy changes 213 → 11, "too many" 53 → 1, specific 56 → 183,
   and the rest carry at least the premium line. The queries for interests and applicants were
-  drafted and validated by the postgres peer. Not yet covered: drivers, locations, discounts,
-  scheduled items and the carrier's own download narrative (ranked lower by blank rows filled).
+  drafted and validated by the postgres peer, as were the driver and location queries (added the
+  same day; premium-only policy changes 146 → 119). Not yet covered: discounts, scheduled items and
+  the carrier's own download narrative (ranked lowest by blank rows filled).
 - **Resolves specific vehicle adds/removals with VIN, plus coverage/limit/deductible specifics for
   every line of business** (`change_detail` — vehicle-only version added 2026-09-02 per client
   feedback wanting more than AMS360's terse transaction description, e.g. "an auto updated ...
