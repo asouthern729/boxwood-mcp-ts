@@ -49,13 +49,48 @@ description says so explicitly rather than silently dropping them:
   table and the reasoning behind each `flagged` value — an unrecognized `trantype` is flagged
   rather than silently dropped).
 - **For flagged items only**, retrieves candidate prior staff activity notes (`afw_transaction`,
-  staff-classified, scoped to that `polid`, within `lookback_days` before the transaction's
-  `entereddate`) — but does **not** judge whether they match. That judgment (✓ matches / ✗ no
-  match / ⚠ verify, in the original hand-built report) requires reading free text and reasoning
-  about it; it's a separate step performed on this tool's output, not something computed here.
+  staff-classified, scoped to that `polid`). A note is included when its activity date (`trandate`,
+  the date staff set in AMS360, falling back to `entereddate`) falls within `lookback_days` (default
+  **30**) before the download's `entereddate`, and it was entered no later than the download was.
+  Patrick said on 2026-09-29 that older activity shouldn't be tied to today's download. The tool
+  does **not** judge whether the notes match. That judgment (✓ matches / ✗ no match / ⚠ verify,
+  in the original hand-built report) requires reading free text and reasoning about it; it's a
+  separate step performed on this tool's output, not something computed here.
+- **Customer names** read "Last, First" for a person (suffixes such as "Jr." go after the first
+  name). A business, trust or DBA keeps its business name. Rows sort by that name within each rep.
 - **Groups by `afw_customer.csrcode`** (the customer's header CSR — the account owner), not
   `afw_basicpolinfo.csrcode` (a per-policy field that can diverge from who actually owns the
   relationship) — same precedent as the `book_summary` fix.
+- **Policy Changes column (`change_detail`) — 2026-09-30 expansion.** Patrick asked for more
+  utility: on 30 days of downloads, 66% of policy changes were blank and 16% said "too many to
+  list". It now joins these, in order, with "; " between them:
+  1. **Premium impact** on endorsement-type downloads (PCH/XLC/REI/PAB only — never renewals, new
+     business or rewrites, which are whole-term images): "Premium: +$58.34 (full-term +$68.00)" or
+     "No premium change", from `afw_policytranpremium`. Each premium row belongs to the latest
+     transaction entered at or before it. The full-term part is dropped when a line has nothing
+     earlier to compare against (a $0 placeholder on a commercial package).
+  2. **Vehicles** added/removed (below), with their per-vehicle coverages folded into the line
+     ("(and its 8 coverages)"). A/D rows only count when the VIN is really new to the policy or
+     really gone from it within the window, because carriers re-send unchanged vehicles.
+  3. **Additional interests** (`afw_commaddotherint`): mortgagees, lienholders, loss payees and
+     additional insureds added/removed, loan-number changes, and label-only changes. This is a set
+     diff of active interests before vs after, NOT row status, because carriers re-send every
+     interest as 'A'. An interest with no earlier image anywhere reads "… on file: …", and is only
+     shown when the carrier's description is about an interest.
+  4. **Named insured / mailing address / email** (`afw_applicant`, column-granted, so never
+     `SELECT *`). Values are compared as normalized word sets, so re-casing, middle initials,
+     truncation and street-abbreviation changes produce nothing.
+  5. **Coverages** (below). Churn-proof: a coverage re-sent under a new coverageid (or on a re-sent
+     unit) with identical values cancels out; a C row with nothing earlier is skipped; every
+     coverage on one unit added/removed together reads as one line ("Removed coverages for 1987 AMC
+     WRANGLER (7)"); and a policy whose carrier is sending coverage detail for the first time reads
+     "Coverage detail first received from carrier (N coverages)" instead of N "Added" lines. Past 6
+     changes the first 6 are listed, then "+N more coverage changes".
+
+  Result on the same 30 days: blank policy changes 213 → 11, "too many" 53 → 1, specific 56 → 159,
+  and the rest carry at least the premium line. The queries for interests and applicants were
+  drafted and validated by the postgres peer. Not yet covered: drivers, locations, discounts,
+  scheduled items and the carrier's own download narrative (ranked lower by blank rows filled).
 - **Resolves specific vehicle adds/removals with VIN, plus coverage/limit/deductible specifics for
   every line of business** (`change_detail` — vehicle-only version added 2026-09-02 per client
   feedback wanting more than AMS360's terse transaction description, e.g. "an auto updated ...

@@ -46,9 +46,22 @@ function formatMissingDownloadDetail(commenttran: string | null): string {
   return lines.length > 0 ? lines.join(" ") : "Carrier download landed with no other detail recorded in AMS360's processing log — review directly in AMS360."
 }
 
-// For a commercial/business customer, lastname/firstname/dba are often all null — firmnamecust
-// carries the business name in that case (same fallback customer_lookup already documents/uses).
-const CUSTOMER_NAME_EXPR = "COALESCE(c.dba, NULLIF(TRIM(CONCAT_WS(' ', c.firstname, c.lastname)), ''), c.firmnamecust)"
+// "Last, First" for a person (Patrick, 2026-09-29: "Switch to customer last name, First name in first
+// column"), otherwise the business name. Keyed on which name fields are filled rather than
+// afw_customer.typename, which isn't reliable (~72 typename='I' customers are really LLCs/trusts/
+// HOAs with only firmnamecust set). Checked against every customer with a carrier download in the
+// prior 90 days (2026-09-30): no business has first+last without a firm name, all 6 individuals with
+// a dba are real business DBAs, and joint households keep both names in firstname ("Carney, Addison &
+// Grace"). A generational suffix kept in lastname ("Pratt Jr") moves after the first name ("Pratt,
+// Paul Jr").
+const NAME_SUFFIX_PATTERN = "[ ,]+((?:jr|sr)\\.?|ii|iii|iv)$"
+const CUSTOMER_NAME_EXPR = `CASE
+  WHEN NULLIF(TRIM(c.dba), '') IS NULL AND NULLIF(TRIM(c.firmnamecust), '') IS NULL
+    AND NULLIF(TRIM(c.firstname), '') IS NOT NULL AND NULLIF(TRIM(c.lastname), '') IS NOT NULL
+  THEN regexp_replace(TRIM(c.lastname), '${ NAME_SUFFIX_PATTERN }', '', 'i') || ', ' || TRIM(c.firstname)
+    || COALESCE(' ' || substring(TRIM(c.lastname) FROM '(?i)${ NAME_SUFFIX_PATTERN }'), '')
+  ELSE COALESCE(c.dba, NULLIF(TRIM(CONCAT_WS(' ', c.firstname, c.lastname)), ''), c.firmnamecust)
+END`
 const REP_NAME_EXPR = "COALESCE(NULLIF(TRIM(CONCAT_WS(' ', csr.firstname, csr.lastname)), ''), c.csrcode)"
 
 // afw_policytransaction/afw_claim store naive local wall-clock timestamps (see src/utils/localTime.ts),
@@ -215,16 +228,23 @@ type MissingDownloadTransactionRow = {
 // against entereddate for the same reason the outer report window does (see POLICY_TRANSACTION_QUERY) —
 // though afw_transaction's own entereddate/changeddate are essentially always identical (confirmed
 // 99.993% match, unlike afw_policytransaction), so this is a consistency change, not a fix in itself.
+//
+// The activity date is trandate — the date staff set on the activity in AMS360, which they can backdate
+// when logging past work late — falling back to entereddate. changeddate never differs from
+// entereddate on this table (100% of 180 days checked 2026-09-30), so it carried no extra meaning.
+// A note still has to have been ENTERED by the time the download was, so work logged afterwards but
+// backdated can't masquerade as prior context.
 const CANDIDATE_ACTIVITY_QUERY = `
-  SELECT tr.polid, tr.changeddate, tr.commenttran
+  SELECT tr.polid, COALESCE(tr.trandate, tr.entereddate) AS activity_date, tr.entereddate, tr.commenttran
   FROM afw_transaction tr
   WHERE tr.polid = ANY($1::uuid[])
-    AND tr.entereddate BETWEEN $2 AND $3
+    AND COALESCE(tr.trandate, tr.entereddate) >= $2
+    AND tr.entereddate <= $3
     AND EXISTS (
       SELECT 1 FROM afw_employee e
       WHERE e.empcode = tr.changedby AND NOT ${ systemEmployeeCondition("e") }
     )
-  ORDER BY tr.polid, tr.changeddate DESC
+  ORDER BY tr.polid, activity_date DESC
 `
 
 const CANDIDATE_LIMIT_PER_ITEM = 5
@@ -264,15 +284,31 @@ const VEHICLE_CHANGE_QUERY = `
   WITH txns AS (
     SELECT * FROM UNNEST($1::int[], $2::uuid[], $3::timestamp[], $4::timestamp[]) AS t(idx, polid, lower_bound, upper_bound)
   ), matches AS (
-    SELECT txns.idx, txns.polid, txns.upper_bound, v.effdate, v.status, v.vin, v.make, v.model, v.vehyear
+    SELECT txns.idx, txns.polid, txns.upper_bound, v.effdate, v.status, v.vin, v.make, v.model, v.vehyear, v.vehid AS unit_id,
+      EXISTS (
+        SELECT 1 FROM afw_vehicle v2 JOIN afw_basicpolinfo bp ON bp.polid = txns.polid
+        WHERE v2.polid IN (bp.polid, bp.priorpolid) AND v2.vin = v.vin AND v2.status <> 'D' AND v2.effdate < txns.lower_bound
+      ) AS seen_before,
+      EXISTS (
+        SELECT 1 FROM afw_vehicle v2
+        WHERE v2.polid = v.polid AND v2.vin = v.vin AND v2.status <> 'D' AND v2.effdate > v.effdate AND v2.effdate <= txns.upper_bound
+      ) AS still_active
     FROM txns
     JOIN afw_vehicle v ON v.polid = txns.polid AND v.effdate BETWEEN txns.lower_bound AND txns.upper_bound
     UNION ALL
-    SELECT txns.idx, txns.polid, txns.upper_bound, v.effdate, v.status, v.vin, v.make, v.model, v.vehyear
+    SELECT txns.idx, txns.polid, txns.upper_bound, v.effdate, v.status, v.vin, v.make, v.model, v.vehyear, v.vehdid AS unit_id,
+      EXISTS (
+        SELECT 1 FROM afw_127vehicle v2 JOIN afw_basicpolinfo bp ON bp.polid = txns.polid
+        WHERE v2.polid IN (bp.polid, bp.priorpolid) AND v2.vin = v.vin AND v2.status <> 'D' AND v2.effdate < txns.lower_bound
+      ) AS seen_before,
+      EXISTS (
+        SELECT 1 FROM afw_127vehicle v2
+        WHERE v2.polid = v.polid AND v2.vin = v.vin AND v2.status <> 'D' AND v2.effdate > v.effdate AND v2.effdate <= txns.upper_bound
+      ) AS still_active
     FROM txns
     JOIN afw_127vehicle v ON v.polid = txns.polid AND v.effdate BETWEEN txns.lower_bound AND txns.upper_bound
   )
-  SELECT m.idx, m.status, m.vin, m.make, m.model, m.vehyear
+  SELECT m.idx, m.effdate, m.status, m.vin, m.make, m.model, m.vehyear, m.unit_id, m.seen_before, m.still_active
   FROM matches m
   WHERE NOT EXISTS (
     SELECT 1 FROM txns t2
@@ -285,7 +321,15 @@ const VEHICLE_CHANGE_QUERY = `
   )
 `
 
-type VehicleChangeRow = { idx: number; status: string; vin: string | null; make: string | null; model: string | null; vehyear: string | null }
+type VehicleChangeRow = {
+  idx: number; effdate: string; status: string; vin: string | null; make: string | null; model: string | null; vehyear: string | null
+  unit_id: string | null
+  // Whether this VIN was already active on the policy (this term or the prior one) before the
+  // transaction, and whether it's re-written as active later within the same transaction window — carriers re-send an unchanged vehicle as
+  // A/D rows on unrelated endorsements ("Paperless DSC Removed", driver re-rates), so status alone
+  // doesn't mean a vehicle was really added or removed (2026-09-30 data check).
+  seen_before: boolean; still_active: boolean
+}
 
 // afw_coverage is the LOB-agnostic analog of afw_vehicle — every line of business (property, GL,
 // umbrella, auto's own liability/physical-damage coverages, ...) writes its coverage/limit/
@@ -332,7 +376,7 @@ const COVERAGE_CHANGE_QUERY = `
     SELECT * FROM UNNEST($1::int[], $2::uuid[], $3::timestamp[], $4::timestamp[]) AS t(idx, polid, lower_bound, upper_bound)
   ), matches AS (
     SELECT txns.idx, txns.polid, txns.upper_bound, cov.coverageid, cov.effdate, cov.status,
-      COALESCE(cov.descrcov, cov.coveragecode) AS coverage_name,
+      COALESCE(cov.descrcov, cov.coveragecode) AS coverage_name, cov.coveragecode, cov.attachid, cov.attachtype,
       cov.limit1, cov.limit2, cov.limit3, cov.deduct1, cov.deduct2, cov.deduct3,
       bp.custid, bp.polno
     FROM txns
@@ -350,17 +394,33 @@ const COVERAGE_CHANGE_QUERY = `
         AND pt2.effdate >= m.effdate AND pt2.effdate < m.upper_bound
     )
   )
-  SELECT a.idx, a.status, a.coverage_name, a.coverageid, a.limit1, a.limit2, a.limit3, a.deduct1, a.deduct2, a.deduct3,
+  SELECT a.idx, a.status, a.coverage_name, a.coverageid, a.coveragecode, a.attachid, a.attachtype,
+    (
+      SELECT NULLIF(TRIM(CONCAT_WS(' ', v.vehyear, v.make, v.model)), '')
+      FROM afw_vehicle v WHERE a.attachtype = 121 AND v.vehid = a.attachid
+      ORDER BY v.effdate DESC LIMIT 1
+    ) AS unit_label,
+    a.limit1, a.limit2, a.limit3, a.deduct1, a.deduct2, a.deduct3,
     p.limit1 AS prev_limit1, p.limit2 AS prev_limit2, p.limit3 AS prev_limit3,
-    p.deduct1 AS prev_deduct1, p.deduct2 AS prev_deduct2, p.deduct3 AS prev_deduct3
+    p.deduct1 AS prev_deduct1, p.deduct2 AS prev_deduct2, p.deduct3 AS prev_deduct3,
+    EXISTS (
+      SELECT 1 FROM afw_coverage c3 JOIN afw_basicpolinfo bp3 ON bp3.polid = c3.polid
+      WHERE bp3.custid = a.custid AND bp3.polno = a.polno AND c3.effdate < a.effdate
+    ) AS chain_has_prior
   FROM attributed a
   LEFT JOIN LATERAL (
     SELECT c2.limit1, c2.limit2, c2.limit3, c2.deduct1, c2.deduct2, c2.deduct3
     FROM afw_coverage c2
     JOIN afw_basicpolinfo bp2 ON bp2.polid = c2.polid
-    WHERE bp2.custid = a.custid AND bp2.polno = a.polno
-      AND c2.coverageid = a.coverageid AND c2.effdate < a.effdate
-    ORDER BY c2.effdate DESC LIMIT 1
+    WHERE bp2.custid = a.custid AND bp2.polno = a.polno AND c2.effdate < a.effdate
+      AND (
+        c2.coverageid = a.coverageid
+        -- Carriers re-send an unchanged coverage under a NEW coverageid (old id D, new id A + C, same
+        -- values — e.g. "Added Apt. Number" = 14 such re-sends, zero real changes), so the same
+        -- coverage on the same unit (coveragecode + attachid) on this term also counts as its prior.
+        OR (c2.polid = a.polid AND c2.coveragecode = a.coveragecode AND c2.attachid IS NOT DISTINCT FROM a.attachid)
+      )
+    ORDER BY (c2.coverageid = a.coverageid) DESC, c2.effdate DESC LIMIT 1
   ) p ON true
   WHERE (
     a.status IN ('A', 'D')
@@ -377,6 +437,16 @@ type CoverageChangeRow = {
   status: string
   coverage_name: string
   coverageid: string
+  coveragecode: string | null
+  attachid: string | null
+  // afw_coverage attach level: 121 = a vehicle (attachid = afw_vehicle.vehid), 85 = line of
+  // business, 86 = location, 578 = scheduled property; anything else is another per-unit schedule
+  // (boats etc.).
+  attachtype: number | null
+  unit_label: string | null
+  // False when the policy (this polno, any term) has no coverage rows at all before this one — the
+  // carrier sending its coverage detail for the first time, not coverages being added.
+  chain_has_prior: boolean
   limit1: number | null; limit2: number | null; limit3: number | null
   deduct1: number | null; deduct2: number | null; deduct3: number | null
   prev_limit1: number | null; prev_limit2: number | null; prev_limit3: number | null
@@ -401,34 +471,89 @@ const COVERAGE_FIELDS = [
   { label: "deductible (3)", key: "deduct3" as const, prevKey: "prev_deduct3" as const }
 ]
 
-// AMS360 sometimes writes a superseded placeholder ('D', deleted) immediately followed by the
-// final value ('A', added) for the exact same coverageid within one rewrite/new-business
-// transaction — confirmed real (client-requested accuracy check, 2026-09-11): John Lynch's
-// HO264928000 rewrite showed 16 distinct coverageids but 25 raw rows, because 9 of those
-// coverageids had this exact A/D pair, all 9 with byte-identical limit/deductible values on both
-// sides — inflating "25 coverage changes" when only 7 were real (the other 9 coverageids, each a
-// single unpaired row). Grouping by coverageid first, rather than treating every row
-// independently, catches this: an identical-value pair nets to nothing and is dropped entirely
-// (matches the same real coverage line being written twice, not two real facts); a
-// different-value pair is reported as one diff line (matching the normal 'C'-status diff format)
-// instead of a misleading "Removed X; Added X" pair naming the same coverage twice.
-function summarizeCoverageChanges(rows: CoverageChangeRow[]): string | null {
-  if(rows.length === 0) return null
+// Coverage rows are grouped per real coverage line — the same coverage on the same unit
+// (coveragecode + attachid) — rather than per coverageid. AMS360 sometimes writes a superseded
+// placeholder ('D') immediately followed by the final value ('A') for one coverage within a rewrite
+// (John Lynch's HO264928000: 25 raw rows, 7 real changes), and carriers also re-send an unchanged
+// coverage under a brand-new coverageid ("Added Apt. Number": 14 re-sent coverages, zero real
+// changes, 2026-09-30). An identical-value D+A pair nets to nothing; a different-value pair reads
+// as one diff line instead of "Removed X; Added X".
+//
+// Coverages attached to a vehicle that was really added/removed are folded into that vehicle's own
+// line instead of listed ("Removed: 2023 Lamborghini Huracan (and its 8 coverages)"), and a policy
+// whose carrier is sending coverage detail for the first time reads as exactly that rather than as
+// every coverage being "Added".
+type CoverageSummary = { lines: string[]; firstImageCount: number; foldedByUnit: Map<string, number> }
 
+function summarizeCoverageChanges(rows: CoverageChangeRow[], foldUnitIds: Set<string>): CoverageSummary {
   const lines: string[] = []
-  const byCoverageId = new Map<string, CoverageChangeRow[]>()
+  const foldedByUnit = new Map<string, number>()
+  let firstImageCount = 0
+  const byLine = new Map<string, CoverageChangeRow[]>()
 
+  // A re-sent coverage can also come back attached to a re-sent unit (a new location/boat id), so
+  // identical remove+add pairs are cancelled by coverage code alone before grouping by unit.
+  const valuesKey = (r: CoverageChangeRow) => `${ r.coveragecode ?? r.coverage_name }|${ COVERAGE_FIELDS.map((f) => r[f.key]).join("|") }`
+  const removedByValues = new Map<string, CoverageChangeRow[]>()
   for(const row of rows) {
-    const group = byCoverageId.get(row.coverageid)
-    if(group) group.push(row)
-    else byCoverageId.set(row.coverageid, [row])
+    if(row.status === "D") removedByValues.set(valuesKey(row), [...(removedByValues.get(valuesKey(row)) ?? []), row])
+  }
+  const cancelled = new Set<CoverageChangeRow>()
+  for(const row of rows) {
+    if(row.status !== "A") continue
+    const match = removedByValues.get(valuesKey(row))?.find((d) => !cancelled.has(d))
+    if(match) {
+      cancelled.add(match)
+      cancelled.add(row)
+    }
   }
 
-  for(const group of byCoverageId.values()) {
-    const added = group.find((r) => r.status === "A")
+  for(const row of rows) {
+    if(cancelled.has(row)) continue
+    // A 'C' row with nothing earlier to diff against is a re-sent image, not a change.
+    if(row.status !== "A" && row.status !== "D" && COVERAGE_FIELDS.every((f) => row[f.prevKey] === null)) continue
+    if(row.attachid && foldUnitIds.has(row.attachid)) {
+      foldedByUnit.set(row.attachid, (foldedByUnit.get(row.attachid) ?? 0) + 1)
+      continue
+    }
+    if(row.status === "A" && !row.chain_has_prior) {
+      firstImageCount++
+      continue
+    }
+    const key = `${ row.attachid ?? "" }|${ row.coveragecode ?? row.coverageid }`
+    const group = byLine.get(key)
+    if(group) group.push(row)
+    else byLine.set(key, [row])
+  }
+
+  // Every coverage on one vehicle/boat removed (or added) together is that unit being removed or
+  // added, even when the unit's own schedule row didn't line up with this transaction — reported as
+  // one line instead of one per coverage ("Removed Jeep" = 7 coverage lines before, 2026-09-30).
+  const UNIT_LEVEL_EXCLUDED = new Set([85, 86, 578])
+  const MIN_UNIT_COVERAGES = 3
+  const byUnit = new Map<string, CoverageChangeRow[]>()
+  for(const group of byLine.values()) {
+    for(const row of group) {
+      if(!row.attachid || row.attachtype === null || UNIT_LEVEL_EXCLUDED.has(row.attachtype)) continue
+      byUnit.set(row.attachid, [...(byUnit.get(row.attachid) ?? []), row])
+    }
+  }
+  const foldedUnitRows = new Set<CoverageChangeRow>()
+  for(const unitRows of byUnit.values()) {
+    const statuses = new Set(unitRows.map((r) => r.status))
+    if(unitRows.length < MIN_UNIT_COVERAGES || statuses.size !== 1 || !(statuses.has("A") || statuses.has("D"))) continue
+    const unit = unitRows[0].unit_label ?? (unitRows[0].attachtype === 121 ? "a vehicle" : "a scheduled unit (boat, trailer, etc.)")
+    lines.push(`${ statuses.has("A") ? "Added coverages for" : "Removed coverages for" } ${ unit } (${ unitRows.length })`)
+    unitRows.forEach((r) => foldedUnitRows.add(r))
+  }
+
+  for(const fullGroup of byLine.values()) {
+    const group = fullGroup.filter((r) => !foldedUnitRows.has(r))
+    if(group.length === 0) continue
+    const added = group.filter((r) => r.status === "A").at(-1)
     const removed = group.find((r) => r.status === "D")
 
-    if(added && removed && group.length === 2) {
+    if(added && removed) {
       for(const field of COVERAGE_FIELDS) {
         const beforeValue = removed[field.key]
         const afterValue = added[field.key]
@@ -441,7 +566,9 @@ function summarizeCoverageChanges(rows: CoverageChangeRow[]): string | null {
 
     for(const row of group) {
       if(row.status === "A") {
-        lines.push(`Added coverage: ${ row.coverage_name }${ row.limit1 !== null ? ` (${ formatMoney(row.limit1) })` : "" }`)
+        // An 'A' row that matches an existing coverage line's prior values is a re-send, not an add.
+        const unchanged = COVERAGE_FIELDS.every((f) => row[f.key] === row[f.prevKey]) && COVERAGE_FIELDS.some((f) => row[f.prevKey] !== null)
+        if(!unchanged) lines.push(`Added coverage: ${ row.coverage_name }${ row.limit1 !== null ? ` (${ formatMoney(row.limit1) })` : "" }`)
         continue
       }
 
@@ -460,11 +587,23 @@ function summarizeCoverageChanges(rows: CoverageChangeRow[]): string | null {
     }
   }
 
-  if(lines.length === 0) return null
+  return { lines: [...new Set(lines)], firstImageCount, foldedByUnit }
+}
 
-  return lines.length > MAX_REPORTED_COVERAGE_CHANGES
-    ? `${ lines.length } coverage changes — too many to list here, review the coverage schedule directly in AMS360`
-    : lines.join("; ")
+function coverageSummaryText({ lines, firstImageCount }: CoverageSummary): string | null {
+  const parts: string[] = []
+
+  // Past the cap, the most useful thing is still to show the first few real changes and say how
+  // many more there are, rather than replace them all with a count.
+  if(lines.length > MAX_REPORTED_COVERAGE_CHANGES) {
+    parts.push(...lines.slice(0, MAX_REPORTED_COVERAGE_CHANGES), `+${ lines.length - MAX_REPORTED_COVERAGE_CHANGES } more coverage changes — review the coverage schedule in AMS360`)
+  } else {
+    parts.push(...lines)
+  }
+
+  if(firstImageCount > 0) parts.push(`Coverage detail first received from carrier (${ firstImageCount } coverage${ firstImageCount === 1 ? "" : "s" })`)
+
+  return parts.length ? parts.join("; ") : null
 }
 
 // A single real-world vehicle add/replace/delete can leave more than one audit row behind for the
@@ -475,10 +614,12 @@ function summarizeCoverageChanges(rows: CoverageChangeRow[]): string | null {
 // its window (also confirmed real — e.g. a sibling vehicle silently renumbered when another vehicle
 // on the same policy was added/removed) is dropped entirely rather than surfaced as "Updated": there's
 // no reliable way to tell that apart from real field-level edits without diffing every column, and
-// the client's ask was specifically about vehicles being added/removed, not renumbered.
-function summarizeVehicleChanges(rows: Omit<VehicleChangeRow, "idx">[]): string | null {
-  if(rows.length === 0) return null
+// the client's ask was specifically about vehicles being added/removed, not renumbered. An A/D row
+// only counts when the VIN is really new to the policy / really gone from it (seen_before /
+// still_active), since carriers re-send unchanged vehicles on unrelated endorsements.
+type VehicleLine = { unitIds: string[]; text: string }
 
+function summarizeVehicleChanges(rows: Omit<VehicleChangeRow, "idx">[]): VehicleLine[] {
   const byVin = new Map<string, Omit<VehicleChangeRow, "idx">[]>()
 
   for(const row of rows) {
@@ -489,35 +630,376 @@ function summarizeVehicleChanges(rows: Omit<VehicleChangeRow, "idx">[]): string 
     else byVin.set(key, [row])
   }
 
-  const lines: string[] = []
+  const lines: VehicleLine[] = []
 
   for(const group of byVin.values()) {
-    const added = group.find((r) => r.status === "A")
-    const removed = group.find((r) => r.status === "D")
+    // The last add/remove in the window decides the direction ("Delt Bronco, Add Jeep" writes the
+    // Bronco as A then D within seconds).
+    const last = group
+      .filter((r) => r.status === "A" || r.status === "D")
+      .sort((a, b) => new Date(a.effdate).getTime() - new Date(b.effdate).getTime())
+      .at(-1)
+    if(!last) continue
 
-    if(!added && !removed) continue
+    const real = last.status === "A" ? !last.vin || !last.seen_before : !last.vin || !last.still_active
+    if(!real) continue
 
-    const winner = (added ?? removed)!
-    const action = added ? "Added" : "Removed"
+    const winner = last
+    const action = last.status === "A" ? "Added" : "Removed"
     const vehicleLabel = [winner.vehyear, winner.make, winner.model].filter(Boolean).join(" ")
 
-    lines.push(`${ action }: ${ vehicleLabel || "vehicle" }${ winner.vin ? ` (VIN ${ winner.vin })` : "" }`)
+    lines.push({
+      unitIds: [...new Set(group.map((r) => r.unit_id).filter((id): id is string => Boolean(id)))],
+      text: `${ action }: ${ vehicleLabel || "vehicle" }${ winner.vin ? ` (VIN ${ winner.vin })` : "" }`
+    })
   }
 
+  return lines
+}
+
+// A real single client-driven change (a swap, an add, an occasional 2-4 vehicle fleet update)
+// never touches more than a handful of vehicles at once — confirmed against real data that a
+// double-digit count here means the correlation window caught a bulk vehicle-schedule reload
+// rather than anything from this specific transaction. A wall of dozens of VINs would also just be
+// useless in a report cell either way, so this is reported as a count instead of listed out.
+const MAX_REPORTED_VEHICLES = 6
+
+function vehicleSummaryText(lines: VehicleLine[], foldedByUnit: Map<string, number>): string | null {
   if(lines.length === 0) return null
+  if(lines.length > MAX_REPORTED_VEHICLES) {
+    return `${ lines.length } vehicles added/removed — too many to list here, review the vehicle schedule directly in AMS360`
+  }
 
-  // A real single client-driven change (a swap, an add, an occasional 2-4 vehicle fleet update)
-  // never touches more than a handful of vehicles at once — confirmed against real data that a
-  // double-digit count here means the correlation window caught a bulk vehicle-schedule reload
-  // (e.g. an old AMS360-internal reprocessing event that only touched the parent transaction row's
-  // changeddate, not a same-night change) rather than anything from this specific transaction. A
-  // wall of dozens of VINs would also just be useless in a report cell either way, so this is
-  // reported as a count instead of listed out.
-  const MAX_REPORTED_VEHICLES = 6
+  return lines.map(({ unitIds, text }) => {
+    const folded = unitIds.reduce((sum, id) => sum + (foldedByUnit.get(id) ?? 0), 0)
+    return folded > 0 ? `${ text } (and its ${ folded } coverage${ folded === 1 ? "" : "s" })` : text
+  }).join("; ")
+}
 
-  return lines.length > MAX_REPORTED_VEHICLES
-    ? `${ lines.length } vehicles added/removed — too many to list here, review the vehicle schedule directly in AMS360`
-    : lines.join("; ")
+// Premium impact of each downloaded transaction (Patrick, 2026-09-29: the Policy Changes column
+// should say more), shown as the column's first line. afw_policytranpremium rows carry no
+// transaction key, so each is assigned to the latest afw_policytransaction entered at or before it —
+// the same rule validated for pl_renewal_premium_change. `premium` is the pro-rated amount charged
+// for THIS endorsement; the full-term change is this transaction's fulltermpremium per line minus
+// that line's latest earlier value. writtenpremium is always 0, and annualizedpremium is only
+// populated since ~2026 (and doubled on 6-month terms), so neither is used. Checked against 10 real
+// endorsements (2026-09-30), e.g. "Add 2nd Mortgagee" = +$58.34 pro-rated, full-term 5,349 → 5,417.
+const TRANSACTION_PREMIUM_QUERY = `
+  SELECT tp.polid, tk.tran_entered, tp.lineofbus, sum(tp.premium) AS premium, sum(tp.fulltermpremium) AS fulltermpremium
+  FROM afw_policytranpremium tp
+  CROSS JOIN LATERAL (
+    SELECT coalesce(max(pt.entereddate), tp.entereddate) AS tran_entered
+    FROM afw_policytransaction pt
+    WHERE pt.polid = tp.polid AND pt.entereddate <= tp.entereddate
+  ) tk
+  WHERE tp.polid = ANY($1::uuid[])
+    AND tp.chargecatpoltp = '1'
+  GROUP BY tp.polid, tk.tran_entered, tp.lineofbus
+`
+
+// Additional interests (mortgagees, lienholders, loss payees, additional insureds) added, removed or
+// with a changed loan number on each transaction — Patrick, 2026-09-29, wanting the Policy Changes
+// column to say more; "Update Mortgagee Clause"/"Add 2nd Mortgagee" were blank before. A set diff of
+// the active interests (interest label + name with punctuation stripped) just before vs just after
+// the transaction's rows, NOT afw_commaddotherint.status: carriers re-send every existing interest as
+// 'A' on unrelated endorsements. "Before" is this term's earlier state, else the prior term's final
+// state; with neither, it's the first interest image the carrier ever sent ('on_file'). Same txns
+// contract and ownership guards as COVERAGE_CHANGE_QUERY. Drafted and validated by the postgres peer
+// against all 333 PCH downloads from the prior 30 days (2026-09-30): the known mortgagee/lienholder
+// cases all come out right, and 46 of 71 unrelated endorsements that touch interest rows produce
+// nothing (most of the rest are a lienholder moving with a replaced vehicle — a real change).
+const ADDITIONAL_INTEREST_CHANGE_QUERY = String.raw`
+  WITH txns AS (
+    SELECT * FROM UNNEST($1::int[], $2::uuid[], $3::timestamp[], $4::timestamp[]) AS t(idx, polid, lower_bound, upper_bound)
+  ), owned_rows AS (
+    SELECT txns.idx, txns.polid, txns.upper_bound, x.effdate
+    FROM txns
+    JOIN afw_commaddotherint x ON x.polid = txns.polid AND x.effdate BETWEEN txns.lower_bound AND txns.upper_bound
+  ), owned AS (
+    SELECT m.idx, m.polid, min(m.effdate) AS first_eff, max(m.effdate) AS last_eff
+    FROM owned_rows m
+    WHERE NOT EXISTS (
+      SELECT 1 FROM txns t2
+      WHERE t2.polid = m.polid AND t2.upper_bound < m.upper_bound AND t2.upper_bound >= m.effdate
+    )
+    AND NOT EXISTS (
+      SELECT 1 FROM afw_policytransaction pt2
+      WHERE pt2.polid = m.polid AND pt2.source = 'D'
+        AND pt2.effdate >= m.effdate AND pt2.effdate < m.upper_bound
+    )
+    GROUP BY m.idx, m.polid
+  ), baseline AS (
+    SELECT o.*, bp.priorpolid, st.has_same_term,
+      st.has_same_term OR EXISTS (SELECT 1 FROM afw_commaddotherint p WHERE p.polid = bp.priorpolid) AS has_baseline
+    FROM owned o
+    JOIN afw_basicpolinfo bp ON bp.polid = o.polid
+    CROSS JOIN LATERAL (
+      SELECT EXISTS (SELECT 1 FROM afw_commaddotherint e WHERE e.polid = o.polid AND e.effdate < o.first_eff) AS has_same_term
+    ) st
+  ), states AS (
+    SELECT b.idx, 'after' AS side, s.polid, s.interest, s.name1, s.attachtype, s.attachid, s.refno
+    FROM baseline b
+    CROSS JOIN LATERAL (
+      SELECT DISTINCT ON (a.lobid, a.caoiid) a.polid, a.lobid, a.caoiid, a.effdate, a.status, a.interest, a.name1, a.attachtype, a.attachid, a.refno
+      FROM afw_commaddotherint a
+      WHERE a.polid = b.polid AND a.effdate <= b.last_eff
+      ORDER BY a.lobid, a.caoiid, a.effdate DESC
+    ) s
+    WHERE s.status <> 'D'
+    UNION ALL
+    SELECT b.idx, 'before', s.polid, s.interest, s.name1, s.attachtype, s.attachid, s.refno
+    FROM baseline b
+    CROSS JOIN LATERAL (
+      SELECT DISTINCT ON (a.lobid, a.caoiid) a.polid, a.lobid, a.caoiid, a.effdate, a.status, a.interest, a.name1, a.attachtype, a.attachid, a.refno
+      FROM afw_commaddotherint a
+      WHERE (b.has_same_term AND a.polid = b.polid AND a.effdate < b.first_eff)
+         OR (NOT b.has_same_term AND a.polid = b.priorpolid)
+      ORDER BY a.lobid, a.caoiid, a.effdate DESC
+    ) s
+    WHERE s.status <> 'D'
+  ), keyed AS (
+    SELECT st.*,
+      coalesce(nullif(trim(st.interest), ''), 'Additional interest') AS interest_label,
+      upper(regexp_replace(coalesce(st.name1, ''), '[^A-Za-z0-9]+', '', 'g')) AS name_key,
+      CASE st.attachtype
+        WHEN 121 THEN (SELECT concat_ws(' ', v.vehyear, v.make, v.model) FROM afw_vehicle v WHERE v.polid = st.polid AND v.vehid = st.attachid ORDER BY v.effdate DESC LIMIT 1)
+        WHEN 336 THEN (SELECT concat_ws(' ', v.vehyear, v.make, v.model) FROM afw_127vehicle v WHERE v.polid = st.polid AND v.vehdid = st.attachid ORDER BY v.effdate DESC LIMIT 1)
+        WHEN 311 THEN (SELECT concat_ws(' ', v.modelyear, v.makemodel) FROM afw_boat v WHERE v.polid = st.polid AND v.boatid = st.attachid ORDER BY v.effdate DESC LIMIT 1)
+        WHEN 86 THEN (SELECT concat_ws(', ', l.addr1, l.city) FROM afw_location l WHERE l.polid = st.polid AND l.locid = st.attachid ORDER BY l.effdate DESC LIMIT 1)
+      END AS attach_label
+    FROM states st
+    WHERE trim(coalesce(st.name1, '')) <> ''
+  )
+  SELECT a.idx,
+    CASE WHEN a.side = 'before' THEN 'removed' WHEN b.has_baseline THEN 'added' ELSE 'on_file' END AS change,
+    a.interest_label AS interest,
+    a.name_key,
+    min(trim(a.name1)) AS name,
+    string_agg(DISTINCT a.attach_label, ' | ') AS attach_label,
+    NULL::text AS detail
+  FROM keyed a
+  JOIN baseline b ON b.idx = a.idx
+  WHERE NOT EXISTS (
+    SELECT 1 FROM keyed o
+    WHERE o.idx = a.idx AND o.side <> a.side AND o.name_key = a.name_key AND o.interest_label = a.interest_label
+  )
+  GROUP BY a.idx, a.side, b.has_baseline, a.interest_label, a.name_key
+  UNION ALL
+  SELECT a.idx, 'updated', a.interest_label, a.name_key, min(trim(a.name1)), string_agg(DISTINCT a.attach_label, ' | '),
+    'Loan #: ' || coalesce(min(nullif(trim(o.refno), '')), '(none)') || ' → ' || coalesce(min(nullif(trim(a.refno), '')), '(none)')
+  FROM keyed a
+  JOIN keyed o ON o.idx = a.idx AND o.side = 'before' AND o.name_key = a.name_key AND o.interest_label = a.interest_label
+  WHERE a.side = 'after'
+  GROUP BY a.idx, a.interest_label, a.name_key
+  HAVING string_agg(DISTINCT upper(regexp_replace(coalesce(a.refno, ''), '[^A-Za-z0-9]+', '', 'g')), ',' ORDER BY upper(regexp_replace(coalesce(a.refno, ''), '[^A-Za-z0-9]+', '', 'g')))
+      IS DISTINCT FROM string_agg(DISTINCT upper(regexp_replace(coalesce(o.refno, ''), '[^A-Za-z0-9]+', '', 'g')), ',' ORDER BY upper(regexp_replace(coalesce(o.refno, ''), '[^A-Za-z0-9]+', '', 'g')))
+  ORDER BY 1, 2, 3, 5
+`
+
+type AdditionalInterestChangeRow = {
+  idx: number
+  change: "added" | "removed" | "updated" | "on_file"
+  interest: string
+  name_key: string
+  name: string
+  attach_label: string | null
+  detail: string | null
+}
+
+// Named insured / mailing address / email changes on each transaction, from afw_applicant (keyed
+// (polid, appid, effdate); appid is stable across renewal terms, so "before" falls back to the prior
+// term's version). afw_customer is current-state only, so this is the one historized source. Carriers
+// rewrite the applicant on ~85% of endorsements, almost always unchanged, so values are compared as
+// normalized word sets (case, punctuation, street abbreviations, zip5; for names also lone initials,
+// AND and suffixes), and carrier truncation/cleanup is ignored. Drafted and validated by the postgres
+// peer against the same 333 downloads (2026-09-30): 25 produce lines, all real (e.g. "chngd mailing
+// address": 54 Shelton Rd, Fayetteville → 703 Forrest Dr, Tullahoma); "Zachary Blanton" → "Zachary T
+// Blanton" and the 256 identical rewrites produce nothing.
+// Columns are listed explicitly (never a.*): the app's read-only role has a column-level grant on
+// afw_applicant that excludes ssn/dob/license, so a wildcard select is refused outright.
+const APPLICANT_CHANGE_QUERY = String.raw`
+  WITH txns AS (
+    SELECT * FROM UNNEST($1::int[], $2::uuid[], $3::timestamp[], $4::timestamp[]) AS t(idx, polid, lower_bound, upper_bound)
+  ), owned_rows AS (
+    SELECT txns.idx, txns.polid, txns.upper_bound, a.appid, a.effdate
+    FROM txns
+    JOIN afw_applicant a ON a.polid = txns.polid AND a.effdate BETWEEN txns.lower_bound AND txns.upper_bound
+  ), owned AS (
+    SELECT m.idx, m.polid, m.appid, min(m.effdate) AS first_eff, max(m.effdate) AS last_eff
+    FROM owned_rows m
+    WHERE NOT EXISTS (
+      SELECT 1 FROM txns t2
+      WHERE t2.polid = m.polid AND t2.upper_bound < m.upper_bound AND t2.upper_bound >= m.effdate
+    )
+    AND NOT EXISTS (
+      SELECT 1 FROM afw_policytransaction pt2
+      WHERE pt2.polid = m.polid AND pt2.source = 'D'
+        AND pt2.effdate >= m.effdate AND pt2.effdate < m.upper_bound
+    )
+    GROUP BY m.idx, m.polid, m.appid
+  ), pairs AS (
+    SELECT o.idx, n.*, coalesce(p_same.decnameapp, p_prior.decnameapp) AS decnameapp_before,
+      coalesce(p_same.appid, p_prior.appid) AS before_appid,
+      CASE WHEN p_same.appid IS NOT NULL THEN p_same.firstname ELSE p_prior.firstname END AS firstname_before,
+      CASE WHEN p_same.appid IS NOT NULL THEN p_same.lastname ELSE p_prior.lastname END AS lastname_before,
+      CASE WHEN p_same.appid IS NOT NULL THEN p_same.firmnameapp ELSE p_prior.firmnameapp END AS firmnameapp_before,
+      CASE WHEN p_same.appid IS NOT NULL THEN p_same.mailaddr1 ELSE p_prior.mailaddr1 END AS mailaddr1_before,
+      CASE WHEN p_same.appid IS NOT NULL THEN p_same.mailaddr2 ELSE p_prior.mailaddr2 END AS mailaddr2_before,
+      CASE WHEN p_same.appid IS NOT NULL THEN p_same.mailcity ELSE p_prior.mailcity END AS mailcity_before,
+      CASE WHEN p_same.appid IS NOT NULL THEN p_same.mailstate ELSE p_prior.mailstate END AS mailstate_before,
+      CASE WHEN p_same.appid IS NOT NULL THEN p_same.mailzip ELSE p_prior.mailzip END AS mailzip_before,
+      CASE WHEN p_same.appid IS NOT NULL THEN p_same.emailapp ELSE p_prior.emailapp END AS emailapp_before
+    FROM owned o
+    JOIN afw_basicpolinfo bp ON bp.polid = o.polid
+    CROSS JOIN LATERAL (
+      SELECT a.appid, a.polid, a.effdate, a.status, a.decnameapp, a.firstname, a.lastname, a.firmnameapp, a.mailaddr1, a.mailaddr2, a.mailcity, a.mailstate, a.mailzip, a.emailapp FROM afw_applicant a
+      WHERE a.polid = o.polid AND a.appid = o.appid AND a.effdate <= o.last_eff
+      ORDER BY a.effdate DESC LIMIT 1
+    ) n
+    LEFT JOIN LATERAL (
+      SELECT a.appid, a.polid, a.effdate, a.status, a.decnameapp, a.firstname, a.lastname, a.firmnameapp, a.mailaddr1, a.mailaddr2, a.mailcity, a.mailstate, a.mailzip, a.emailapp FROM afw_applicant a
+      WHERE a.polid = o.polid AND a.appid = o.appid AND a.effdate < o.first_eff
+      ORDER BY a.effdate DESC LIMIT 1
+    ) p_same ON true
+    LEFT JOIN LATERAL (
+      SELECT a.appid, a.polid, a.effdate, a.status, a.decnameapp, a.firstname, a.lastname, a.firmnameapp, a.mailaddr1, a.mailaddr2, a.mailcity, a.mailstate, a.mailzip, a.emailapp FROM afw_applicant a
+      WHERE a.polid = bp.priorpolid AND a.appid = o.appid
+      ORDER BY a.effdate DESC LIMIT 1
+    ) p_prior ON true
+    WHERE n.status <> 'D'
+  ), vals AS (
+    SELECT p.idx, p.appid, v.field, v.before_disp, v.after_disp, v.before_raw, v.after_raw
+    FROM pairs p
+    CROSS JOIN LATERAL (VALUES
+      ('Named insured',
+        regexp_replace(regexp_replace(trim(coalesce(nullif(trim(p.decnameapp_before), ''), nullif(trim(p.firmnameapp_before), ''), concat_ws(' ', p.firstname_before, p.lastname_before))), '\s{3,}', ' / ', 'g'), '\s{2}', ' ', 'g'),
+        regexp_replace(regexp_replace(trim(coalesce(nullif(trim(p.decnameapp), ''), nullif(trim(p.firmnameapp), ''), concat_ws(' ', p.firstname, p.lastname))), '\s{3,}', ' / ', 'g'), '\s{2}', ' ', 'g'),
+        coalesce(nullif(trim(p.decnameapp_before), ''), nullif(trim(p.firmnameapp_before), ''), concat_ws(' ', p.firstname_before, p.lastname_before)),
+        coalesce(nullif(trim(p.decnameapp), ''), nullif(trim(p.firmnameapp), ''), concat_ws(' ', p.firstname, p.lastname))),
+      ('Mailing address',
+        concat_ws(', ', nullif(trim(regexp_replace(p.mailaddr1_before, '\s+', ' ', 'g')), ''), nullif(nullif(trim(regexp_replace(p.mailaddr2_before, '\s+', ' ', 'g')), ''), trim(regexp_replace(p.mailaddr1_before, '\s+', ' ', 'g'))), nullif(trim(p.mailcity_before), ''))
+          || coalesce(' ' || nullif(trim(p.mailstate_before), ''), '') || coalesce(' ' || left(nullif(trim(p.mailzip_before), ''), 5), ''),
+        concat_ws(', ', nullif(trim(regexp_replace(p.mailaddr1, '\s+', ' ', 'g')), ''), nullif(nullif(trim(regexp_replace(p.mailaddr2, '\s+', ' ', 'g')), ''), trim(regexp_replace(p.mailaddr1, '\s+', ' ', 'g'))), nullif(trim(p.mailcity), ''))
+          || coalesce(' ' || nullif(trim(p.mailstate), ''), '') || coalesce(' ' || left(nullif(trim(p.mailzip), ''), 5), ''),
+        concat_ws(' ', p.mailaddr1_before, p.mailaddr2_before, p.mailcity_before, p.mailstate_before, left(p.mailzip_before, 5)),
+        concat_ws(' ', p.mailaddr1, p.mailaddr2, p.mailcity, p.mailstate, left(p.mailzip, 5))),
+      ('Email', lower(trim(p.emailapp_before)), lower(trim(p.emailapp)), lower(trim(p.emailapp_before)), lower(trim(p.emailapp)))
+    ) v(field, before_disp, after_disp, before_raw, after_raw)
+    WHERE p.before_appid IS NOT NULL
+  ), tokens AS (
+    SELECT v.idx, v.appid, v.field, side.side,
+      array(
+        SELECT DISTINCT coalesce(m.abbr, u.tok)
+        FROM unnest(regexp_split_to_array(trim(regexp_replace(regexp_replace(upper(coalesce(side.raw, '')), 'P\s*\.?\s*O\.?\s*BOX', 'POBOX', 'g'), '[^A-Z0-9]+', ' ', 'g')), ' ')) u(tok)
+        LEFT JOIN (VALUES ('AVENUE','AVE'),('STREET','ST'),('DRIVE','DR'),('ROAD','RD'),('LANE','LN'),('COURT','CT'),
+          ('CIRCLE','CIR'),('BOULEVARD','BLVD'),('PLACE','PL'),('TRACE','TRCE'),('PARKWAY','PKWY'),('HIGHWAY','HWY'),
+          ('TERRACE','TER'),('SQUARE','SQ'),('POINT','PT'),('NORTH','N'),('SOUTH','S'),('EAST','E'),('WEST','W'),
+          ('APARTMENT','APT'),('SUITE','STE'),('UNIT','APT')) m(full_word, abbr)
+          ON m.full_word = u.tok AND v.field = 'Mailing address'
+        WHERE u.tok <> ''
+          AND NOT (v.field = 'Named insured' AND (length(u.tok) = 1 OR u.tok IN ('AND', 'JR', 'SR', 'II', 'III', 'IV')))
+      ) AS words
+    FROM vals v
+    CROSS JOIN LATERAL (VALUES ('before', v.before_raw), ('after', v.after_raw)) side(side, raw)
+  )
+  SELECT v.idx, v.field, v.before_disp AS before, v.after_disp AS after
+  FROM vals v
+  JOIN tokens tb ON tb.idx = v.idx AND tb.appid = v.appid AND tb.field = v.field AND tb.side = 'before'
+  JOIN tokens ta ON ta.idx = v.idx AND ta.appid = v.appid AND ta.field = v.field AND ta.side = 'after'
+  CROSS JOIN LATERAL (
+    SELECT upper(regexp_replace(coalesce(v.before_raw, ''), '[^A-Za-z0-9]+', '', 'g')) AS b,
+           upper(regexp_replace(coalesce(v.after_raw, ''), '[^A-Za-z0-9]+', '', 'g')) AS a
+  ) flat
+  WHERE NOT (tb.words @> ta.words AND ta.words @> tb.words)
+    AND (v.field <> 'Email' OR coalesce(v.after_raw, '') <> '')
+    AND NOT (v.field = 'Named insured' AND abs(length(flat.a) - length(flat.b)) <= 4
+             AND (flat.a LIKE flat.b || '%' OR flat.b LIKE flat.a || '%'))
+    AND NOT (v.field = 'Mailing address' AND tb.words @> ta.words
+             AND NOT EXISTS (SELECT 1 FROM unnest(tb.words) w WHERE w <> ALL (ta.words) AND w ~ '[0-9]'))
+  ORDER BY v.idx, v.field
+`
+
+type ApplicantChangeRow = { idx: number; field: "Named insured" | "Mailing address" | "Email"; before: string | null; after: string | null }
+
+// An interest that was already on file before this term's first interest image isn't "added" — it's
+// only worth showing when the carrier's own description is about an interest (about half of these
+// first images are "Added Trust"/"lienholder added"; the rest ride along on "Enrolled in Paperless").
+const INTEREST_DESCRIPTION_PATTERN = /mort|mtg|lien|loss ?payee|\bai\b|add'?l|additional|interest|trust|escrow|lender|bank/i
+
+function summarizeInterestChanges(rawRows: Omit<AdditionalInterestChangeRow, "idx">[], description: string): string | null {
+  // Carriers pad interest names with runs of spaces ("Pennymac Loan Services LLC    Its Successors").
+  const tidy = (v: string | null) => (v === null ? null : v.replace(/\s+/g, " ").trim())
+  const rows = rawRows.map((r) => ({ ...r, name: tidy(r.name) ?? "", interest: tidy(r.interest) ?? "", attach_label: tidy(r.attach_label) }))
+  const lines: string[] = []
+  const on = (r: { attach_label: string | null }) => (r.attach_label ? ` on ${ r.attach_label }` : "")
+  const removed = rows.filter((r) => r.change === "removed")
+  const usedRemovals = new Set<typeof rows[number]>()
+
+  for(const row of rows) {
+    if(row.change === "added") {
+      // Only the interest label changed ("Loss payee" → "Loss Payee & Addl Insured") — one line, not add + remove.
+      const relabel = removed.find((r) => r.name_key === row.name_key && !usedRemovals.has(r))
+      if(relabel) {
+        usedRemovals.add(relabel)
+        lines.push(`${ row.name }: ${ relabel.interest } → ${ row.interest }${ on(row) }`)
+      } else {
+        lines.push(`Added ${ row.interest }: ${ row.name }${ on(row) }`)
+      }
+    } else if(row.change === "updated") {
+      lines.push(`${ row.interest } ${ row.name }${ on(row) }: ${ row.detail }`)
+    } else if(row.change === "on_file" && INTEREST_DESCRIPTION_PATTERN.test(description)) {
+      lines.push(`${ row.interest } on file: ${ row.name }${ on(row) }`)
+    }
+  }
+  for(const row of removed) {
+    if(!usedRemovals.has(row)) lines.push(`Removed ${ row.interest }: ${ row.name }${ on(row) }`)
+  }
+
+  return lines.length ? lines.join("; ") : null
+}
+
+function summarizeApplicantChanges(rows: Omit<ApplicantChangeRow, "idx">[]): string | null {
+  const lines = rows.map((r) => `${ r.field }: ${ r.before || "none" } → ${ r.after || "none" }`)
+  return lines.length ? [...new Set(lines)].join("; ") : null
+}
+
+// Only endorsement-style downloads get a premium line. A renewal, renewal quote, new business,
+// rewrite or reissue is a whole-term image (a renewal compared against its own renewal-quote rows
+// read "+$536.00 (full-term -$62.00)", 2026-09-30), and a sync carries no client-facing change.
+const PREMIUM_LINE_TRANTYPES = new Set(["PCH", "XLC", "REI", "PAB"])
+
+type TransactionPremiumRow = { polid: string; tran_entered: string; lineofbus: string | null; premium: string | number | null; fulltermpremium: string | number | null }
+
+function signedMoney(value: number): string {
+  const rounded = Math.round(value * 100) / 100
+  return `${ rounded < 0 ? "-" : "+" }$${ Math.abs(rounded).toLocaleString("en-US", { minimumFractionDigits: 2, maximumFractionDigits: 2 }) }`
+}
+
+// Null when the transaction has no premium rows, or none earlier on this term to compare against
+// (a new business/renewal/rewrite first image — its premium is the whole term, not a change).
+function summarizePremiumChange(polidRows: TransactionPremiumRow[], enteredAt: string): string | null {
+  const at = new Date(enteredAt).getTime()
+  const current = polidRows.filter((r) => new Date(r.tran_entered).getTime() === at)
+  const earlier = polidRows.filter((r) => new Date(r.tran_entered).getTime() < at)
+  if(current.length === 0 || earlier.length === 0) return null
+
+  const num = (v: string | number | null) => Number(v ?? 0) || 0
+  const prorated = current.reduce((sum, r) => sum + num(r.premium), 0)
+  let comparable = true
+  const fullTermChange = current.reduce((sum, r) => {
+    const prior = earlier
+      .filter((e) => e.lineofbus === r.lineofbus)
+      .sort((a, b) => new Date(b.tran_entered).getTime() - new Date(a.tran_entered).getTime())[0]
+    // A line with nothing earlier (or only a $0 placeholder, common on commercial packages) can't
+    // give a full-term change — one such case read "full-term +$65,115" on an $884 endorsement.
+    if(!prior || (num(prior.fulltermpremium) === 0 && num(r.fulltermpremium) !== 0)) comparable = false
+    return sum + num(r.fulltermpremium) - (prior ? num(prior.fulltermpremium) : 0)
+  }, 0)
+
+  if(Math.abs(prorated) < 0.005 && (!comparable || Math.abs(fullTermChange) < 0.005)) return "No premium change"
+  return comparable
+    ? `Premium: ${ signedMoney(prorated) } (full-term ${ signedMoney(fullTermChange) })`
+    : `Premium: ${ signedMoney(prorated) }`
 }
 
 type PolicyTransactionRow = {
@@ -558,7 +1040,7 @@ type ClaimRow = {
   customer_name: string | null
 }
 
-type CandidateActivityRow = { polid: string; changeddate: string; commenttran: string | null }
+type CandidateActivityRow = { polid: string; activity_date: string; entereddate: string; commenttran: string | null }
 
 export type ReportItem = {
   item_id: number
@@ -735,12 +1217,12 @@ export function registerDownloadReportTool(server: McpServer) {
   server.registerTool(
     "download_report",
     {
-      description: "Boxwood's daily \"Download Report\" — the overnight carrier-download review each rep does every morning, rebuilt from synced AMS360 data instead of AMS360's own exported report. Returns policy transactions and claims that came down from carriers overnight, normalized into plain-language action items and grouped by representative (CSR). RESPONSE SHAPE — this returns a compact result, not the full dataset: the full item list (every rep's routine AND flagged items, with every field) is written to a 24h link (`report_url`) instead of being embedded inline, to keep this response small on a busy day. The inline `reps[].flagged_items` only includes items where `flagged: true`, trimmed to just what judging accuracy requires (`item_id`, `customer_name`, `policy_no`, `what_happened`, `repeat_count`, and up to 3 most-recent `candidate_prior_activity` notes, each capped to 240 characters) — routine items are represented solely by `reps[].summary` counts, and flagged items' other fields (carrier_name, detail, next_step, ...) live only in the full dataset behind the link. Save `report_token` (the same value as the last path segment of `report_url`): pass it to `download_report_workbook` to build the finished worksheet from the *full* dataset (not just the flagged subset you saw here). IMPORTANT — this is a data-synthesis step only, not the finished worksheet: (1) `flagged` means \"this category is one a client could plausibly have requested something about\" (policy change/cancellation/rewrite/reinstatement/reissue/new business) — it is NOT AMS360's native [WARNING]/GROUP REJECT flag from its live download-processing log, which isn't replicated into any table this MCP can query and so cannot be reproduced here; (2) flagged items include `candidate_prior_activity` (recent staff notes on that policy) but NO verdict — deciding whether the download actually matches a documented client request requires reading those notes and judging, which is a separate reasoning step, not something this tool computes; (3) claims reflect only their current state — AMS360's own report can show a claim re-downloaded multiple times in one night (an \"x2/x3 overnight\" note), but that per-event history isn't stored in these tables, so no repeat-count is reported for claims; (4) policy transactions ARE collapsed when AMS360's download processor writes the same transaction (same policy/type/description) several times in quick succession — a confirmed, ongoing AMS360-side glitch, not a client action — into one item, so 12 identical rows read as 1 client-relevant event, not 12 separate requests; a 2-row repeat merges quietly (common enough — ~78% of these — to be unremarkable on its own), but 3+ is surfaced via `repeat_count` and called a repeated transaction, since that pattern is rare enough to be worth a second look. It is NOT necessarily harmless: no synced table records whether a transaction actually applied (isposted/isuploaded were checked and don't track this), so a repeated transaction can equally mean AMS360 kept retrying something that kept failing (e.g. a GROUP REJECT loop) — `next_step` calls this out for any item with a `repeat_count` and the rep should verify directly in AMS360 rather than assume it's cosmetic. (5) `change_detail` (client-requested 2026-09-02, broadened 2026-09-02 from a vehicle-only field per follow-up feedback) spells out the concrete specifics of what changed on a policy transaction, across every line of business — not just AMS360's terse transaction description. Two independent signals are merged into this one field, semicolon-joined when both fire on the same transaction: vehicle adds/removals with VIN (e.g. \"Added: 2019 FORD F-150 SUPERCREW RAPTOR (VIN 1FTFW1RG5KFC53281); Removed: 2013 FORD F-150 SUPERCREW (VIN 1FTFW1ET3DKE56229)\" for a vehicle replacement — Personal and Commercial Auto, `afw_vehicle`/`afw_127vehicle`), and coverage/limit/deductible adds, removals, and value changes for any line of business (e.g. \"Dwelling limit: $850,000 → $899,000; Other Structures limit: $170,000 → $179,800\" for a homeowners coverage bump, or \"Added coverage: Water Backup of Sewers & Drains ($50,000)\" for a new endorsement — `afw_coverage`). Both are correlated to the specific transaction (not just the policy) even when several related transactions land seconds apart on the same policy in one overnight batch. Null whenever a transaction has neither kind of activity — most transactions, including ones with `detail` text that already mentions a vehicle or coverage (e.g. a plain premium change), will have this as null; don't read null as \"nothing changed,\" only as \"nothing this field tracks changed on this specific transaction.\" Deliberately does not report a vehicle that was merely edited in place (e.g. renumbered when a sibling vehicle was added/removed) or a coverage row rewritten with identical values (AMS360 rewrites every active coverage on any coverage-related download, not just the one that changed) — only clear adds/removals/value-changes, since AMS360's audit trail can't reliably distinguish a real edit from an incidental side-effect touch. `change_detail` only ever attributes a vehicle/coverage row to a transaction actually present in the current call's own window — if that row's true owning transaction was already downloaded and reported on an earlier call, this attribution correctly excludes the row entirely (verified against real data) rather than misattributing it to whatever unrelated transaction happens to be nearby in this call. Coverage limit/deductible comparisons also look up each coverage line's prior value across the policy's full renewal history (not just its current term), since AMS360 gives a policy a new internal term id every renewal but keeps the same coverage-line id — so a renewal's own first-of-term snapshot correctly compares against its real prior value instead of reading every limit as newly added. (6) `effective_date` on a policy_transaction item is that specific transaction's own effdate (when the change took effect), not the policy's own poleffdate/polexpdate — always null on a claim item, since claims have no equivalent field. (7) `missing_transaction_record` (client-requested 2026-09-03: \"if a new row is inserted into afw_transaction by a carrier download we want to see that tx ... even if there is no policy change detected\") surfaces a carrier download that never got its own row in AMS360's policy-transaction table at all — afw_policytransaction only keeps the latest write per (policy, effective date), so when two downloads land on the same key close together, the earlier one's content is otherwise invisible to this report. These items are built from afw_transaction's own raw processing-log text instead (its `detail` is AMS360's cleaned-up commenttran narrative, e.g. \"Download updated the writing company from Hartford Property & Casualty to Hartford Insurance Group\" or a vehicle's discount change) — `categorized`/`flagged`/`change_detail`/`repeat_count` all still apply normally on top, since these items carry a real policy and effective date same as any other. `next_step` names this explicitly so a rep isn't confused why an item has unusual detail text. (8) `cross_term_echo_count` (found investigating client-requested duplicate-reduction 2026-09-11) covers a second, distinct glitch from repeat_count above, this one carrier-side rather than purely AMS360-side: a carrier's overnight feed can transmit one real edit twice right at a policy's term-rollover boundary — once as a plain policy-change image against the closing term, once folded into the renewal image against the new term — and since AMS360 mints a brand-new polid every renewal term, these land as two genuinely distinct policy-transaction rows (not literal duplicates) with identical description text, in the same sync batch, weeks apart on effdate. Confirmed via real data the underlying staff request was only ever entered once. `clusterRepeats` can't catch this since it keys on a single polid; this folds the closing-term echo into the new-term item instead (same policy number, matching description, same sync batch) and reports how many were folded plus their original effective date(s) in `next_step` — the rep should treat it as the same request already seen elsewhere, not a second one, unless something looks off. (9) `since`/`until` bind against each row's own `entereddate` (client-requested 2026-09-11, after staff reported transactions being \"flagged as not on [today's] report\" but actually downloaded days earlier) — not `changeddate`, which AMS360 re-touches on a large share of rows well after real entry (confirmed at scale: 70.7% of source='D' policy-transaction rows show a real changeddate-entereddate gap, 38.4% by more than 30 days, across thousands of distinct policies) — so a transaction's report day no longer silently drifts to whatever day something unrelated last touched it. This is unrelated to `repeat_count`/`cross_term_echo_count` above, which catch genuinely duplicated or miscounted content within an already-correctly-selected transaction, not which day it's selected into. (10) `synced_since` (client-requested 2026-09-19, after a 2026-09-17 batch that synced a full day late fell into the gap between two consecutive entereddate windows and was never reported at all) is a separate, additive bound on top of since/until — see its own field description for the mechanism. Ordinary callers should leave it unset; scripts/morningDownload.ts's persisted watermark is the intended user of it. (11) `sync_metadata` (`tables_touched`, the synced tables that actually contributed a row this call, and `rows_entered`, their total row count) reports what this call actually pulled off Postgres, before any downstream merging/collapsing (repeat clustering, cross-term echo folding) changes how many distinct items the report ends up showing — scripts/morningDownload.ts records both alongside the watermark boundary it advances, so a run that succeeds but quietly touched nothing is visible without digging up that day's report separately.",
+      description: "Boxwood's daily \"Download Report\" — the overnight carrier-download review each rep does every morning, rebuilt from synced AMS360 data instead of AMS360's own exported report. Returns policy transactions and claims that came down from carriers overnight, normalized into plain-language action items and grouped by representative (CSR). RESPONSE SHAPE — this returns a compact result, not the full dataset: the full item list (every rep's routine AND flagged items, with every field) is written to a 24h link (`report_url`) instead of being embedded inline, to keep this response small on a busy day. The inline `reps[].flagged_items` only includes items where `flagged: true`, trimmed to just what judging accuracy requires (`item_id`, `customer_name`, `policy_no`, `what_happened`, `repeat_count`, and up to 3 most-recent `candidate_prior_activity` notes, each capped to 240 characters) — routine items are represented solely by `reps[].summary` counts, and flagged items' other fields (carrier_name, detail, next_step, ...) live only in the full dataset behind the link. Save `report_token` (the same value as the last path segment of `report_url`): pass it to `download_report_workbook` to build the finished worksheet from the *full* dataset (not just the flagged subset you saw here). IMPORTANT — this is a data-synthesis step only, not the finished worksheet: (1) `flagged` means \"this category is one a client could plausibly have requested something about\" (policy change/cancellation/rewrite/reinstatement/reissue/new business) — it is NOT AMS360's native [WARNING]/GROUP REJECT flag from its live download-processing log, which isn't replicated into any table this MCP can query and so cannot be reproduced here; (2) flagged items include `candidate_prior_activity` (recent staff notes on that policy) but NO verdict — deciding whether the download actually matches a documented client request requires reading those notes and judging, which is a separate reasoning step, not something this tool computes; (3) claims reflect only their current state — AMS360's own report can show a claim re-downloaded multiple times in one night (an \"x2/x3 overnight\" note), but that per-event history isn't stored in these tables, so no repeat-count is reported for claims; (4) policy transactions ARE collapsed when AMS360's download processor writes the same transaction (same policy/type/description) several times in quick succession — a confirmed, ongoing AMS360-side glitch, not a client action — into one item, so 12 identical rows read as 1 client-relevant event, not 12 separate requests; a 2-row repeat merges quietly (common enough — ~78% of these — to be unremarkable on its own), but 3+ is surfaced via `repeat_count` and called a repeated transaction, since that pattern is rare enough to be worth a second look. It is NOT necessarily harmless: no synced table records whether a transaction actually applied (isposted/isuploaded were checked and don't track this), so a repeated transaction can equally mean AMS360 kept retrying something that kept failing (e.g. a GROUP REJECT loop) — `next_step` calls this out for any item with a `repeat_count` and the rep should verify directly in AMS360 rather than assume it's cosmetic. (5) `change_detail` (client-requested 2026-09-02, broadened 2026-09-02 from a vehicle-only field per follow-up feedback, expanded 2026-09-30) is the rep-facing \"Policy Changes\" column. On a policy change, cancellation, reinstatement or premium audit it starts with the premium impact (\"Premium: +$58.34 (full-term +$68.00)\" or \"No premium change\"), then vehicles added/removed with their own coverages folded in, then additional interests (mortgagee/lienholder/loss payee/additional insured added or removed, loan number changed), then named insured/mailing address/email changes, then coverage changes. Coverage re-sent unchanged under a new id doesn't count, and a carrier's first image of a policy's coverages reads \"Coverage detail first received from carrier\". It spells out the concrete specifics of what changed on a policy transaction, across every line of business — not just AMS360's terse transaction description. Two independent signals are merged into this one field, semicolon-joined when both fire on the same transaction: vehicle adds/removals with VIN (e.g. \"Added: 2019 FORD F-150 SUPERCREW RAPTOR (VIN 1FTFW1RG5KFC53281); Removed: 2013 FORD F-150 SUPERCREW (VIN 1FTFW1ET3DKE56229)\" for a vehicle replacement — Personal and Commercial Auto, `afw_vehicle`/`afw_127vehicle`), and coverage/limit/deductible adds, removals, and value changes for any line of business (e.g. \"Dwelling limit: $850,000 → $899,000; Other Structures limit: $170,000 → $179,800\" for a homeowners coverage bump, or \"Added coverage: Water Backup of Sewers & Drains ($50,000)\" for a new endorsement — `afw_coverage`). Both are correlated to the specific transaction (not just the policy) even when several related transactions land seconds apart on the same policy in one overnight batch. Null whenever a transaction has neither kind of activity — most transactions, including ones with `detail` text that already mentions a vehicle or coverage (e.g. a plain premium change), will have this as null; don't read null as \"nothing changed,\" only as \"nothing this field tracks changed on this specific transaction.\" Deliberately does not report a vehicle that was merely edited in place (e.g. renumbered when a sibling vehicle was added/removed) or a coverage row rewritten with identical values (AMS360 rewrites every active coverage on any coverage-related download, not just the one that changed) — only clear adds/removals/value-changes, since AMS360's audit trail can't reliably distinguish a real edit from an incidental side-effect touch. `change_detail` only ever attributes a vehicle/coverage row to a transaction actually present in the current call's own window — if that row's true owning transaction was already downloaded and reported on an earlier call, this attribution correctly excludes the row entirely (verified against real data) rather than misattributing it to whatever unrelated transaction happens to be nearby in this call. Coverage limit/deductible comparisons also look up each coverage line's prior value across the policy's full renewal history (not just its current term), since AMS360 gives a policy a new internal term id every renewal but keeps the same coverage-line id — so a renewal's own first-of-term snapshot correctly compares against its real prior value instead of reading every limit as newly added. (6) `effective_date` on a policy_transaction item is that specific transaction's own effdate (when the change took effect), not the policy's own poleffdate/polexpdate — always null on a claim item, since claims have no equivalent field. (7) `missing_transaction_record` (client-requested 2026-09-03: \"if a new row is inserted into afw_transaction by a carrier download we want to see that tx ... even if there is no policy change detected\") surfaces a carrier download that never got its own row in AMS360's policy-transaction table at all — afw_policytransaction only keeps the latest write per (policy, effective date), so when two downloads land on the same key close together, the earlier one's content is otherwise invisible to this report. These items are built from afw_transaction's own raw processing-log text instead (its `detail` is AMS360's cleaned-up commenttran narrative, e.g. \"Download updated the writing company from Hartford Property & Casualty to Hartford Insurance Group\" or a vehicle's discount change) — `categorized`/`flagged`/`change_detail`/`repeat_count` all still apply normally on top, since these items carry a real policy and effective date same as any other. `next_step` names this explicitly so a rep isn't confused why an item has unusual detail text. (8) `cross_term_echo_count` (found investigating client-requested duplicate-reduction 2026-09-11) covers a second, distinct glitch from repeat_count above, this one carrier-side rather than purely AMS360-side: a carrier's overnight feed can transmit one real edit twice right at a policy's term-rollover boundary — once as a plain policy-change image against the closing term, once folded into the renewal image against the new term — and since AMS360 mints a brand-new polid every renewal term, these land as two genuinely distinct policy-transaction rows (not literal duplicates) with identical description text, in the same sync batch, weeks apart on effdate. Confirmed via real data the underlying staff request was only ever entered once. `clusterRepeats` can't catch this since it keys on a single polid; this folds the closing-term echo into the new-term item instead (same policy number, matching description, same sync batch) and reports how many were folded plus their original effective date(s) in `next_step` — the rep should treat it as the same request already seen elsewhere, not a second one, unless something looks off. (9) `since`/`until` bind against each row's own `entereddate` (client-requested 2026-09-11, after staff reported transactions being \"flagged as not on [today's] report\" but actually downloaded days earlier) — not `changeddate`, which AMS360 re-touches on a large share of rows well after real entry (confirmed at scale: 70.7% of source='D' policy-transaction rows show a real changeddate-entereddate gap, 38.4% by more than 30 days, across thousands of distinct policies) — so a transaction's report day no longer silently drifts to whatever day something unrelated last touched it. This is unrelated to `repeat_count`/`cross_term_echo_count` above, which catch genuinely duplicated or miscounted content within an already-correctly-selected transaction, not which day it's selected into. (10) `synced_since` (client-requested 2026-09-19, after a 2026-09-17 batch that synced a full day late fell into the gap between two consecutive entereddate windows and was never reported at all) is a separate, additive bound on top of since/until — see its own field description for the mechanism. Ordinary callers should leave it unset; scripts/morningDownload.ts's persisted watermark is the intended user of it. (11) `sync_metadata` (`tables_touched`, the synced tables that actually contributed a row this call, and `rows_entered`, their total row count) reports what this call actually pulled off Postgres, before any downstream merging/collapsing (repeat clustering, cross-term echo folding) changes how many distinct items the report ends up showing — scripts/morningDownload.ts records both alongside the watermark boundary it advances, so a run that succeeds but quietly touched nothing is visible without digging up that day's report separately.",
       inputSchema: {
         since: z.string().describe('Start of window: agency-local timestamp ("2026-08-28T08:00") or relative shorthand ("24h", "7d"). Defaults to the most recent 8am agency-local sync cutoff, minus 24h — i.e. the 8am-to-8am span ending at the last completed overnight sync (minus 72h on a Monday, reaching back to Friday 8am, since no report runs Sat/Sun)').optional(),
         until: z.string().describe("End of window, same format as since. Defaults to the most recent 8am agency-local sync cutoff (or yesterday's 8am, if today's hasn't happened yet) — a firm boundary, not \"now\", since the AMS360 ETL sync doesn't reliably finish pulling overnight carrier activity until shortly after 7:30am, and the report script itself doesn't run until 8am").optional(),
         csr_code: z.string().describe("Scope to one representative (exact match against afw_customer.csrcode, the customer's header CSR — not afw_basicpolinfo's per-policy CSR field, which can diverge)").optional(),
-        lookback_days: z.number().int().min(1).max(365).default(60).describe("How far back to search for candidate staff activity notes on flagged items"),
+        lookback_days: z.number().int().min(1).max(365).default(30).describe("How far back (in days, from when each flagged download was entered) to search for candidate staff activity notes. Defaults to 30 — Patrick, 2026-09-29: activity older than that shouldn't be tied to today's download"),
         synced_since: z.string().describe("Advanced/automation use — a true UTC instant (plain ISO-8601, e.g. \"2026-09-17T13:01:00.000Z\"; NOT agency-local like since/until). When set, only includes rows whose synced_at (when this MCP's own ETL first ingested the row, genuinely immutable after insert) is at or after this instant, on top of the normal since/until entereddate window. Exists because entereddate reflects AMS360's own write time, not when the row reached this database — a row can be entered in AMS360 before since/until's lower bound yet not actually sync into Postgres until after a prior day's report already ran, in which case an entereddate-only window can never include it again. scripts/morningDownload.ts uses this to drive a persisted watermark (see src/utils/downloadReportWatermark.ts) so a late-syncing row still gets reported on the next run instead of silently falling into the gap between two windows.").optional()
       }
     },
@@ -859,9 +1341,12 @@ export function registerDownloadReportTool(server: McpServer) {
           const upperBounds = canonicalRows.map((row) => bindableAgencyDate(agencyWallClockParts(new Date(row.effdate))))
           const lowerBounds = upperBounds.map((d) => new Date(d.getTime() - REPEAT_GAP_MS))
 
-          const [vehicleChangeRows, coverageChangeRows] = await Promise.all([
+          const [vehicleChangeRows, coverageChangeRows, premiumRows, interestChangeRows, applicantChangeRows] = await Promise.all([
             runReadOnlyQuery(VEHICLE_CHANGE_QUERY, [idxs, polids, lowerBounds, upperBounds]) as Promise<VehicleChangeRow[]>,
-            runReadOnlyQuery(COVERAGE_CHANGE_QUERY, [idxs, polids, lowerBounds, upperBounds]) as Promise<CoverageChangeRow[]>
+            runReadOnlyQuery(COVERAGE_CHANGE_QUERY, [idxs, polids, lowerBounds, upperBounds]) as Promise<CoverageChangeRow[]>,
+            runReadOnlyQuery(TRANSACTION_PREMIUM_QUERY, [[...new Set(polids)]]) as Promise<TransactionPremiumRow[]>,
+            runReadOnlyQuery(ADDITIONAL_INTEREST_CHANGE_QUERY, [idxs, polids, lowerBounds, upperBounds]) as Promise<AdditionalInterestChangeRow[]>,
+            runReadOnlyQuery(APPLICANT_CHANGE_QUERY, [idxs, polids, lowerBounds, upperBounds]) as Promise<ApplicantChangeRow[]>
           ])
 
           // VEHICLE_CHANGE_QUERY UNIONs afw_vehicle and afw_127vehicle with no table-of-origin
@@ -873,6 +1358,17 @@ export function registerDownloadReportTool(server: McpServer) {
             rowsEntered += vehicleChangeRows.length
           }
           tallyTable("afw_coverage", coverageChangeRows)
+          tallyTable("afw_policytranpremium", premiumRows)
+          tallyTable("afw_commaddotherint", interestChangeRows)
+          tallyTable("afw_applicant", applicantChangeRows)
+          const premiumRowsByPolid = groupByKey(premiumRows, "polid")
+          const byIdx = <T extends { idx: number }>(rows: T[]) => {
+            const map = new Map<number, T[]>()
+            for(const row of rows) map.set(row.idx, [...(map.get(row.idx) ?? []), row])
+            return map
+          }
+          const interestChangesByIdx = byIdx(interestChangeRows)
+          const applicantChangesByIdx = byIdx(applicantChangeRows)
 
           const vehicleChangesByIdx = new Map<number, Omit<VehicleChangeRow, "idx">[]>()
           for(const row of vehicleChangeRows) {
@@ -888,16 +1384,21 @@ export function registerDownloadReportTool(server: McpServer) {
             else coverageChangesByIdx.set(row.idx, [row])
           }
 
-          // Vehicle adds/removes (with VIN) and coverage adds/removes/limit changes are two
-          // independent signals about the same underlying transaction — merged into one field since
-          // the client's ask ("specifics of what changed") doesn't distinguish between them, and a
-          // single vehicle-replacement-plus-coverage-bump download should read as one combined line,
-          // not force a rep to check two columns.
+          // Premium impact, vehicle adds/removes (with VIN) and coverage adds/removes/limit changes
+          // are independent signals about the same underlying transaction — merged into one field
+          // since the client's ask ("specifics of what changed") doesn't distinguish between them,
+          // with the premium line first (Andrew, 2026-09-30), so a rep never has to check two columns.
           for(const [index, item] of transactionItems.entries()) {
-            const vehicleSummary = summarizeVehicleChanges(vehicleChangesByIdx.get(index) ?? [])
-            const coverageSummary = summarizeCoverageChanges(coverageChangesByIdx.get(index) ?? [])
+            const vehicleLines = summarizeVehicleChanges(vehicleChangesByIdx.get(index) ?? [])
+            const coverage = summarizeCoverageChanges(coverageChangesByIdx.get(index) ?? [], new Set(vehicleLines.flatMap((l) => l.unitIds)))
+            const row = canonicalRows[index]
+            const premium = row.missingRecord || !PREMIUM_LINE_TRANTYPES.has(row.trantype) ? null : summarizePremiumChange(premiumRowsByPolid.get(row.polid) ?? [], row.entereddate)
 
-            item.change_detail = [vehicleSummary, coverageSummary].filter((s): s is string => s !== null).join("; ") || null
+            const interests = summarizeInterestChanges(interestChangesByIdx.get(index) ?? [], row.description ?? "")
+            const applicant = summarizeApplicantChanges(applicantChangesByIdx.get(index) ?? [])
+
+            item.change_detail = [premium, vehicleSummaryText(vehicleLines, coverage.foldedByUnit), interests, applicant, coverageSummaryText(coverage)]
+              .filter((s): s is string => s !== null).join("; ") || null
           }
         }
 
@@ -924,12 +1425,9 @@ export function registerDownloadReportTool(server: McpServer) {
           const windowEnd = new Date(row.entereddate).getTime()
 
           const candidates = (candidatesByPolid.get(row.polid) ?? [])
-            .filter((c) => {
-              const t = new Date(c.changeddate).getTime()
-              return t >= windowStart && t <= windowEnd
-            })
+            .filter((c) => new Date(c.activity_date).getTime() >= windowStart && new Date(c.entereddate).getTime() <= windowEnd)
             .slice(0, CANDIDATE_LIMIT_PER_ITEM)
-            .map((c) => ({ date: c.changeddate, note: c.commenttran ?? "" }))
+            .map((c) => ({ date: c.activity_date, note: c.commenttran ?? "" }))
 
           item.candidate_prior_activity = candidates
         }
