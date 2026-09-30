@@ -1,6 +1,6 @@
 ---
 name: renewals
-description: Domain knowledge for boxwood-mcp-ts's renewal-related MCP tools — upcoming_renewals (Boxwood Insurance's AMS360 book of business filtered to active policy terms expiring within a day window, with marketing shells and, by default, already-renewed terms excluded — pass include_already_renewed for a calendar/exposure view instead) risk_profile (builds a branded Pre-Renewal Review .docx, exposures only, for one or more commercial policies), cl_renewal_summary (the same document plus current coverage limits/deductibles by line of business), pl_renewal_summary (the personal-lines Personal Insurance Portfolio Summary .docx — auto, home, personal articles, umbrella limits), and pl_renewal_premium_change (personal-lines renewal premium change vs the expiring term, as tab-delimited lines for an AMS activity note). Use when answering questions about what's renewing soon, a producer's or carrier's upcoming renewal book, which accounts need renewal outreach, building a renewal-meeting packet for a commercial client, building a personal-lines coverage summary for a household, or how much a personal-lines renewal went up or down.
+description: Domain knowledge for boxwood-mcp-ts's renewal-related MCP tools — upcoming_renewals (Boxwood Insurance's AMS360 book of business filtered to active policy terms expiring within a day window, with marketing shells and, by default, already-renewed terms excluded — pass include_already_renewed for a calendar/exposure view instead) risk_profile (builds a branded Pre-Renewal Review .docx, exposures only, for one or more commercial policies), cl_renewal_summary (the same document plus current coverage limits/deductibles by line of business), pl_renewal_summary (the personal-lines Personal Insurance Portfolio Summary .docx — auto, home, personal articles, umbrella limits), and pl_renewal_premium_change (fills the PL team's Renewal Calculator .xlsx with each downloaded personal-lines renewal's premium change vs the expiring term, per line of business, plus a paste-ready AMS note). Use when answering questions about what's renewing soon, a producer's or carrier's upcoming renewal book, which accounts need renewal outreach, building a renewal-meeting packet for a commercial client, building a personal-lines coverage summary for a household, or how much a personal-lines renewal went up or down.
 ---
 
 # Boxwood renewals
@@ -146,7 +146,12 @@ Builds a branded "Personal Insurance Portfolio Summary" Word document (`.docx`) 
 
 ### Calling the tool
 
-Same inputs as `cl_renewal_summary` (`customer_name`, `polno`, and/or `custid`, optional `renewal_within_days`) and the same resolution code (`resolveClPolicies` in `src/utils/clPolicyData.ts`, called with `PERSONAL_BOOK`): `typeofbus = 1`, current in-force terms only, `customer_name` matched only among customers with a current personal policy, cross-customer matches ambiguous. The one difference: **no default renewal window** — an account-level request combines every in-force personal policy on the account (up to 20), since PL auto's 6-month terms rarely line up with the home's annual term. Download link only, no email.
+Same inputs as `cl_renewal_summary` (`customer_name`, `polno`, and/or `custid`, optional `renewal_within_days`) and the same resolution code (`resolveClPolicies` in `src/utils/clPolicyData.ts`, called with `PERSONAL_BOOK`): `typeofbus = 1`, current in-force terms only, `customer_name` matched only among customers with a current personal policy, cross-customer matches ambiguous. Two differences:
+- **No default renewal window.** An account-level request combines every in-force personal policy on the account (up to 20), since PL auto's 6-month terms rarely line up with the home's annual term.
+- **Downloaded renewals show their renewal term** (Andrew, 2026-09-30). After the shared lookup, `withDownloadedRenewalTerms` (`src/utils/plRenewalTerms.ts`) swaps each in-force policy for its successor term when that renewal has an RWL download, wasn't cancelled at inception, and carries coverage rows. So the client sees what they're renewing into. Swapped policies come back in `shown_on_renewal_term`. Overlapping terms are kept once.
+- **One term per policy number.** When the same polno is in force more than once on the account (22 such groups on 2026-09-30, none of them real second policies), `dedupeSamePolicyNumber` keeps one term. The usual causes are an agency-entered $0 "Monoline" placeholder next to the carrier's real term (e.g. Kimbra Morris's 6835594207), a cancel + reissue, or leftover quote terms. It drops a term with no carrier download when a sibling has one, a cancelled-not-reinstated term, and a quote-only term. Of what's left, the most recently downloaded term wins. If the rules can't decide, the result carries `verify_in_ams360` for a rep; the client document never shows it.
+
+No email. The build itself lives in `src/utils/plRenewalSummaryBuild.ts`, shared with the morning job.
 
 ### Sections
 
@@ -154,7 +159,7 @@ All coverages come from `afw_coverage` (deduped to each coverage's latest non-de
 
 - **Automobile Insurance** (AUTOP; per-vehicle rows, attachtype 121 → `afw_vehicle.vehid`) — Coverage Highlights: Liability (CSL, or split BI per person / per accident / PD), Uninsured/Underinsured Motorist, UM PD (only alongside a split UM limit), Medical Payments, PIP, Comprehensive and Collision deductibles, Rental Reimbursement, Roadside Assistance. A coverage identical on every vehicle is a highlight; one that differs goes in a separate Coverage by Vehicle table below the Scheduled Vehicles table (Year / Make & Model / VIN), one row per coverage and one column per vehicle, split into several tables past 4 vehicles, with "None" where a vehicle lacks it. Vehicles come only from the auto line's own schedule: an auto + umbrella policy keeps a second copy of the vehicles on the umbrella line, which is ignored, and vehicles are also deduped by VIN. Truncated makes from carrier downloads (SUBA, TOYT, LNDR, MERC, …) are expanded to the full make name.
 - **Homeowners Insurance** / **Dwelling Fire Insurance** (HOME / DFIRE; attachtype 86 → `afw_location.locid`, one table per property address) — Dwelling, Other Structures, Personal Property, Loss of Use (shown as "Actual Loss Sustained" when the HOME row carries no limit, as in the client's sample) or Fair Rental Value, Medical Payments, Personal or Premises Liability, Deductible (the Dwelling row's), Wind/Hail Deductible ("1% of Dwelling" for a percentage). Other home endorsements (service line, fungi, loss assessment) are left out, matching the sample. Rating counts ("Number of Autos", "Number of Residences") are never shown, even when a carrier puts a number in their limit field.
-- **Personal Articles Coverage** (INMRP) — the total scheduled limit only (sum of the scheduled-personal-property rows, falling back to `afw_sppsummary.spplimit`); the item schedule stays in the policy.
+- **Personal Articles Coverage** (INMRP): the total scheduled limit, then the full item schedule (Patrick, 2026-09-29). There's one table per class (Jewelry, Fine arts, Guns…) with Item # / Description / Value and the class's scheduled limit (`afw_sppsummary.spplimit`, not the item sum, which runs a few dollars short on integer values). The data comes from `afw_sppitem`, using the latest entered version of each item and class, with deletes dropped. Each class lists its first 50 items, then "…and N more" (one fine-art schedule has 752). Descriptions cut at AMS360's 150-character limit get "…". Classes with no item rows synced keep the total-only line. Scheduled property priced inside a **homeowners** policy is listed the same way under that policy's first property table.
 - **Umbrella Liability Insurance** (PUMBR) — Personal Liability, Excess Uninsured/Underinsured Motorist, Self-Insured Retention; no underlying schedule.
 - **Any other personal line** (boat, etc.) — a generic Coverage / Limit / Deductible table.
 - A line with no coverage detail on file at all (every current FLOOD policy, as of 2026-09-29) still gets its heading, with a note to see the policy documents.
@@ -163,7 +168,9 @@ With several carriers (or the same line on two policies), each section shows its
 
 ### Archiving
 
-Same manifest shape and keying as `cl_renewal_summary`, under `scripts/output/pl-renewal-summary/`, backing `GET /api/v1/boxwood-mcp/pl-renewal-summary/manifest`, `GET`/`DELETE .../pl-renewal-summary/files/:filename`, and `POST .../pl-renewal-summary/chat` (`src/routes/plRenewalSummary.ts`), consumed by the employee dashboard's /personal/renewal-summary page.
+Same manifest shape and keying as `cl_renewal_summary`, under `scripts/output/pl-renewal-summary/`, backing `GET /api/v1/boxwood-mcp/pl-renewal-summary/manifest`, `GET`/`DELETE .../pl-renewal-summary/files/:filename`, and `POST .../pl-renewal-summary/chat` (`src/routes/plRenewalSummary.ts`), consumed by the employee dashboard's /personal/renewal-summary page. `GET .../pl-renewal-summary/files/:filename/pdf` returns a PDF of the same .docx: headless LibreOffice, cached beside the .docx and removed with it, 503 `converter_unavailable` if LibreOffice isn't installed. An account-level summary is archived as one file per client per soonest upcoming renewal date (`<Client>_<YYYY-MM-DD>_Personal_Insurance_Summary.docx`); a single-policy request, per polid.
+
+**Built automatically** each morning by `scripts/dailyPlRenewalPremiumChange.ts` (run from `dailyMorningDownload.sh`). Every client with a new PL renewal download gets their account-level summary rebuilt, alongside the Renewal Calculator workbook. Nothing is emailed; OneDrive filing is pending Entra access.
 
 ### Common questions → calls
 
@@ -172,13 +179,16 @@ Same manifest shape and keying as `cl_renewal_summary`, under `scripts/output/pl
 
 ## pl_renewal_premium_change
 
-For every personal-lines renewal a carrier downloaded (`afw_policytransaction` `trantype='RWL'`, `source='D'`, `typeofbus=1`), compares the renewal term's premium with the term it replaces and returns the $ and % change, plus one tab-delimited line per policy (`activity_lines`, header in `activity_header`) for pasting into an AMS activity note. A daily email (`scripts/dailyPlRenewalPremiumChange.ts`) sends the same lines to personal@boxwoodins.com. It is not in cron yet and will be switched on once the note format is confirmed. Nothing is archived.
+Fills the PL team's own **Renewal Calculator** workbook (`assets/templates/pl-renewal-calculator.xlsx`, Patrick 2026-09-29) for each personal-lines renewal a carrier downloaded (`afw_policytransaction` `trantype='RWL'`, `source='D'`, `typeofbus=1`). There's one workbook per client per renewal effective date, covering every PL policy renewing that day, whichever day each downloaded. Current vs renewal premium goes per line: Homeowners, Automobile, Personal Articles, Watercraft, Umbrella, Flood, plus spare rows. The template's formulas give the $/monthly/% change. The note block holds only the client's lines plus Account Total, and the same text is returned as a column-aligned `note` for "Copy For AMS".
+- **6-month auto:** accounts with a 6-month auto term use the template's 6-month table.
+- **Package policies** are split per line from each term's latest transaction.
+- **Personal Articles** is carved out of HOME via the SPP premium.
+- **Where it's filed:** archived to `scripts/output/pl-renewal-premium-change/` for the dashboard's /personal/premium-change-tool page, and built automatically each morning. Nothing is emailed.
 
 ### Calling the tool
 
 - Scope by `customer_name` (partial match), `custid`, or `policy_no`, plus `start_date`/`end_date`: the date the renewal *downloaded*, end inclusive. The default is the last 30 days.
-- Present `activity_lines` inside a code block so the tabs survive copy/paste.
-- The column layout is a placeholder until Patrick confirms the real one.
+- A policy whose premium can't be compared (prior term missing, $0, negative/cancelled) is left out and listed in `excluded` with the reason. It is never estimated.
 
 ### How the premiums are chosen (confirmed against 171 real renewals, 2026-09-24)
 

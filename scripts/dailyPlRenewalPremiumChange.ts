@@ -7,6 +7,11 @@
 // Nothing is emailed (Andrew, 2026-09-30: written to the server only). OneDrive filing hooks into
 // archivePlRenewalChange once Graph access exists.
 //
+// The same trigger also builds that client's PL Renewal Summary (Patrick, 2026-09-29: "Renewal
+// Summary Tool — auto triggered when on download report & user initiated"): the account-level
+// Personal Insurance Portfolio Summary, with every in-force personal policy and any downloaded
+// renewal shown on its renewal term, archived for the dashboard's PL Renewal Summary page.
+//
 // Calls the shared utils directly, like scripts/monthlyRenewalPremiumSummaries.ts — no LLM turn,
 // nothing for one to decide.
 //
@@ -24,6 +29,7 @@ import path from "node:path"
 import { pool } from "../src/db.js"
 import { fetchPlRenewalChangeGroups } from "../src/utils/plRenewalPremiumChange.js"
 import { archivePlRenewalChange } from "../src/utils/plRenewalPremiumChangeArchive.js"
+import { buildAndArchivePlRenewalSummary } from "../src/utils/plRenewalSummaryBuild.js"
 
 const CURSOR_PATH = path.join(import.meta.dirname, "state", "pl-renewal-premium-change-cursor.json")
 // First run only (no cursor yet): look back this far on synced_at instead of the whole history.
@@ -54,6 +60,8 @@ async function main() {
   const { groups, maxSyncedAt } = await fetchPlRenewalChangeGroups({ syncedAfter })
   console.log(`[plRenewalPremiumChange] ${ groups.length } client renewal(s) with PL downloads synced after ${ syncedAfter }`)
 
+  let failures = 0
+
   for(const group of groups) {
     const label = `${ group.client_name } ${ group.renewal_date } (${ group.carriers }, ${ group.term }, ${ group.lines.length } line(s)${ group.excluded.length ? `, ${ group.excluded.length } excluded` : "" })`
 
@@ -65,9 +73,25 @@ async function main() {
 
     const archived = await archivePlRenewalChange(group)
     console.log(archived ? `  archived ${ archived.entry.filename }: ${ label }` : `  skipped (nothing comparable): ${ label }`)
+
+    // One failed summary mustn't stop the rest; the cursor then stays put so tomorrow retries (a
+    // rebuild just overwrites the same archived file).
+    try {
+      const summary = await buildAndArchivePlRenewalSummary({ custid: group.custid })
+      console.log(summary.kind === "ok"
+        ? `  renewal summary ${ summary.filename }${ summary.renewedPolnos.length ? ` (renewal term: ${ summary.renewedPolnos.join(", ") })` : "" }`
+        : `  renewal summary not built for ${ group.client_name }: ${ summary.kind === "error" ? summary.error.message : "ambiguous customer match" }`)
+    } catch(error) {
+      failures++
+      console.error(`  renewal summary FAILED for ${ group.client_name }:`, error)
+    }
   }
 
-  if(!dryRun && maxSyncedAt) writeCursor(maxSyncedAt)
+  if(!dryRun && maxSyncedAt && failures === 0) writeCursor(maxSyncedAt)
+  if(failures > 0) {
+    console.error(`[plRenewalPremiumChange] ${ failures } renewal summary build(s) failed — cursor not advanced, will retry next run`)
+    process.exitCode = 1
+  }
 }
 
 main()

@@ -5,6 +5,7 @@ import path from "node:path"
 import auth0 from "../middleware/auth/auth0/index.js"
 import asyncHandler from "../middleware/async/index.js"
 import { ErrorResponse } from "../utils/errorResponse.js"
+import { PdfConverterUnavailableError, pdfForDocx } from "../utils/docxToPdf.js"
 import {
   PL_RENEWAL_SUMMARY_OUTPUT_DIR, deletePlRenewalSummary, readPlRenewalSummaryManifest
 } from "../utils/plRenewalSummaryArchive.js"
@@ -49,6 +50,32 @@ router.get(`${ BASE }/pl-renewal-summary/files/:filename`, auth0, (req: Request<
   res.setHeader("Content-Disposition", `attachment; filename="${ filename }"`)
   res.send(readFileSync(filePath))
 })
+
+// PDF of the same archived .docx (Patrick, 2026-09-29: "Ability to download pdf from the tool page"),
+// converted with headless LibreOffice on first request and cached beside the .docx.
+router.get(`${ BASE }/pl-renewal-summary/files/:filename/pdf`, auth0, asyncHandler(async(req: Request<{ filename: string }>, res: Response) => {
+  const { filename } = req.params
+  const entry = readPlRenewalSummaryManifest().find((e) => e.filename === filename)
+  const filePath = path.join(PL_RENEWAL_SUMMARY_OUTPUT_DIR, filename)
+
+  if(!entry || !existsSync(filePath)) {
+    res.status(404).json({ error: "not_found", error_description: "This renewal summary doesn't exist." })
+    return
+  }
+
+  try {
+    const pdf = await pdfForDocx(filePath)
+    res.setHeader("Content-Type", "application/pdf")
+    res.setHeader("Content-Disposition", `attachment; filename="${ pdf.filename }"`)
+    res.send(pdf.buffer)
+  } catch(err) {
+    if(err instanceof PdfConverterUnavailableError) {
+      res.status(503).json({ error: "converter_unavailable", error_description: err.message })
+      return
+    }
+    throw err
+  }
+}))
 
 router.delete(`${ BASE }/pl-renewal-summary/files/:filename`, auth0, (req: Request<{ filename: string }>, res: Response) => {
   const { filename } = req.params

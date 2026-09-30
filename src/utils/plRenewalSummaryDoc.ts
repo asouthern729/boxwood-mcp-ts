@@ -4,7 +4,7 @@ import {
   ShadingType, Table, TableCell, TableLayoutType, TableRow, TextRun, VerticalAlign, WidthType
 } from "docx"
 import { GREEN, LIGHTGREEN, LOGO_PATH, NEARBLACK } from "./riskProfileDoc.js"
-import type { LabeledValue, PlSection } from "./plCoverageData.js"
+import type { LabeledValue, PlScheduleClass, PlSection } from "./plCoverageData.js"
 
 // The "Personal Insurance Portfolio Summary" document for pl_renewal_summary. Unlike the CL documents
 // (riskProfileDoc.ts: a cover page, then page-fit sections), this reproduces the client-supplied
@@ -114,6 +114,20 @@ function sourceLine(section: PlSection): Paragraph {
   })
 }
 
+// The full scheduled property list, one table per class (Patrick, 2026-09-29).
+function scheduleBlocks(schedule: PlScheduleClass[]): (Paragraph | Table)[] {
+  const blocks: (Paragraph | Table)[] = [subheading("Scheduled Items:")]
+  for(const cls of schedule) {
+    const heading = [cls.className, cls.classLimit && `Scheduled Limit ${ cls.classLimit }`].filter(Boolean).join(" — ")
+    blocks.push(new Paragraph({ keepNext: true, spacing: { before: 60, after: 40 }, children: [run(heading, { bold: true })] }))
+    blocks.push(table(["Item #", "Description", "Value"], cls.items.map((i) => [i.number, i.description, i.value]), [0.1, 0.7, 0.2]))
+    if(cls.moreCount > 0) {
+      blocks.push(new Paragraph({ spacing: { before: 40, after: 80 }, children: [run(`…and ${ cls.moreCount } more ${ cls.className.toLowerCase() } item${ cls.moreCount === 1 ? "" : "s" }. The complete schedule is in your policy documents.`, { italics: true })] }))
+    }
+  }
+  return blocks
+}
+
 function sectionBlocks(section: PlSection, showSource: boolean): (Paragraph | Table)[] {
   const blocks: (Paragraph | Table)[] = [sectionHeading(section.title)]
   if(showSource) blocks.push(sourceLine(section))
@@ -139,10 +153,12 @@ function sectionBlocks(section: PlSection, showSource: boolean): (Paragraph | Ta
     case "property":
       if(section.address) blocks.push(labeledLine("Property Address", section.address))
       blocks.push(labeledValueTable(["Coverage Category", "Amount"], section.rows, [0.55, 0.45]))
+      if(section.schedule?.length) blocks.push(...scheduleBlocks(section.schedule))
       break
     case "personalArticles":
       blocks.push(labeledLine("Total Scheduled Limit", section.totalScheduledLimit, 40))
-      blocks.push(new Paragraph({ spacing: { after: 80 }, children: [run("A detailed item schedule is included in the attached policy document.")] }))
+      if(section.schedule?.length) blocks.push(...scheduleBlocks(section.schedule))
+      else blocks.push(new Paragraph({ spacing: { after: 80 }, children: [run("A detailed item schedule is included in the attached policy document.")] }))
       break
     case "umbrella":
       blocks.push(labeledValueTable(["Coverage Type", "Limit"], section.rows, [0.65, 0.35]))

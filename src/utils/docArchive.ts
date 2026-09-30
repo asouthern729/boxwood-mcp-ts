@@ -65,6 +65,9 @@ export function createDocArchive<Entry extends DocArchiveEntry = DocArchiveEntry
 
     const filePath = path.join(outputDir, filename)
     if(existsSync(filePath)) unlinkSync(filePath)
+    // A PDF rendition cached beside the .docx (docxToPdf.ts) goes with it.
+    const pdfPath = filePath.replace(/\.docx$/i, ".pdf")
+    if(pdfPath !== filePath && existsSync(pdfPath)) unlinkSync(pdfPath)
 
     writeFileSync(manifestPath, JSON.stringify(manifest.filter((existing) => existing.filename !== filename), null, 2))
     return true

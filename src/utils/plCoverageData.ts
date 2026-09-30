@@ -88,6 +88,34 @@ const SPP_SUMMARY_QUERY = `
   WHERE s.rn = 1 AND s.status != 'D'
 `
 
+// Every active scheduled item (jewelry, fine arts, guns, ...) with its class, for the full schedule
+// Patrick asked for under Personal Articles (2026-09-29, with a screenshot of AMS360's Inland Marine
+// schedule). Latest entered version of each item and of each class summary — an item is dropped if
+// its latest version is a delete, and so is every item of a deleted class. Item numbers are
+// zero-padded strings ("0001"), hence the numeric-aware sort. Validated by the postgres peer
+// (2026-09-30): item values sum to the class spplimit on 93% of classes; the rest are a few dollars
+// short (sppitem.value is an integer) — so the class total shown is always spplimit, not the sum.
+const SPP_ITEMS_QUERY = `
+  SELECT i.lobid, trim(s.class) AS class, s.spsumid, s.spplimit, i.spitmid,
+    trim(i.itemnumber) AS item_number, trim(i.description) AS description, i.value
+  FROM (
+    SELECT DISTINCT ON (x.spitmid) x.lobid, x.spsumid, x.spitmid, x.itemnumber, x.description, x.value, x.status
+    FROM afw_sppitem x
+    WHERE x.polid = $1::uuid
+    ORDER BY x.spitmid, x.entereddate DESC, x.effdate DESC
+  ) i
+  JOIN (
+    SELECT DISTINCT ON (y.spsumid) y.spsumid, y.class, y.spplimit, y.status
+    FROM afw_sppsummary y
+    WHERE y.polid = $1::uuid
+    ORDER BY y.spsumid, y.entereddate DESC, y.effdate DESC
+  ) s ON s.spsumid = i.spsumid
+  WHERE i.status <> 'D'
+    AND s.status <> 'D'
+  ORDER BY i.lobid, trim(s.class),
+    CASE WHEN trim(i.itemnumber) ~ '^[0-9]+$' THEN lpad(trim(i.itemnumber), 10, '0') ELSE trim(i.itemnumber) END
+`
+
 type Money = string | number | null
 
 type CoverageRow = {
@@ -99,6 +127,7 @@ type CoverageRow = {
 type VehicleQueryRow = { lobid: string; vehid: string; vehicleno: string | null; vehyear: string | number | null; make: string | null; model: string | null; vin: string | null }
 type LocationQueryRow = { locid: string; locno: string | null; addr1: string | null; addr2: string | null; city: string | null; state: string | null; zipcode: string | null }
 type SppSummaryRow = { lobid: string; class: string | null; spplimit: Money }
+type SppItemRow = { lobid: string; class: string | null; spsumid: string; spplimit: Money; spitmid: string; item_number: string | null; description: string | null; value: Money }
 type LobQueryRow = { lobid: string; lineofbus: string | null; descriptionlobs: string | null }
 
 // ---------- OUTPUT TYPES ----------
@@ -107,14 +136,23 @@ export type LabeledValue = { label: string; value: string }
 export type PlCoverageRow = { coverage: string; limit: string; deductible: string }
 export type PlVehicle = { year: string; makeModel: string; vin: string; values: Record<string, string> }
 
+// One class of a scheduled personal property schedule. Only the first MAX_SCHEDULE_ITEMS items of a
+// class are listed (one fine-arts schedule has 752); the rest are summarized as a count.
+export type PlScheduleClass = {
+  className: string
+  classLimit: string
+  items: { number: string; description: string; value: string }[]
+  moreCount: number
+}
+
 // Identifies which policy a section came from. The document shows it under the section heading
 // only when that's needed to tell policies apart (several carriers, or the same line twice).
 export type PlSectionSource = { polno: string; carrier: string; term: string }
 
 export type PlSection =
   | { kind: "auto"; title: string; source: PlSectionSource; highlights: LabeledValue[]; vehicleColumns: { key: string; label: string }[]; vehicles: PlVehicle[] }
-  | { kind: "property"; title: string; source: PlSectionSource; address: string; rows: LabeledValue[] }
-  | { kind: "personalArticles"; title: string; source: PlSectionSource; totalScheduledLimit: string }
+  | { kind: "property"; title: string; source: PlSectionSource; address: string; rows: LabeledValue[]; schedule?: PlScheduleClass[] }
+  | { kind: "personalArticles"; title: string; source: PlSectionSource; totalScheduledLimit: string; schedule?: PlScheduleClass[] }
   | { kind: "umbrella"; title: string; source: PlSectionSource; rows: LabeledValue[] }
   | { kind: "other"; title: string; source: PlSectionSource; rows: PlCoverageRow[] }
   | { kind: "noDetail"; title: string; source: PlSectionSource }
@@ -504,13 +542,41 @@ function otherTitle(lineofbus: string, description: string | null): string {
   return /insurance|coverage/i.test(name) ? name : `${ name } Insurance`
 }
 
+const MAX_SCHEDULE_ITEMS = 50
+// afw_sppitem.description is cut at 150 characters upstream, often mid-word.
+const DESCRIPTION_CUTOFF = 150
+
+function moneyValue(v: Money): number {
+  return Number(String(v ?? 0).replace(/[$,]/g, "")) || 0
+}
+
+function buildSchedule(items: SppItemRow[]): PlScheduleClass[] {
+  const byClass = new Map<string, SppItemRow[]>()
+  for(const item of items) byClass.set(item.spsumid, [...(byClass.get(item.spsumid) ?? []), item])
+
+  return [...byClass.values()].map((classItems) => ({
+    className: clean(classItems[0].class) || "Scheduled Property",
+    classLimit: moneyValue(classItems[0].spplimit) > 0 ? limitText(moneyValue(classItems[0].spplimit)) : "",
+    items: classItems.slice(0, MAX_SCHEDULE_ITEMS).map((i) => {
+      const description = clean(i.description)
+      return {
+        number: clean(i.item_number),
+        description: description.length >= DESCRIPTION_CUTOFF ? `${ description }…` : description,
+        value: moneyValue(i.value) > 0 ? limitText(moneyValue(i.value)) : ""
+      }
+    }),
+    moreCount: Math.max(0, classItems.length - MAX_SCHEDULE_ITEMS)
+  }))
+}
+
 export async function fetchPlPolicyCoverage(policy: ResolvedPolicy): Promise<PlPolicyCoverage> {
-  const [lobs, allRows, vehicles, locations, sppSummaries] = await Promise.all([
+  const [lobs, allRows, vehicles, locations, sppSummaries, sppItems] = await Promise.all([
     runReadOnlyQuery(LOB_QUERY, [policy.polid]) as Promise<LobQueryRow[]>,
     runReadOnlyQuery(COVERAGE_QUERY, [policy.polid]) as Promise<CoverageRow[]>,
     runReadOnlyQuery(VEHICLE_QUERY, [policy.polid]) as Promise<VehicleQueryRow[]>,
     runReadOnlyQuery(LOCATION_QUERY, [policy.polid]) as Promise<LocationQueryRow[]>,
-    runReadOnlyQuery(SPP_SUMMARY_QUERY, [policy.polid]) as Promise<SppSummaryRow[]>
+    runReadOnlyQuery(SPP_SUMMARY_QUERY, [policy.polid]) as Promise<SppSummaryRow[]>,
+    runReadOnlyQuery(SPP_ITEMS_QUERY, [policy.polid]) as Promise<SppItemRow[]>
   ])
 
   const source: PlSectionSource = {
@@ -553,6 +619,11 @@ export async function fetchPlPolicyCoverage(policy: ResolvedPolicy): Promise<PlP
       const locationIds = [...new Set(lobRows.filter((r) => r.attachtype === 86).map((r) => r.attachid))]
       const groups = locationIds.length > 0 ? locationIds : [null]
 
+      // Scheduled property priced inside the homeowners policy (Reiss Wilburn's guns and jewelry)
+      // is listed under the policy's first property table.
+      const homeSchedule = buildSchedule(sppItems.filter((i) => i.lobid === lobid))
+      let scheduleAttached = false
+
       for(const locid of groups) {
         const locRows = [...lobRows.filter((r) => r.attachtype === 86 && r.attachid === locid), ...lineLevel]
         const propertyRows = buildPropertyRows(locRows, lineofbus)
@@ -560,8 +631,10 @@ export async function fetchPlPolicyCoverage(policy: ResolvedPolicy): Promise<PlP
         sections.push({
           kind: "property", title, source,
           address: formatPropertyAddress(locations.find((l) => l.locid === locid) ?? (locations.length === 1 ? locations[0] : undefined)),
-          rows: propertyRows
+          rows: propertyRows,
+          ...(!scheduleAttached && homeSchedule.length > 0 ? { schedule: homeSchedule } : {})
         })
+        scheduleAttached = true
       }
     } else if(lineofbus === "INMRP") {
       const sppRows = lobRows.filter((r) => r.attachtype === 578)
@@ -571,7 +644,8 @@ export async function fetchPlPolicyCoverage(policy: ResolvedPolicy): Promise<PlP
         .reduce((sum, s) => sum + (Number(String(s.spplimit ?? 0).replace(/[$,]/g, "")) || 0), 0)
       const totalValue = total || fallback
 
-      if(totalValue > 0) sections.push({ kind: "personalArticles", title, source, totalScheduledLimit: limitText(totalValue) })
+      const schedule = buildSchedule(sppItems.filter((i) => i.lobid === lobid))
+      if(totalValue > 0) sections.push({ kind: "personalArticles", title, source, totalScheduledLimit: limitText(totalValue), ...(schedule.length > 0 ? { schedule } : {}) })
 
       const otherRows = lobRows.filter((r) => r.attachtype !== 578)
       if(otherRows.length > 0) {

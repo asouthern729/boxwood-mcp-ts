@@ -12,7 +12,7 @@ mkdir -p scripts/logs
 {
   echo "===== $(date -Iseconds) ====="
   npx tsx scripts/morningDownload.ts && npx tsx scripts/sendReportEmail.ts
-  # PL Renewal Premium Change workbooks for the renewals on today's download (archived on the server
-  # for the dashboard's PL Premium Change page; nothing emailed). Independent of the report above.
+  # PL Renewal Premium Change workbooks + PL Renewal Summaries for the renewals on today's download
+  # (archived on the server for the dashboard's PL pages; nothing emailed). Independent of the report above.
   npx tsx scripts/dailyPlRenewalPremiumChange.ts
 } >> scripts/logs/morning-download.log 2>&1
