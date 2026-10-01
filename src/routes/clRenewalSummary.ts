@@ -5,6 +5,7 @@ import path from "node:path"
 import auth0 from "../middleware/auth/auth0/index.js"
 import asyncHandler from "../middleware/async/index.js"
 import { ErrorResponse } from "../utils/errorResponse.js"
+import { PdfConverterUnavailableError, pdfForDocx } from "../utils/docxToPdf.js"
 import {
   CL_RENEWAL_SUMMARY_OUTPUT_DIR, deleteClRenewalSummary, readClRenewalSummaryManifest
 } from "../utils/clRenewalSummaryArchive.js"
@@ -59,6 +60,32 @@ router.get(`${ BASE }/cl-renewal-summary/files/:filename`, auth0, (req: Request<
   res.setHeader("Content-Disposition", `attachment; filename="${ filename }"`)
   res.send(readFileSync(filePath))
 })
+
+// PDF of the same archived .docx, same as routes/plRenewalSummary.ts. Cached beside the .docx; a quote
+// upload rebuilds the .docx in place (newer mtime), so the next PDF request reconverts.
+router.get(`${ BASE }/cl-renewal-summary/files/:filename/pdf`, auth0, asyncHandler(async(req: Request<{ filename: string }>, res: Response) => {
+  const { filename } = req.params
+  const entry = readClRenewalSummaryManifest().find((e) => e.filename === filename)
+  const filePath = path.join(CL_RENEWAL_SUMMARY_OUTPUT_DIR, filename)
+
+  if(!entry || !existsSync(filePath)) {
+    res.status(404).json(NOT_FOUND)
+    return
+  }
+
+  try {
+    const pdf = await pdfForDocx(filePath)
+    res.setHeader("Content-Type", "application/pdf")
+    res.setHeader("Content-Disposition", `attachment; filename="${ pdf.filename }"`)
+    res.send(pdf.buffer)
+  } catch(err) {
+    if(err instanceof PdfConverterUnavailableError) {
+      res.status(503).json({ error: "converter_unavailable", error_description: err.message })
+      return
+    }
+    throw err
+  }
+}))
 
 router.delete(`${ BASE }/cl-renewal-summary/files/:filename`, auth0, (req: Request<{ filename: string }>, res: Response) => {
   const { filename } = req.params
