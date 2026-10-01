@@ -26,6 +26,10 @@ export type DocArchiveEntry = {
   // since a multi-policy document can span a date range, which doesn't sort correctly as one string.
   renewal_date: string
   renewal_date_label: string
+  // Every included policy term's polid — lets a scheduled job tell exactly which terms already have
+  // a document (scripts/dailyClRenewalSummaries.ts). Optional: entries archived before 2026-10-01
+  // don't carry it (alreadyArchivedPolids falls back to the filename/polno label for those).
+  polids?: string[]
 }
 
 export function createDocArchive<Entry extends DocArchiveEntry = DocArchiveEntry>(subdir: string) {
@@ -80,4 +84,17 @@ export function createDocArchive<Entry extends DocArchiveEntry = DocArchiveEntry
 // collapsed to underscores.
 export function sanitizeForFilename(value: string): string {
   return value.replace(/[^A-Za-z0-9]+/g, "_").replace(/^_+|_+$/g, "") || "Unknown"
+}
+
+// Whether a policy term already has an archived document. Entries carrying polids are matched
+// exactly. Older entries fall back to what they do carry: a single-policy archive filename ends in
+// the term's polid (see riskProfileGenerate.ts's keying), and a combined one is matched on polno
+// plus renewal date — the same polno renews under a new polid each term, so polno alone would
+// count last year's document.
+export function isTermArchived(entries: DocArchiveEntry[], term: { polid: string; polno: string; renewalDate: string }): boolean {
+  return entries.some((entry) => {
+    if(entry.polids) return entry.polids.includes(term.polid)
+    if(entry.filename.endsWith(`_${ term.polid }.docx`)) return true
+    return entry.polnos.split(", ").includes(term.polno) && entry.renewal_date_label.includes(term.renewalDate)
+  })
 }

@@ -1,8 +1,9 @@
 import { readFileSync } from "node:fs"
 import path from "node:path"
 import {
-  AlignmentType, BorderStyle, Document, HeadingLevel, ImageRun, Packer, PageBreak, Paragraph,
-  ShadingType, Table, TableCell, TableLayoutType, TableRow, TextRun, VerticalAlign, WidthType
+  AlignmentType, BorderStyle, CommentRangeEnd, CommentRangeStart, CommentReference, Document, HeadingLevel,
+  ImageRun, Packer, PageBreak, Paragraph, ShadingType, Table, TableCell, TableLayoutType, TableRow, TextRun,
+  VerticalAlign, WidthType
 } from "docx"
 
 // Ported from the client-supplied pre-renewal-review Skill's scripts/build-template.js (see
@@ -219,6 +220,28 @@ function buildTable(headers: string[], rows: string[][]): Table {
 
 function h1(text: string): Paragraph {
   return new Paragraph({ heading: HeadingLevel.HEADING_1, children: [new TextRun(text)] })
+}
+
+// A Word comment anchored on a section heading — flags content a reviewer should check (e.g. a
+// section filled in from an uploaded quote PDF). Comments live in the .docx margin and never reach
+// the dashboard's PDF (LibreOffice export omits them; verified 2026-10-01). Collected per document
+// and handed to renderDocument, which registers them on the Document.
+export type DocComment = { id: number; text: string }
+
+function commentedH1(text: string, comment: DocComment): Paragraph {
+  return new Paragraph({
+    heading: HeadingLevel.HEADING_1,
+    children: [
+      new CommentRangeStart(comment.id),
+      new TextRun(text),
+      new CommentRangeEnd(comment.id),
+      new TextRun({ children: [new CommentReference(comment.id)] })
+    ]
+  })
+}
+
+function bulletParagraph(text: string): Paragraph {
+  return new Paragraph({ indent: { left: 560, hanging: 280 }, spacing: { before: 30, after: 30 }, children: [new TextRun(`•\t${ text }`)] })
 }
 
 function h2(text: string): Paragraph {
@@ -528,10 +551,16 @@ type CoverFields = { clientName: string; currentPeriod: string; renewalDate: str
 
 // Shared by both document types — same styles, page setup, cover page, and page-fit layout; only
 // the cover title and the section list differ.
-async function renderDocument(title: string, cover: CoverFields, sections: { name: string; section: DocSection | null }[]): Promise<{ buffer: Buffer; includedSections: string[] }> {
+async function renderDocument(title: string, cover: CoverFields, sections: { name: string; section: DocSection | null }[], comments: DocComment[] = []): Promise<{ buffer: Buffer; includedSections: string[] }> {
   const included = sections.filter((s): s is { name: string; section: DocSection } => s.section !== null)
+  const commentDate = new Date()
 
   const doc = new Document({
+    comments: {
+      children: comments.map((c) => ({
+        id: c.id, author: "Claude", initials: "CL", date: commentDate, children: [new Paragraph(c.text)]
+      }))
+    },
     styles: {
       default: {
         document: { run: { font: "Arial", size: 22, color: NEARBLACK } }
@@ -592,7 +621,15 @@ export async function buildRiskProfileDoc(input: RiskProfileInput): Promise<{ bu
 // business's exposure schedule. See clCoverageData.ts for where each limit comes from in AMS360.
 
 export type CoverageLimitRow = { coverage: string; limit: string; deductible: string }
-export type CoverageSection = { title: string; rows: CoverageLimitRow[] }
+// keyFacts/bulletGroups/comment are only set on a section built from an uploaded quote
+// (clQuoteMerge.ts) — AMS360 data never carries carrier ratings, enhancements, or bind conditions.
+export type CoverageSection = {
+  title: string
+  rows: CoverageLimitRow[]
+  keyFacts?: [string, string][]
+  bulletGroups?: { title: string; items: string[] }[]
+  comment?: string
+}
 // One row per subject of insurance (not per address, unlike the Risk Profile's PropertyRow) —
 // matches the AMS360 proposal-builder layout the client's own staff produce (Sarah Schultz's
 // Defatta version, 9/14/2026). A peril deductible (wind/hail) rides along in `deductible`, e.g.
@@ -627,17 +664,41 @@ function propertySubjectSection(rows: PropertySubjectRow[]): DocSection | null {
 }
 
 // Deductible column only when at least one row has one — most liability limits tables never do.
-function coverageSection(section: CoverageSection): DocSection | null {
-  if(section.rows.length === 0) return null
+function coverageSection(section: CoverageSection, comments: DocComment[]): DocSection | null {
+  const keyFacts = section.keyFacts ?? []
+  const bulletGroups = (section.bulletGroups ?? []).filter((g) => g.items.length > 0)
+  if(section.rows.length === 0 && keyFacts.length === 0 && bulletGroups.length === 0) return null
 
-  const withDeductible = section.rows.some((r) => r.deductible !== "")
-  const headers = withDeductible ? ["Coverage", "Limit", "Deductible"] : ["Coverage", "Limit"]
-  const tableRows = section.rows.map((r) => withDeductible ? [r.coverage, r.limit, r.deductible] : [r.coverage, r.limit])
+  let heading = h1(section.title)
 
-  return {
-    height: H1_HEIGHT + estimateTableHeight(headers, tableRows),
-    blocks: [h1(section.title), buildTable(headers, tableRows)]
+  if(section.comment) {
+    const comment = { id: comments.length, text: section.comment }
+    comments.push(comment)
+    heading = commentedH1(section.title, comment)
   }
+
+  const blocks: (Paragraph | Table)[] = [heading]
+  let height = H1_HEIGHT
+
+  if(keyFacts.length > 0) {
+    blocks.push(fieldValueTable(keyFacts))
+    height += estimateTableHeight(["Field", "Value"], keyFacts)
+  }
+
+  if(section.rows.length > 0) {
+    const withDeductible = section.rows.some((r) => r.deductible !== "")
+    const headers = withDeductible ? ["Coverage", "Limit", "Deductible"] : ["Coverage", "Limit"]
+    const tableRows = section.rows.map((r) => withDeductible ? [r.coverage, r.limit, r.deductible] : [r.coverage, r.limit])
+    blocks.push(buildTable(headers, tableRows))
+    height += estimateTableHeight(headers, tableRows)
+  }
+
+  for(const group of bulletGroups) {
+    blocks.push(h2(group.title), ...group.items.map(bulletParagraph))
+    height += H2_HEIGHT + group.items.reduce((sum, item) => sum + estimateCellLines(item, 8800) * BODY_LINE_HEIGHT, 0)
+  }
+
+  return { height, blocks }
 }
 
 // A separate table keyed by Veh # rather than extra columns on the Vehicle List — the VIN column
@@ -668,9 +729,11 @@ function hiredNonOwnedSection(rows: HiredNonOwnedRow[]): DocSection | null {
 }
 
 export async function buildRenewalSummaryDoc(input: RenewalSummaryInput): Promise<{ buffer: Buffer; includedSections: string[] }> {
+  // Filled in document order as each commented section is built (slot() runs eagerly below).
+  const comments: DocComment[] = []
   const slot = (key: CoverageSectionSlot) => input.coverageSections
     .filter((s) => s.key === key)
-    .map((s) => ({ name: s.title, section: coverageSection(s) }))
+    .map((s) => ({ name: s.title, section: coverageSection(s, comments) }))
 
   return renderDocument("RENEWAL SUMMARY", input, [
     { name: "Named Insureds", section: namedInsuredsSection(input.clientName, input.additionalNamedInsureds) },
@@ -690,5 +753,5 @@ export async function buildRenewalSummaryDoc(input: RenewalSummaryInput): Promis
     { name: "Workers' Compensation Exposure", section: wcSection(input.wcExposure) },
     ...slot("umbrella"),
     ...slot("other")
-  ])
+  ], comments)
 }

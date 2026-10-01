@@ -2,19 +2,17 @@ import { McpServer } from "@modelcontextprotocol/sdk/server/mcp.js"
 import * as z from "zod"
 import { publicBaseUrl } from "../../config/config.js"
 import { storeDownload } from "../../utils/downloadStore.js"
-import { archiveRiskProfile, sanitizeForFilename } from "../../utils/riskProfileArchive.js"
 import { errorResult, textResult } from "../../utils/mcpHelpers.js"
 import { logger } from "../../utils/logger.js"
-import {
-  buildPolicySummary, combineExposures, fetchPolicyData, formatDate, renewalDateFields, resolveClPolicies
-} from "../../utils/clPolicyData.js"
-import { buildRiskProfileDoc } from "../../utils/riskProfileDoc.js"
+import { resolveClPolicies } from "../../utils/clPolicyData.js"
+import { generateRiskProfile } from "../../utils/riskProfileGenerate.js"
 
 const DOCX_MIME_TYPE = "application/vnd.openxmlformats-officedocument.wordprocessingml.document"
 
 // Policy resolution, per-policy exposure queries, and the multi-policy combine/dedupe logic live in
 // utils/clPolicyData.ts, shared with cl_renewal_summary (which builds this same document plus
-// coverage limits) — see that file for the client-confirmed behavior behind each query.
+// coverage limits) — see that file for the client-confirmed behavior behind each query. The
+// build+archive step lives in utils/riskProfileGenerate.ts, shared with scripts/monthlyRiskProfiles.ts.
 export function registerRiskProfileTool(server: McpServer) {
   server.registerTool(
     "risk_profile",
@@ -34,51 +32,10 @@ export function registerRiskProfileTool(server: McpServer) {
         if(resolution.kind === "error") return errorResult(resolution.error)
         if(resolution.kind === "ambiguous") return textResult(resolution.payload)
 
-        const { matches, combining, primaryPolicy, clientName } = resolution
-
-        const perPolicyData = await Promise.all(matches.map((policy) => fetchPolicyData(policy)))
-        const exposures = combineExposures(perPolicyData, clientName)
-        const policySummary = await buildPolicySummary(matches, combining)
-
-        const { buffer, includedSections } = await buildRiskProfileDoc({
-          clientName,
-          currentPeriod: `${ formatDate(primaryPolicy.poleffdate) } – ${ formatDate(primaryPolicy.polexpdate) }`,
-          renewalDate: formatDate(primaryPolicy.polexpdate),
-          policySummary,
-          ...exposures
-        })
-
-        const polnoLabel = matches.map((m) => m.polno).join(", ")
-        const filename = combining
-          ? `${ sanitizeForFilename(clientName) }_Pre-Renewal_Review_Combined.docx`
-          : `${ sanitizeForFilename(clientName) }_Pre-Renewal_Review.docx`
+        const { matches, primaryPolicy, clientName } = resolution
+        const { buffer, filename, includedSections, combining, polnoLabel } = await generateRiskProfile(matches, clientName)
         const token = storeDownload(buffer, filename, DOCX_MIME_TYPE)
         const downloadUrl = `${ publicBaseUrl }/downloads/${ token }`
-
-        // Keyed by polid (this specific policy TERM), not custid alone — a customer can carry
-        // several distinct commercial policies at once (confirmed against real data: Celebration
-        // Homes LLC has 4), and keying only by custid collapsed all of them onto a single file,
-        // each regeneration silently overwriting a different policy's packet. polid is unique per
-        // term, so: regenerating the SAME term (same policy, same renewal date) still overwrites
-        // its own prior copy, a different policy for the same customer gets its own separate file,
-        // and a future renewal of this same policy (a new term, new polid, new renewal_date once
-        // AMS360 processes it) becomes its own new file rather than clobbering this one. A combined
-        // document is instead keyed on the full set of matched polnos, so regenerating the exact
-        // same combination overwrites its own prior copy, and a different combination (e.g. a 6th
-        // policy added later) gets its own separate file rather than clobbering this one.
-        const archiveFilename = combining
-          ? `${ sanitizeForFilename(clientName) }_${ sanitizeForFilename(matches.map((m) => m.polno).join("_")) }_combined.docx`
-          : `${ sanitizeForFilename(clientName) }_${ sanitizeForFilename(primaryPolicy.polno) }_${ primaryPolicy.polid }.docx`
-
-        archiveRiskProfile(buffer, {
-          filename: archiveFilename,
-          generated_at: new Date().toISOString(),
-          csr_code: primaryPolicy.csrcode,
-          csr_name: primaryPolicy.csr_name,
-          client_name: clientName,
-          polnos: polnoLabel,
-          ...renewalDateFields(matches)
-        })
 
         return textResult({
           message: combining

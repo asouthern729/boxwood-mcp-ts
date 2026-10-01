@@ -17,72 +17,18 @@
 //            "current month + 2" from today's date.
 
 import "dotenv/config"
-import { runReadOnlyQuery } from "../src/db.js"
 import { generateRenewalPremiumSummary, NoCommercialPoliciesError } from "../src/utils/renewalPremiumSummaryGenerate.js"
+import { discoverCommercialAccounts, monthArgFromArgv, resolveTargetMonthWindow } from "../src/utils/monthlyRenewalWindow.js"
 
-// Mirrors generateRenewalPremiumSummary's own ACCOUNT_POLICIES_QUERY "genuinely in force" filter
-// (typeofbus=2, polsubtype!='S', status!='D', poleffdate<=now()) exactly, so every custid this
-// discovers is guaranteed to actually produce a workbook — deliberately NOT upcoming_renewals'
-// filter (renewalrptflag='A' + not-yet-renewed), which answers a different question and would
-// drift out of sync with what generation itself considers "in force." DISTINCT because an account
-// can have more than one commercial policy expiring in the same target month.
-const DISCOVERY_QUERY = `
-  SELECT DISTINCT p.custid,
-    COALESCE(c.dba, NULLIF(TRIM(CONCAT_WS(' ', c.firstname, c.lastname)), ''), c.firmnamecust) AS customer_name
-  FROM afw_basicpolinfo p
-  LEFT JOIN afw_customer c ON c.custid = p.custid
-  WHERE p.typeofbus = 2
-    AND p.polsubtype != 'S'
-    AND p.status != 'D'
-    AND p.poleffdate <= now()
-    AND p.polexpdate BETWEEN $1::date AND $2::date
-  ORDER BY customer_name
-`
-
-type DiscoveredAccount = { custid: string; customer_name: string | null }
-
-function toDateString(date: Date): string {
-  return date.toISOString().slice(0, 10)
-}
-
-// current month + 2, with year rollover (e.g. run in November → target January of next year).
-function resolveTargetMonth(monthArg: string | undefined): { year: number; month: number } {
-  if(monthArg) {
-    const match = monthArg.match(/^(\d{4})-(\d{2})$/)
-    if(!match) throw new Error(`--month must be YYYY-MM, got "${ monthArg }"`)
-    return { year: Number(match[1]), month: Number(match[2]) - 1 }
-  }
-
-  const now = new Date()
-  const target = new Date(Date.UTC(now.getUTCFullYear(), now.getUTCMonth() + 2, 1))
-  return { year: target.getUTCFullYear(), month: target.getUTCMonth() }
-}
-
-function targetMonthBounds(year: number, month: number): { startDate: string; endDate: string } {
-  const start = new Date(Date.UTC(year, month, 1))
-  const end = new Date(Date.UTC(year, month + 1, 0)) // day 0 of next month = last day of this one
-  return { startDate: toDateString(start), endDate: toDateString(end) }
-}
-
-// Sized so every renewal through the end of the target month lands in the main table (per-run
-// window, not a fixed 90-day default) — +1 day of buffer against any time-of-day component on
-// polexpdate so the last day of the month is never clipped by the cutoff comparison.
-function renewalWithinDaysThrough(endDate: string): number {
-  const now = new Date()
-  const todayUtc = Date.UTC(now.getUTCFullYear(), now.getUTCMonth(), now.getUTCDate())
-  const endUtc = new Date(`${ endDate }T00:00:00Z`).getTime()
-  return Math.max(1, Math.ceil((endUtc - todayUtc) / (24 * 60 * 60 * 1000)) + 1)
-}
-
+// Target month + account discovery are shared with scripts/monthlyRiskProfiles.ts (Patrick's
+// companion job, same schedule) — see src/utils/monthlyRenewalWindow.ts.
 async function main() {
-  const monthArg = process.argv.slice(2).find((arg) => arg.startsWith("--month="))?.split("=")[1]
-  const { year, month } = resolveTargetMonth(monthArg)
-  const { startDate, endDate } = targetMonthBounds(year, month)
-  const renewalWithinDays = renewalWithinDaysThrough(endDate)
+  const targetWindow = resolveTargetMonthWindow(monthArgFromArgv(process.argv.slice(2)))
+  const { startDate, endDate, renewalWithinDays } = targetWindow
 
   console.log(`[monthlyRenewalPremiumSummaries] target month ${ startDate } – ${ endDate } (renewal_within_days=${ renewalWithinDays })`)
 
-  const accounts = await runReadOnlyQuery(DISCOVERY_QUERY, [startDate, endDate]) as DiscoveredAccount[]
+  const accounts = await discoverCommercialAccounts(targetWindow)
   console.log(`[monthlyRenewalPremiumSummaries] ${ accounts.length } commercial account(s) with a policy expiring in this window`)
 
   const generated: { custid: string; clientName: string; includedCount: number; filename: string }[] = []

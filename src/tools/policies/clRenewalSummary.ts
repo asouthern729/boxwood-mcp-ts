@@ -2,15 +2,10 @@ import { McpServer } from "@modelcontextprotocol/sdk/server/mcp.js"
 import * as z from "zod"
 import { publicBaseUrl } from "../../config/config.js"
 import { storeDownload } from "../../utils/downloadStore.js"
-import { archiveClRenewalSummary } from "../../utils/clRenewalSummaryArchive.js"
-import { sanitizeForFilename } from "../../utils/docArchive.js"
 import { errorResult, textResult } from "../../utils/mcpHelpers.js"
 import { logger } from "../../utils/logger.js"
-import {
-  buildPolicySummary, combineExposures, fetchPolicyData, formatDate, renewalDateFields, resolveClPolicies
-} from "../../utils/clPolicyData.js"
-import { VEHICLE_COLUMNS, combineCoverageData, fetchPolicyCoverageData } from "../../utils/clCoverageData.js"
-import { buildRenewalSummaryDoc } from "../../utils/riskProfileDoc.js"
+import { resolveClPolicies } from "../../utils/clPolicyData.js"
+import { generateClRenewalSummary } from "../../utils/clRenewalSummaryGenerate.js"
 
 const DOCX_MIME_TYPE = "application/vnd.openxmlformats-officedocument.wordprocessingml.document"
 
@@ -19,7 +14,8 @@ const DOCX_MIME_TYPE = "application/vnd.openxmlformats-officedocument.wordproces
 // exposures and building limits, veh, driver etc. CL Renewal Summary- incl all that plus coverage
 // limits for liability etc. data pulled from MCP." Policy resolution, combining, and every exposure
 // schedule are shared with risk_profile (utils/clPolicyData.ts), so the two documents always agree
-// on which terms they cover; the limits come from utils/clCoverageData.ts. Scope decisions confirmed
+// on which terms they cover; the limits come from utils/clCoverageData.ts. The build+archive step
+// lives in utils/clRenewalSummaryGenerate.ts, shared with scripts/dailyClRenewalSummaries.ts. Scope decisions confirmed
 // with Andrew 2026-09-22: no premiums, per-vehicle auto coverages, umbrella limits only (no schedule
 // of underlying policies), and the blank Renewal Exposure/Payroll meeting columns kept.
 export function registerClRenewalSummaryTool(server: McpServer) {
@@ -41,56 +37,10 @@ export function registerClRenewalSummaryTool(server: McpServer) {
         if(resolution.kind === "error") return errorResult(resolution.error)
         if(resolution.kind === "ambiguous") return textResult(resolution.payload)
 
-        const { matches, combining, primaryPolicy, clientName } = resolution
-
-        const [perPolicyData, perPolicyCoverage, policySummary] = await Promise.all([
-          Promise.all(matches.map((policy) => fetchPolicyData(policy))),
-          Promise.all(matches.map((policy) => fetchPolicyCoverageData(policy.polid))),
-          buildPolicySummary(matches, combining)
-        ])
-
-        // property (the Risk Profile's one-row-per-address Building/BPP table) is replaced here by
-        // coverage.propertySubjects — one row per subject of insurance with its own limit.
-        const { property: _property, ...exposures } = combineExposures(perPolicyData, clientName)
-        const coverage = combineCoverageData(perPolicyCoverage)
-
-        const { buffer, includedSections } = await buildRenewalSummaryDoc({
-          clientName,
-          currentPeriod: `${ formatDate(primaryPolicy.poleffdate) } – ${ formatDate(primaryPolicy.polexpdate) }`,
-          renewalDate: formatDate(primaryPolicy.polexpdate),
-          policySummary,
-          ...exposures,
-          propertySubjects: coverage.propertySubjects,
-          vehicleCoverages: coverage.vehicleCoverages,
-          vehicleCoverageColumns: VEHICLE_COLUMNS
-            .filter((c) => coverage.vehicleCoverages.some((v) => v.values[c.key]))
-            .map(({ key, label }) => ({ key, label })),
-          hiredNonOwned: coverage.hiredNonOwned,
-          coverageSections: coverage.sections
-        })
-
-        const polnoLabel = matches.map((m) => m.polno).join(", ")
-        const filename = combining
-          ? `${ sanitizeForFilename(clientName) }_Renewal_Summary_Combined.docx`
-          : `${ sanitizeForFilename(clientName) }_Renewal_Summary.docx`
+        const { matches, primaryPolicy, clientName } = resolution
+        const { buffer, filename, includedSections, combining, polnoLabel, carrierCodes } = await generateClRenewalSummary(matches, clientName)
         const token = storeDownload(buffer, filename, DOCX_MIME_TYPE)
         const downloadUrl = `${ publicBaseUrl }/downloads/${ token }`
-
-        // Same keying as risk_profile's archive (see its comment): polid for a single policy term,
-        // the full polno set for a combined document.
-        const archiveFilename = combining
-          ? `${ sanitizeForFilename(clientName) }_${ sanitizeForFilename(matches.map((m) => m.polno).join("_")) }_combined.docx`
-          : `${ sanitizeForFilename(clientName) }_${ sanitizeForFilename(primaryPolicy.polno) }_${ primaryPolicy.polid }.docx`
-
-        archiveClRenewalSummary(buffer, {
-          filename: archiveFilename,
-          generated_at: new Date().toISOString(),
-          csr_code: primaryPolicy.csrcode,
-          csr_name: primaryPolicy.csr_name,
-          client_name: clientName,
-          polnos: polnoLabel,
-          ...renewalDateFields(matches)
-        })
 
         return textResult({
           message: combining
@@ -98,7 +48,7 @@ export function registerClRenewalSummaryTool(server: McpServer) {
             : `Built the Renewal Summary for ${ clientName } (policy ${ primaryPolicy.polno }) — ${ includedSections.length } section(s) included: ${ includedSections.join(", ") }.`,
           download_url: downloadUrl,
           included_sections: includedSections,
-          ...(coverage.carrierCodes.length > 0 ? { unresolved_coverage_codes: coverage.carrierCodes } : {})
+          ...(carrierCodes.length > 0 ? { unresolved_coverage_codes: carrierCodes } : {})
         })
       } catch(error) {
         logger.error({ err: error, polno, custid, customer_name }, "cl_renewal_summary failed")
