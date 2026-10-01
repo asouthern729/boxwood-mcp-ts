@@ -1,6 +1,7 @@
 #!/bin/bash
 # Monthly commercial Renewal Premium Summary batch generation.
-# Invoked by cron on the 1st of each month at 8am America/Chicago via the same UTC-pair +
+# Invoked by cron on the 1st of each month at 8:30am America/Chicago (30 min after the AMS360 sync
+# should have finished; Andrew, 2026-10-01) via the same UTC-pair +
 # runtime-TZ-check pattern used by dailyMorningDownload.sh (this box's cron doesn't support
 # CRON_TZ). Kept as a script rather than a cron one-liner so logging doesn't have to live in a
 # fragile cron string.

@@ -54,7 +54,7 @@ function combineSum(values: (number | null)[]): number | null {
 // Updates just the Current (and, when newly known, Renewal) cells of an already-generated renewal
 // premium summary in place, using the row map recorded at generation time (RenewalPremiumSummaryCellMapEntry,
 // stored on the manifest entry) — deliberately does NOT rebuild row order, coverage text, Carrier,
-// Trending, or anything below the main table. Percent Change and TOTAL are never written either —
+// or anything below the main table. Percent Change and TOTAL are never written either —
 // they're live template formulas that recalculate once Current/Renewal change.
 //
 // Built to be safe on a workbook an employee has since opened and edited (the files are headed for

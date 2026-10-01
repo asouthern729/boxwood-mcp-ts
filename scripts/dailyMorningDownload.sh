@@ -12,15 +12,6 @@ mkdir -p scripts/logs
 {
   echo "===== $(date -Iseconds) ====="
   npx tsx scripts/morningDownload.ts && npx tsx scripts/sendReportEmail.ts
-  # PL Renewal Premium Change workbooks + PL Renewal Summaries for the renewals on today's download
-  # (archived on the server for the dashboard's PL pages; nothing emailed). Independent of the report above.
-  npx tsx scripts/dailyPlRenewalPremiumChange.ts
 } >> scripts/logs/morning-download.log 2>&1
-
-# CL Renewal Summaries for commercial terms entering the rolling 30-day window (weekdays, with the PL
-# jobs above; each term built once, nothing emailed). Its own log — it has nothing to do with the
-# download report.
-{
-  echo "===== $(date -Iseconds) ====="
-  npx tsx scripts/dailyClRenewalSummaries.ts
-} >> scripts/logs/daily-cl-renewal-summaries.log 2>&1
+# The PL Renewal Premium Change (8:30) and PL Renewal Summary (9:00) builds for today's renewal
+# downloads run from their own cron lines — see scripts/dailyPlRenewalJob.sh.

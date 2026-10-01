@@ -17,18 +17,20 @@ export type KnownLobCode = typeof LOB_ROW_ORDER[number]
 
 const FIRST_LOB_ROW = 12 // through 19 — always exactly 8 rows, one per LOB_ROW_ORDER entry
 
-// The template's own label/Trending text per line, keyed by code rather than fixed row position —
-// needed because rows are now reordered per generation (populated lines first; see
-// buildRenewalPremiumSummaryWorkbook), so a line's label/Trending has to travel with it rather than
-// stay pinned to whichever row it originally occupied in the template.
+// The template's own label text per line, keyed by code rather than fixed row position — needed
+// because rows are reordered per generation (populated lines first; see
+// buildRenewalPremiumSummaryWorkbook), so a line's label has to travel with it rather than stay
+// pinned to whichever row it originally occupied in the template.
 const LOB_LABEL: Record<KnownLobCode, string> = {
   CGL: "General Liability ", PROP: "Property", AUTOB: "Auto", CUMBR: "Umbrella",
   WORK: "Workers Comp", EPLI: "EPLI", INMRC: "Inland Marine", DO: "D&O"
 }
-const LOB_TRENDING: Record<KnownLobCode, string> = {
-  CGL: "+1% to +9%", PROP: "flat to +10%", AUTOB: "+5% to +15%", CUMBR: "+10% to +20%",
-  WORK: "-2% to +2%", EPLI: "0 to +5%", INMRC: "0 to +15%", DO: "0 to +5%"
-}
+
+// Column H is the template's "Trending Percent Increase" column. Patrick (9/29 "final lap"): remove
+// it. Its header and per-line ranges are cleared rather than the column deleted — column H also sits
+// inside the section banner and the Quote Notes boxes, and deleting it would mean shifting the Market
+// Options block, its formulas, the merges, and the print area (Andrew, 2026-10-01: clearing is enough).
+const TRENDING_HEADER_ROW = 11
 
 const NUM_SPARE_ROWS = 3 // matches prepRenewalPremiumTemplate.py's NUM_BLANK_ROWS
 const FIRST_SPARE_ROW = 20
@@ -107,6 +109,7 @@ export async function buildRenewalPremiumSummaryWorkbook(input: RenewalPremiumSu
 
   sheet.getCell("C6").value = input.clientName
   sheet.getCell("C7").value = input.renewalDateLabel
+  sheet.getCell(`H${ TRENDING_HEADER_ROW }`).value = null
 
   // Client feedback (2026-09-15, final ordering): the 8 known coverage types always print first as
   // one block — populated ones among themselves first, then the remaining empty ones — matching the
@@ -167,12 +170,10 @@ export async function buildRenewalPremiumSummaryWorkbook(input: RenewalPremiumSu
     // overwritten below with a real number when one is available, which still blocks overflow from
     // its left neighbor exactly like the empty string did.
     eCell.value = ""
+    // The template bakes a Trending range into rows 12-19 — cleared on every row (see TRENDING_HEADER_ROW).
+    sheet.getCell(`H${ row }`).value = null
 
     if(entry.kind === "known") {
-      // Trending only applies to a known coverage line (it's an inherent property of the line
-      // itself, e.g. "+1% to +9%" for General Liability) — shown whether or not it's populated, so
-      // the reader still sees the benchmark range for a line this account doesn't currently carry.
-      sheet.getCell(`H${ row }`).value = LOB_TRENDING[entry.code]
       setCoverageCell(bCell, entry.fill.coverage, entry.fill.policyNos)
       cCell.value = entry.fill.current !== null ? entry.fill.current : ""
       if(entry.fill.renewal !== null) eCell.value = entry.fill.renewal
@@ -180,11 +181,6 @@ export async function buildRenewalPremiumSummaryWorkbook(input: RenewalPremiumSu
       maxCarrierLen = Math.max(maxCarrierLen, entry.fill.carrier.length)
       cellMap.push({ row, kind: "known", code: entry.code, polnos: entry.fill.policyNos.split(", "), current: entry.fill.current, renewal: entry.fill.renewal })
     } else if(entry.kind === "extra") {
-      // No Trending — an extra/unmatched policy isn't one of the 8 tracked lines, so no benchmark
-      // range applies. Explicitly cleared, not just left unwritten: this row may now land on a
-      // template row position (12-19) that already has one of the 8 known lines' own Trending value
-      // baked in from the template's default layout, which would otherwise leak through untouched.
-      sheet.getCell(`H${ row }`).value = null
       setCoverageCell(bCell, entry.extra.coverage, entry.extra.policyNos)
       cCell.value = entry.extra.current !== null ? entry.extra.current : ""
       if(entry.extra.renewal !== null) eCell.value = entry.extra.renewal
@@ -192,14 +188,12 @@ export async function buildRenewalPremiumSummaryWorkbook(input: RenewalPremiumSu
       maxCarrierLen = Math.max(maxCarrierLen, entry.extra.carrier.length)
       cellMap.push({ row, kind: "extra", polnos: entry.extra.policyNos.split(", "), current: entry.extra.current, renewal: entry.extra.renewal })
     } else if(entry.kind === "blank") {
-      // Explicitly cleared (not just left unwritten) for the same reason as the "extra" case above —
-      // this row may land on a template position that already has default label/Trending content.
+      // Explicitly cleared (not just left unwritten) — this row may land on a template position that
+      // already has a default line label.
       bCell.value = null
       cCell.value = ""
       sheet.getCell(`D${ row }`).value = null
-      sheet.getCell(`H${ row }`).value = null
     } else {
-      sheet.getCell(`H${ row }`).value = LOB_TRENDING[entry.code]
       bCell.value = LOB_LABEL[entry.code]
       cCell.value = ""
     }
