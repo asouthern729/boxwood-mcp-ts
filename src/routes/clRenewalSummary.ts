@@ -128,7 +128,7 @@ async function processQuoteUpload(filename: string, upload: QuoteUpload, pdf: Bu
     completeQuoteUpload(filename, upload, extraction)
 
     const entry = readClRenewalSummaryManifest().find((e) => e.filename === filename)
-    if(entry) await rebuildClRenewalSummary(entry)
+    if(entry) await rebuildClRenewalSummary(entry, `Quote added: ${ upload.filename }`)
   } catch(error) {
     logger.error({ err: error, filename, quote: upload.id }, "cl_renewal_summary quote upload failed")
     const message = error instanceof QuoteExtractionError || error instanceof ClRenewalSummaryRebuildError
@@ -189,6 +189,8 @@ router.post(
 router.delete(`${ BASE }/cl-renewal-summary/files/:filename/quotes/:quoteId`, auth0, asyncHandler(async(req: Request<{ filename: string; quoteId: string }>, res: Response) => {
   const { filename, quoteId } = req.params
   const entry = readClRenewalSummaryManifest().find((e) => e.filename === filename)
+  // Read before deleting — the upload record goes with it.
+  const quoteName = entry ? listQuoteUploads(filename).find((q) => q.id === quoteId)?.filename : undefined
 
   if(!entry || !deleteQuoteUpload(filename, quoteId)) {
     res.status(404).json({ error: "not_found", error_description: "This quote doesn't exist." })
@@ -196,7 +198,7 @@ router.delete(`${ BASE }/cl-renewal-summary/files/:filename/quotes/:quoteId`, au
   }
 
   // Take the quote's sections back out of the document.
-  await rebuildClRenewalSummary(entry)
+  await rebuildClRenewalSummary(entry, `Quote removed: ${ quoteName ?? "quote" }`)
   res.status(200).json({ id: quoteId })
 }))
 

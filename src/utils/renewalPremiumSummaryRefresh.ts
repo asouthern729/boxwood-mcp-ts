@@ -51,6 +51,19 @@ function combineSum(values: (number | null)[]): number | null {
   return values.reduce((sum: number, v) => sum + (v ?? 0), 0)
 }
 
+// The manifest's last_refresh_reason, e.g. "1 current premium updated, 2 renewal premiums added".
+// Renewal only ever fills a blank cell, so it's always "added"; Current replaces a value, so "updated".
+function refreshReason(changes: RenewalPremiumSummaryRefreshChange[]): string {
+  const count = (field: "current" | "renewal") => changes.filter((c) => c.field === field).length
+  const phrase = (n: number, noun: string, verb: string) => `${ n } ${ noun }${ n === 1 ? "" : "s" } ${ verb }`
+  const current = count("current")
+  const renewal = count("renewal")
+  return [
+    ...(current > 0 ? [phrase(current, "current premium", "updated")] : []),
+    ...(renewal > 0 ? [phrase(renewal, "renewal premium", "added")] : [])
+  ].join(", ")
+}
+
 // Updates just the Current (and, when newly known, Renewal) cells of an already-generated renewal
 // premium summary in place, using the row map recorded at generation time (RenewalPremiumSummaryCellMapEntry,
 // stored on the manifest entry) — deliberately does NOT rebuild row order, coverage text, Carrier,
@@ -189,7 +202,7 @@ export async function refreshRenewalPremiumSummary(filename: string, options: Re
     return { filename, refreshed_at: refreshedAt, written: false, dry_run: false, changes: [], skipped_rows: skippedRows }
   }
 
-  recordRenewalPremiumSummaryRefresh(filename, buffer, refreshedAt, updatedCellMap)
+  recordRenewalPremiumSummaryRefresh(filename, buffer, refreshedAt, updatedCellMap, refreshReason(appliedChanges))
 
   return { filename, refreshed_at: refreshedAt, written: true, dry_run: false, changes: appliedChanges, skipped_rows: skippedRows }
 }

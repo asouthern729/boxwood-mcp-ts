@@ -36,6 +36,13 @@ export type DocArchiveEntry = {
   built_from?: "current" | "renewal"
   // CL Renewal Summary only: the current-term polids whose renewal term the document printed.
   renewal_polids?: string[]
+  // CL Renewal Summary only: when the document was last rebuilt in place (quote upload/removal or a
+  // renewal landing) — generated_at keeps the original build time. Same name as the renewal premium
+  // summary's field so the index pages share "Updated Today" logic.
+  last_refreshed_at?: string
+  // CL Renewal Summary only: why that last rebuild happened, in staff-facing words (e.g. "Quote added:
+  // Travelers.pdf") — the index page shows it on hover. Absent on entries rebuilt before it existed.
+  last_refresh_reason?: string
 }
 
 export function createDocArchive<Entry extends DocArchiveEntry = DocArchiveEntry>(subdir: string) {

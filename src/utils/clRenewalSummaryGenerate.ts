@@ -253,7 +253,7 @@ export class ClRenewalSummaryRebuildError extends Error {}
 // lands — from the same policy terms it was built from. Resolution goes back through
 // resolveClPolicies (same in-force filter and joins as every other build) for the terms' customer,
 // then keeps exactly the archived terms.
-export async function rebuildClRenewalSummary(entry: DocArchiveEntry): Promise<GeneratedClRenewalSummary> {
+export async function rebuildClRenewalSummary(entry: DocArchiveEntry, reason: string): Promise<GeneratedClRenewalSummary> {
   const polids = archivedPolids(entry)
   if(!polids) throw new ClRenewalSummaryRebuildError("This document predates quote uploads — build it again from the chat, then upload the quote.")
 
@@ -267,5 +267,7 @@ export async function rebuildClRenewalSummary(entry: DocArchiveEntry): Promise<G
   const matches = polids.flatMap((polid) => resolution.matches.filter((m) => m.polid === polid))
   if(matches.length !== polids.length) throw new ClRenewalSummaryRebuildError("Some of this document's policies are no longer in force, so it can't be rebuilt.")
 
-  return generateClRenewalSummary(matches, resolution.clientName)
+  const { archiveEntry, ...generated } = await buildClRenewalSummary(matches, resolution.clientName)
+  archiveClRenewalSummary(generated.buffer, { ...archiveEntry, generated_at: entry.generated_at, last_refreshed_at: archiveEntry.generated_at, last_refresh_reason: reason })
+  return generated
 }

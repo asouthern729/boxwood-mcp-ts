@@ -127,7 +127,7 @@ async function rebuildArchived({ dryRun, everything, today, failed }: {
       continue
     }
     try {
-      const result = await rebuildClRenewalSummary(entry)
+      const result = await rebuildClRenewalSummary(entry, everything ? "Rebuilt in the latest format" : "Renewal term landed in AMS360")
       rebuilt++
       console.log(`[dailyClRenewalSummaries] rebuilt ${ entry.client_name } (${ entry.polnos })${ result.renewalPendingPolnos.length > 0 ? ` — renewal still pending for ${ result.renewalPendingPolnos.join(", ") }` : " — renewal terms" }`)
     } catch(error) {

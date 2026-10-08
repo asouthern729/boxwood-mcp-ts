@@ -37,6 +37,9 @@ export type RenewalPremiumSummaryManifestEntry = {
   // "values touched up since," both for the index page and so a second Refresh knows this file may
   // already differ from its own cell_map's original values.
   last_refreshed_at?: string
+  // What that last Refresh changed, in staff-facing words (e.g. "1 current premium updated, 2 renewal
+  // premiums added") — the index page shows it on hover. Absent on entries refreshed before it existed.
+  last_refresh_reason?: string
 }
 
 // Exported for the renewal-premium-summaries index route (src/routes/renewalPremiumSummaries.ts) —
@@ -69,14 +72,14 @@ export function archiveRenewalPremiumSummary(buffer: Buffer, entry: RenewalPremi
 // Refresh path (renewalPremiumSummaryRefresh.ts), which only ever touches a handful of value cells in
 // the existing workbook rather than rebuilding it, so every other manifest field (csr_code, polnos,
 // etc.) stays exactly as it was at original generation.
-export function recordRenewalPremiumSummaryRefresh(filename: string, buffer: Buffer, refreshedAt: string, cellMap: RenewalPremiumSummaryCellMapEntry[]): void {
+export function recordRenewalPremiumSummaryRefresh(filename: string, buffer: Buffer, refreshedAt: string, cellMap: RenewalPremiumSummaryCellMapEntry[], reason: string): void {
   writeFileSync(path.join(RENEWAL_PREMIUM_SUMMARY_OUTPUT_DIR, filename), buffer)
 
   const manifest = readManifest()
   const index = manifest.findIndex((existing) => existing.filename === filename)
   if(index === -1) throw new Error(`No manifest entry for ${ filename } — cannot record refresh`)
 
-  manifest[index] = { ...manifest[index], cell_map: cellMap, last_refreshed_at: refreshedAt }
+  manifest[index] = { ...manifest[index], cell_map: cellMap, last_refreshed_at: refreshedAt, last_refresh_reason: reason }
   writeFileSync(MANIFEST_PATH, JSON.stringify(manifest, null, 2))
 }
 
