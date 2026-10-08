@@ -219,6 +219,7 @@ export async function buildClRenewalSummary(
     polids: matches.map((m) => m.polid),
     built_from: pending.length === 0 ? "renewal" : "current",
     renewal_polids: terms.filter((t) => t.isRenewal).map((t) => t.current.polid),
+    pending_sections: pendingLines.map((l) => ({ title: l.title, polno: l.polno })),
     ...renewalDateFields(matches)
   }
 
@@ -249,11 +250,9 @@ export function archivedPolids(entry: DocArchiveEntry): string[] | null {
 
 export class ClRenewalSummaryRebuildError extends Error {}
 
-// Rebuilds an archived document in place — after a quote upload or deletion, or once a renewal term
-// lands — from the same policy terms it was built from. Resolution goes back through
-// resolveClPolicies (same in-force filter and joins as every other build) for the terms' customer,
-// then keeps exactly the archived terms.
-export async function rebuildClRenewalSummary(entry: DocArchiveEntry, reason: string): Promise<GeneratedClRenewalSummary> {
+// The policy terms an archived document was built from, re-resolved through resolveClPolicies (same
+// in-force filter and joins as every other build) for the terms' customer, keeping exactly those terms.
+export async function resolveArchivedClPolicies(entry: DocArchiveEntry): Promise<{ matches: ResolvedPolicy[]; clientName: string }> {
   const polids = archivedPolids(entry)
   if(!polids) throw new ClRenewalSummaryRebuildError("This document predates quote uploads — build it again from the chat, then upload the quote.")
 
@@ -267,7 +266,14 @@ export async function rebuildClRenewalSummary(entry: DocArchiveEntry, reason: st
   const matches = polids.flatMap((polid) => resolution.matches.filter((m) => m.polid === polid))
   if(matches.length !== polids.length) throw new ClRenewalSummaryRebuildError("Some of this document's policies are no longer in force, so it can't be rebuilt.")
 
-  const { archiveEntry, ...generated } = await buildClRenewalSummary(matches, resolution.clientName)
+  return { matches, clientName: resolution.clientName }
+}
+
+// Rebuilds an archived document in place — after a quote upload or deletion, or once a renewal term
+// lands — from the same policy terms it was built from.
+export async function rebuildClRenewalSummary(entry: DocArchiveEntry, reason: string): Promise<GeneratedClRenewalSummary> {
+  const { matches, clientName } = await resolveArchivedClPolicies(entry)
+  const { archiveEntry, ...generated } = await buildClRenewalSummary(matches, clientName)
   archiveClRenewalSummary(generated.buffer, { ...archiveEntry, generated_at: entry.generated_at, last_refreshed_at: archiveEntry.generated_at, last_refresh_reason: reason })
   return generated
 }
