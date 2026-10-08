@@ -1,9 +1,18 @@
 import { runReadOnlyQuery } from "../db.js"
-import { clean, formatAddress, numericMoney } from "./clPolicyData.js"
+import { clean, formatAddress, formatLocNo, numericMoney } from "./clPolicyData.js"
 import { money } from "./riskProfileDoc.js"
-import type {
-  CoverageLimitRow, CoverageSection, HiredNonOwnedRow, PropertySubjectRow, VehicleCoverageRow
-} from "./riskProfileDoc.js"
+
+export type CoverageLimitRow = { coverage: string; limit: string; deductible: string }
+export type CoverageSection = { title: string; rows: CoverageLimitRow[] }
+// One row per subject of insurance (Building, Business Personal Property, Business Income, ...) or
+// per additional coverage line attached to one (isAdditional — Ordinance or Law, Demolition, ...).
+// The proposal regroups these per location/building (clProposalLines.ts).
+export type PropertySubjectRow = {
+  locNo: string; bldgNo: string; address: string; subject: string; limit: string; valuation: string
+  causeOfLoss: string; coinsurance: string; deductible: string; perilDeductibles: string[]; isAdditional: boolean
+}
+export type VehicleCoverageRow = { vehNo: string; description: string; values: Record<string, string> }
+export type HiredNonOwnedRow = { exposure: string; coverage: string; limit: string; deductible: string }
 
 // Coverage limits/deductibles for cl_renewal_summary — everything the Pre-Renewal Risk Profile
 // deliberately leaves out. Patrick (9/11/2026): "CL Renewal Summary- incl all that plus coverage
@@ -89,15 +98,50 @@ const PROPERTY_SUBJECT_QUERY = `
       FROM afw_clocation c
       WHERE polid = $1
     ) x WHERE rn = 1 AND status != 'D'
+  ),
+  bld AS (
+    SELECT * FROM (
+      SELECT b.*,
+        ROW_NUMBER() OVER (PARTITION BY polid, cbldgid ORDER BY effdate DESC) AS rn
+      FROM afw_cbuilding b
+      WHERE polid = $1
+    ) x WHERE rn = 1 AND status != 'D'
   )
-  SELECT pi.piid, soi.soiid, loc.locno, loc.addr1, loc.city, loc.state, loc.zip,
+  SELECT pi.piid, soi.soiid, loc.locno, bld.bldgno, loc.addr1, loc.city, loc.state, loc.zip,
     soi.subofins, soi.isubamt, COALESCE(soi.valuation, cprem_320.valuation) AS valuation,
-    cprem_320.coverage, cprem_320.ilimit1, cprem_320.vlimit1, cprem_320.deduct, cprem_320.dedtype
+    cprem_320.coverage, cprem_320.ilimit1, cprem_320.vlimit1, cprem_320.deduct, cprem_320.dedtype, cprem_320.coinspct
   FROM cprem_320
   JOIN soi ON soi.polid = cprem_320.polid AND soi.soiid = cprem_320.attachid
   JOIN pi ON pi.polid = soi.polid AND pi.piid = soi.piid
   JOIN loc ON loc.polid = pi.polid AND loc.clocid = pi.clocid
-  ORDER BY loc.locno, pi.piid, soi.soiid, (cprem_320.ilimit1 IS NULL), cprem_320.coverage
+  LEFT JOIN bld ON bld.polid = pi.polid AND bld.cbldgid = pi.cbldgid
+  ORDER BY loc.locno, bld.bldgno NULLS LAST, pi.piid, soi.soiid, (cprem_320.ilimit1 IS NULL), cprem_320.coverage
+`
+
+// Covered-auto symbols: the cov*sym text columns on afw_127coverage1 are never populated; the
+// symbols are Y/N flags instead (postgres peer, 2026-10-08) — liability symbol N is isliabilityN.
+const AUTO_SYMBOL_QUERY = `
+  SELECT c.isliability1, c.isliability2, c.isliability3, c.isliability4, c.isliability7, c.isliability8, c.isliability9
+  FROM (
+    SELECT c.*, ROW_NUMBER() OVER (PARTITION BY c.polid, c.lobid, c.casid ORDER BY c.effdate DESC) AS rn
+    FROM afw_127coverage1 c
+    WHERE c.polid = $1
+  ) c
+  WHERE c.rn = 1 AND c.status != 'D'
+`
+
+// WC states covered: afw_130policy has one row per state; ispart1 = 'Y' is a Part One (3A) state.
+// Many policies also list every other state as 'N' (3C, other states) — not "covered" in the sense a
+// client reads it.
+const WC_STATES_QUERY = `
+  SELECT DISTINCT rtrim(w.state) AS state
+  FROM (
+    SELECT w.*, ROW_NUMBER() OVER (PARTITION BY w.polid, w.lobid, w.wpolid ORDER BY w.effdate DESC) AS rn
+    FROM afw_130policy w
+    WHERE w.polid = $1
+  ) w
+  WHERE w.rn = 1 AND w.status != 'D' AND w.ispart1 = 'Y' AND w.state IS NOT NULL
+  ORDER BY 1
 `
 
 const VEHICLE_COVERAGE_QUERY = `
@@ -131,7 +175,7 @@ type CoverageQueryRow = LimitColumns & {
 }
 
 type PropertySubjectQueryRow = {
-  piid: string; soiid: string; locno: string | null; addr1: string | null; city: string | null; state: string | null; zip: string | null
+  piid: string; soiid: string; locno: string | null; bldgno: string | null; coinspct: string | null; addr1: string | null; city: string | null; state: string | null; zip: string | null
   subofins: string | null; isubamt: number | null; valuation: string | null
   coverage: string | null; ilimit1: number | null; vlimit1: string | null; deduct: number | null; dedtype: string | null
 }
@@ -264,39 +308,49 @@ function genericRow(r: CoverageQueryRow): CoverageLimitRow {
   return { coverage: clean(r.coverage), limit: joinedLimit(r), deductible: formatDeductible(r.deduct, r.dedtype) }
 }
 
-// Section title per line of business; anything not listed uses AMS360's own LOB description.
-// Order in this map is also the order sections appear in the document relative to each other.
-const LOB_SECTION_TITLES: Record<string, string> = {
-  PROP: "Additional Property Coverages",
-  BOPPR: "Business Owners Property Coverages",
-  CGL: "General Liability Limits",
-  BOPGL: "Business Owners Liability Limits",
-  INMRC: "Inland Marine Coverages",
-  AUTOB: "Auto Policy Coverages",
-  WORK: "Workers' Compensation – Employer's Liability",
-  CUMBR: "Umbrella Liability Limits"
+// Which proposal section each AMS360 line of business fills, in the skill's section order
+// (SKILL.md Section 3). Codes and counts from the postgres peer (2026-10-08, in-force CL terms):
+// CGL 359, CUMBR 230, PROP 225, WORK 178, AUTOB 158, INMRC 141, BOPPR 137, BOPGL 136, BLDRK 58, PL 48,
+// CRIM 43, DO 40, EPLI 34, CYBER 34, ... Anything unlisted (FLODC, SURE, ...) becomes its own "other"
+// section under AMS360's description. Endorsement-style coverages inside a line (Employee Benefits,
+// EPLI or Cyber endorsements on a CGL/BOPGL policy) stay in that line's limits — the skill treats
+// them as part of the line too.
+export const LINE_SLOTS = [
+  "property", "general_liability", "liquor_liability", "inland_marine", "commercial_auto", "workers_comp",
+  "employee_benefits_liability", "umbrella_excess", "directors_officers", "cyber", "epli", "professional_liability",
+  "crime", "other"
+] as const
+
+export type LineSlot = typeof LINE_SLOTS[number]
+
+const LOB_SLOTS: Record<string, LineSlot> = {
+  PROP: "property", BOPPR: "property", CFIRE: "property", SMP: "property", FARM: "property",
+  CGL: "general_liability", BOPGL: "general_liability", GARAG: "general_liability",
+  LL: "liquor_liability",
+  INMRC: "inland_marine", BLDRK: "inland_marine", CONTR: "inland_marine", EDP: "inland_marine", OCMRC: "inland_marine",
+  AUTOB: "commercial_auto",
+  WORK: "workers_comp", ELIAB: "workers_comp",
+  CUMBR: "umbrella_excess",
+  DO: "directors_officers", FIDUC: "directors_officers",
+  CYBER: "cyber",
+  EPLI: "epli",
+  EO: "professional_liability", PL: "professional_liability", PLMSC: "professional_liability", MEDIA: "professional_liability",
+  MEDPR: "professional_liability", MPL: "professional_liability",
+  CRIM: "crime", FIDFG: "crime"
 }
 
-export type CoverageSectionKey = "property" | "liability" | "inlandMarine" | "auto" | "workersComp" | "umbrella" | "other"
-
-// Which part of the document each LOB's limits table sits next to — liability limits right before
-// the GL Exposure schedule, EL limits right before the WC payroll schedule, etc.
-const LOB_SECTION_KEYS: Record<string, CoverageSectionKey> = {
-  PROP: "property", BOPPR: "property",
-  CGL: "liability", BOPGL: "liability",
-  INMRC: "inlandMarine", BLDRK: "inlandMarine", CONTR: "inlandMarine",
-  AUTOB: "auto",
-  WORK: "workersComp",
-  CUMBR: "umbrella"
-}
-
-export type KeyedCoverageSection = CoverageSection & { key: CoverageSectionKey; lob: string }
+// `description` is AMS360's own name for the line (afw_lobsetup), used as the section title for
+// lines without a standard one.
+export type KeyedCoverageSection = CoverageSection & { key: LineSlot; lob: string; description: string }
 
 export type PolicyCoverageData = {
   propertySubjects: PropertySubjectRow[]
   vehicleCoverages: VehicleCoverageRow[]
   hiredNonOwned: HiredNonOwnedRow[]
   sections: KeyedCoverageSection[]
+  // e.g. "7, 8, 9" — empty when AMS360 has no symbol flags for the policy.
+  autoLiabilitySymbols: string
+  wcStates: string[]
   carrierCodes: string[]
 }
 
@@ -354,12 +408,7 @@ function buildLobSections(rows: CoverageQueryRow[], hasVehicleCoverages: boolean
 
     // "OTHER" = a cprem row whose lobid has no afw_lineofbusiness row (seen once in a 60-account sweep).
     const description = clean(lobRows[0].descriptionlobs) || (lob === "OTHER" ? "Other" : lob)
-    sections.push({
-      key: LOB_SECTION_KEYS[lob] ?? "other",
-      lob,
-      title: LOB_SECTION_TITLES[lob] ?? `${ description } Coverages`,
-      rows: out
-    })
+    sections.push({ key: LOB_SLOTS[lob] ?? "other", lob, description, title: description, rows: out })
   }
 
   return { sections, hiredNonOwned: mergeHiredNonOwned(hiredNonOwned) }
@@ -412,7 +461,7 @@ function buildPropertySubjectRows(rows: PropertySubjectQueryRow[]): PropertySubj
     if(list) list.push(r); else bySubject.set(r.soiid, [r])
   }
 
-  type Pending = PropertySubjectRow & { piid: string; perilDeductibles: string[] }
+  type Pending = PropertySubjectRow & { piid: string }
   const pending: Pending[] = []
   const addressPerilDeductibles = new Map<string, string[]>()
   const hasLimit = (r: PropertySubjectQueryRow) => (r.ilimit1 !== null && r.ilimit1 !== 0) || limitPart(null, r.vlimit1) !== ""
@@ -421,6 +470,10 @@ function buildPropertySubjectRows(rows: PropertySubjectQueryRow[]): PropertySubj
     const first = subjectRows[0]
     const subject = clean(first.subofins)
     const address = formatAddress(first.addr1, first.city, first.state, first.zip)
+    const place = { locNo: first.locno ? formatLocNo(first.locno) : "", bldgNo: first.bldgno ? formatLocNo(first.bldgno) : "", address }
+    // AMS360 stores coinsurance as text with inconsistent padding ("080", "80"); "0" means none.
+    const coinsuranceValue = subjectRows.map((r) => Number(clean(r.coinspct))).find((n) => Number.isFinite(n) && n > 0)
+    const coinsurance = coinsuranceValue ? `${ coinsuranceValue }%` : ""
     const valuationText = clean(first.valuation)
     let valuation = VALUATION_LABELS[valuationText] ?? valuationText
 
@@ -438,9 +491,9 @@ function buildPropertySubjectRows(rows: PropertySubjectQueryRow[]): PropertySubj
       } else if(first.isubamt) {
         // No cprem limit but the subject itself carries an amount of insurance.
         pending.push({
-          piid: first.piid, address, subject, limit: money(first.isubamt), valuation,
+          piid: first.piid, ...place, subject, limit: money(first.isubamt), valuation,
           causeOfLoss: subjectRows.map((r) => clean(r.coverage)).find((c) => CAUSE_OF_LOSS_PATTERN.test(c)) ?? "",
-          deductible: formatDeductible(first.deduct, first.dedtype), perilDeductibles: []
+          coinsurance, deductible: formatDeductible(first.deduct, first.dedtype), perilDeductibles: [], isAdditional: false
         })
       }
       continue
@@ -468,19 +521,21 @@ function buildPropertySubjectRows(rows: PropertySubjectQueryRow[]): PropertySubj
     const causeOfLoss = special ?? forms.join("; ")
 
     pending.push({
-      piid: first.piid, address, subject,
+      piid: first.piid, ...place, subject,
       limit: limitPart(main.ilimit1, main.vlimit1),
       valuation,
       causeOfLoss,
+      coinsurance,
       deductible: formatDeductible(main.deduct, main.dedtype),
-      perilDeductibles: perilRows.map((r) => `${ formatDeductible(r.deduct, r.dedtype) } ${ perilLabel(clean(r.coverage)) }`)
+      perilDeductibles: perilRows.map((r) => `${ formatDeductible(r.deduct, r.dedtype) } ${ perilLabel(clean(r.coverage)) }`),
+      isAdditional: false
     })
 
     for(const r of additionalRows) {
       pending.push({
-        piid: first.piid, address, subject: clean(r.coverage),
-        limit: limitPart(r.ilimit1, r.vlimit1), valuation: "", causeOfLoss: "",
-        deductible: formatDeductible(r.deduct, r.dedtype), perilDeductibles: []
+        piid: first.piid, ...place, subject: clean(r.coverage),
+        limit: limitPart(r.ilimit1, r.vlimit1), valuation: "", causeOfLoss: "", coinsurance: "",
+        deductible: formatDeductible(r.deduct, r.dedtype), perilDeductibles: [], isAdditional: true
       })
     }
   }
@@ -494,13 +549,10 @@ function buildPropertySubjectRows(rows: PropertySubjectQueryRow[]): PropertySubj
       seen.add(key)
       return true
     })
-    .map(({ piid, perilDeductibles, ...row }) => {
+    .map(({ piid, ...row }) => {
       // Peril deductibles only ride along on the subject's own row, not its additional coverages.
-      const extras = row.causeOfLoss || perilDeductibles.length > 0
-        ? [...new Set([...perilDeductibles, ...(addressPerilDeductibles.get(piid) ?? [])])]
-        : []
-      const deductible = extras.length === 0 ? row.deductible : `${ row.deductible }${ row.deductible ? " " : "" }(${ extras.join("; ") })`
-      return { ...row, deductible }
+      const perilDeductibles = row.isAdditional ? [] : [...new Set([...row.perilDeductibles, ...(addressPerilDeductibles.get(piid) ?? [])])]
+      return { ...row, perilDeductibles }
     })
 }
 
@@ -550,11 +602,22 @@ function buildVehicleCoverageRows(rows: VehicleCoverageQueryRow[]): VehicleCover
   return [...byVehicle.values()]
 }
 
+type AutoSymbolRow = Record<"isliability1" | "isliability2" | "isliability3" | "isliability4" | "isliability7" | "isliability8" | "isliability9", string | null>
+
+function liabilitySymbols(rows: AutoSymbolRow[]): string {
+  const symbols = [1, 2, 3, 4, 7, 8, 9].filter((n) => rows.some((r) => clean(r[`isliability${ n }` as keyof AutoSymbolRow]) === "Y"))
+  return symbols.join(", ")
+}
+
+// Per policy term — the proposal builds each line's section from its own policy so the section can
+// name that policy's carrier (clProposalLines.ts).
 export async function fetchPolicyCoverageData(polid: string): Promise<PolicyCoverageData> {
-  const [coverageRows, propertyRows, vehicleRows] = await Promise.all([
+  const [coverageRows, propertyRows, vehicleRows, symbolRows, stateRows] = await Promise.all([
     runReadOnlyQuery(COVERAGE_QUERY, [polid]) as Promise<CoverageQueryRow[]>,
     runReadOnlyQuery(PROPERTY_SUBJECT_QUERY, [polid]) as Promise<PropertySubjectQueryRow[]>,
-    runReadOnlyQuery(VEHICLE_COVERAGE_QUERY, [polid]) as Promise<VehicleCoverageQueryRow[]>
+    runReadOnlyQuery(VEHICLE_COVERAGE_QUERY, [polid]) as Promise<VehicleCoverageQueryRow[]>,
+    runReadOnlyQuery(AUTO_SYMBOL_QUERY, [polid]) as Promise<AutoSymbolRow[]>,
+    runReadOnlyQuery(WC_STATES_QUERY, [polid]) as Promise<{ state: string }[]>
   ])
 
   const vehicleCoverages = buildVehicleCoverageRows(vehicleRows)
@@ -567,25 +630,10 @@ export async function fetchPolicyCoverageData(polid: string): Promise<PolicyCove
     ...hiredNonOwned.map((h) => h.coverage)
   ].filter(isCarrierCode)
 
-  return { propertySubjects, vehicleCoverages, hiredNonOwned, sections, carrierCodes: [...new Set(carrierCodes)] }
-}
-
-// Combines several policies' coverage data into one document's worth — sections for the same line
-// of business (rare: two separate CGL policies) merge under one title rather than repeating it.
-export function combineCoverageData(perPolicy: PolicyCoverageData[]): PolicyCoverageData {
-  const sectionsByTitle = new Map<string, KeyedCoverageSection>()
-
-  for(const section of perPolicy.flatMap((p) => p.sections)) {
-    const existing = sectionsByTitle.get(section.title)
-    if(existing) existing.rows = mergeRows([...existing.rows, ...section.rows])
-    else sectionsByTitle.set(section.title, { ...section, rows: [...section.rows] })
-  }
-
   return {
-    propertySubjects: perPolicy.flatMap((p) => p.propertySubjects),
-    vehicleCoverages: perPolicy.flatMap((p) => p.vehicleCoverages),
-    hiredNonOwned: mergeHiredNonOwned(perPolicy.flatMap((p) => p.hiredNonOwned)),
-    sections: [...sectionsByTitle.values()],
-    carrierCodes: [...new Set(perPolicy.flatMap((p) => p.carrierCodes))]
+    propertySubjects, vehicleCoverages, hiredNonOwned, sections,
+    autoLiabilitySymbols: liabilitySymbols(symbolRows),
+    wcStates: stateRows.map((r) => clean(r.state)).filter(Boolean),
+    carrierCodes: [...new Set(carrierCodes)]
   }
 }

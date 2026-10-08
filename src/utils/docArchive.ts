@@ -30,6 +30,12 @@ export type DocArchiveEntry = {
   // a document (scripts/dailyClRenewalSummaries.ts). Optional: entries archived before 2026-10-01
   // don't carry it (alreadyArchivedPolids falls back to the filename/polno label for those).
   polids?: string[]
+  // CL Renewal Summary only: whether every term's renewal was in AMS360 when the document was built
+  // ("renewal") or some line still showed the expiring term ("current") — the daily job rebuilds a
+  // "current" document once the renewal lands. Absent on documents built before 2026-10-08.
+  built_from?: "current" | "renewal"
+  // CL Renewal Summary only: the current-term polids whose renewal term the document printed.
+  renewal_polids?: string[]
 }
 
 export function createDocArchive<Entry extends DocArchiveEntry = DocArchiveEntry>(subdir: string) {

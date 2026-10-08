@@ -9,20 +9,18 @@ import { generateClRenewalSummary } from "../../utils/clRenewalSummaryGenerate.j
 
 const DOCX_MIME_TYPE = "application/vnd.openxmlformats-officedocument.wordprocessingml.document"
 
-// CL Renewal Summary (roadmap item #4) — the Pre-Renewal Risk Profile's document (risk_profile)
-// plus coverage limits per line of business. Patrick (9/11/2026): "Pre Renewal Risk Profile- only
-// exposures and building limits, veh, driver etc. CL Renewal Summary- incl all that plus coverage
-// limits for liability etc. data pulled from MCP." Policy resolution, combining, and every exposure
-// schedule are shared with risk_profile (utils/clPolicyData.ts), so the two documents always agree
-// on which terms they cover; the limits come from utils/clCoverageData.ts. The build+archive step
-// lives in utils/clRenewalSummaryGenerate.ts, shared with scripts/dailyClRenewalSummaries.ts. Scope decisions confirmed
-// with Andrew 2026-09-22: no premiums, per-vehicle auto coverages, umbrella limits only (no schedule
-// of underlying policies), and the blank Renewal Exposure/Payroll meeting columns kept.
+// CL Renewal Summary (roadmap item #4) — since 2026-10-08 a Commercial Insurance Proposal in the
+// layout of Patrick's insurance-proposal skill, filled from AMS360 (his email "FW: TN Equine",
+// 2026-10-07: "This is what we would want to pull from the Renewal Summary Tool for commercial
+// lines. DO NOT have to have the premium summary page"). Policy resolution and combining are shared
+// with risk_profile (utils/clPolicyData.ts), so the two documents always agree on which terms they
+// cover. The build+archive step lives in utils/clRenewalSummaryGenerate.ts, shared with
+// scripts/dailyClRenewalSummaries.ts.
 export function registerClRenewalSummaryTool(server: McpServer) {
   server.registerTool(
     "cl_renewal_summary",
     {
-      description: "Builds a branded \"Renewal Summary\" Word document (.docx) for one or more commercial-lines policies — everything in risk_profile's Pre-Renewal Review (Named Insureds, Locations, Property, General Liability Exposure, Equipment, Vehicles, Drivers, Workers' Comp Exposure) PLUS the current coverage limits and deductibles per line of business: General Liability limits (Each Occurrence, General Aggregate, Products/Completed Ops, etc.), Property one row per subject of insurance (Limit / Valuation / Cause of Loss / Deductible, wind/hail deductibles inline), per-vehicle auto coverages (liability, med pay, UM/UIM, comp/collision deductibles) plus hired & non-owned auto, Workers' Comp Employer's Liability limits, Umbrella limits (occurrence / aggregate / retention — no schedule of underlying policies), Inland Marine and any other line's limits. NO premiums — those are renewal_premium_summary's job. Use this instead of risk_profile whenever coverage limits are wanted; use risk_profile for the exposures-only version. Same inputs and policy resolution as risk_profile: pass customer_name, polno, and/or custid (customer_name matches only customers with current commercial policies, so a client's separate employee-benefits account with a similar name is never a competing match — no need to call customer_lookup first); commercial lines only (typeofbus=2); resolves to the customer's current in-force term(s) by poleffdate/polexpdate; several current policies for the SAME customer combine into one document (up to 12), with a cover-page policy summary table; matches across DIFFERENT customers are treated as ambiguous and no document is built. Sections with no data are omitted. The General Liability and Workers' Comp exposure tables keep their intentionally blank \"Renewal Exposure\"/\"Renewal Payroll\" meeting columns — never populate these. Some carriers record coverages under a bare internal code (e.g. \"WTRBN\") with no description available anywhere in AMS360; those lines are kept as-is in the document and listed back in unresolved_coverage_codes so the CSR can relabel them. A 24-hour download link is always returned — there is no email-sending here. Every generated document is also archived to scripts/output/cl-renewal-summary/ with a manifest.json entry (same shape as risk_profile's) backing the CSR-grouped Renewal Summary index — one archived file per policy (polid), or per exact combined policy set, regenerating overwrites its own prior copy.",
+      description: "Builds the commercial-lines Renewal Summary: a branded Word document (.docx) in Boxwood's Commercial Insurance Proposal layout for one or more commercial policies, filled from AMS360. Cover page (client, mailing address, policy period, Prepared By = producer), Executive Summary with Named Insureds and Location Schedule, then one section per line of business naming that policy's carrier: Property (causes of loss, coinsurance, valuation, deductibles incl. wind/hail; limits by location/building — Building / BPP / Business Income; additional property coverages), General Liability (standard limits, other GL-line coverages, classification & exposure schedule), Inland Marine (limits, scheduled equipment), Commercial Auto (liability symbols, coverages at the value most vehicles carry with exceptions noted, hired/non-owned, vehicle schedule with VIN last 4, drivers), Workers' Compensation (Employers Liability limits, states, class/payroll), Umbrella (occurrence/aggregate/retention plus an underlying coverage schedule), and any other line (Crime, Cyber, D&O, EPLI, E&O...). Closes with Why Boxwood and the service team (producer, account manager, agency). NO premiums anywhere — those are renewal_premium_summary's job. When AMS360 already has a policy's renewal term, that term is printed; otherwise the current term is, the cover says renewal terms are pending, and those policies are listed back in renewal_pending_polnos (the daily job rebuilds the document once the renewal lands). Renewal quote PDFs uploaded on the dashboard add carrier ratings, highlights, exclusions and bind conditions, each flagged with a Word comment for the CSR to verify. Same inputs and policy resolution as risk_profile: pass customer_name, polno, and/or custid (customer_name matches only customers with current commercial policies, so a client's separate employee-benefits account with a similar name is never a competing match — no need to call customer_lookup first); commercial lines only (typeofbus=2); several current policies for the SAME customer combine into one document (up to 12); matches across DIFFERENT customers are treated as ambiguous and no document is built. Sections with no data are omitted. Some carriers record coverages under a bare internal code (e.g. \"WTRBN\") with no description anywhere in AMS360; those lines are kept as-is and listed back in unresolved_coverage_codes so the CSR can relabel them. A 24-hour download link is always returned — there is no email-sending here. Every generated document is also archived to scripts/output/cl-renewal-summary/ with a manifest.json entry backing the CSR-grouped Renewal Summary index — one archived file per policy (polid), or per exact combined policy set; regenerating overwrites its own prior copy.",
       inputSchema: {
         polno: z.string().describe("Partial match against policy number or short policy number — narrows to one customer's current, in-force commercial policy/policies (combine with custid to disambiguate if needed). Matching more than one policy for the same customer combines them into one document; matching across different customers is treated as ambiguous.").optional(),
         custid: z.string().uuid().describe("Filter to a specific customer's current commercial policy/policies — with no polno, that customer's current commercial policies renewing within renewal_within_days (default 90) are combined into one document").optional(),
@@ -38,7 +36,7 @@ export function registerClRenewalSummaryTool(server: McpServer) {
         if(resolution.kind === "ambiguous") return textResult(resolution.payload)
 
         const { matches, primaryPolicy, clientName } = resolution
-        const { buffer, filename, includedSections, combining, polnoLabel, carrierCodes } = await generateClRenewalSummary(matches, clientName)
+        const { buffer, filename, includedSections, combining, polnoLabel, carrierCodes, renewalPendingPolnos } = await generateClRenewalSummary(matches, clientName)
         const token = storeDownload(buffer, filename, DOCX_MIME_TYPE)
         const downloadUrl = `${ publicBaseUrl }/downloads/${ token }`
 
@@ -48,6 +46,7 @@ export function registerClRenewalSummaryTool(server: McpServer) {
             : `Built the Renewal Summary for ${ clientName } (policy ${ primaryPolicy.polno }) — ${ includedSections.length } section(s) included: ${ includedSections.join(", ") }.`,
           download_url: downloadUrl,
           included_sections: includedSections,
+          ...(renewalPendingPolnos.length > 0 ? { renewal_pending_polnos: renewalPendingPolnos } : {}),
           ...(carrierCodes.length > 0 ? { unresolved_coverage_codes: carrierCodes } : {})
         })
       } catch(error) {

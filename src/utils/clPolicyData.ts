@@ -225,7 +225,7 @@ const PROPERTY_QUERY = `
 // external list). Client-reported 2026-09-15, Defatta Custom Homes LLC.
 const GL_EXPOSURE_QUERY = `
   SELECT t.classcode, t.classification, t.prembasis, t.exposure,
-    loc.addr1, loc.city, loc.state, loc.zip, gcc.description AS gl_description
+    loc.locno, loc.addr1, loc.city, loc.state, loc.zip, gcc.description AS gl_description
   FROM (
     SELECT t.clocid, t.classcode, t.classification, t.prembasis, t.exposure, t.status,
       ROW_NUMBER() OVER (PARTITION BY t.polid, t.lobid, t.shazid ORDER BY t.effdate DESC) AS rn
@@ -233,7 +233,7 @@ const GL_EXPOSURE_QUERY = `
     WHERE t.polid = $1
   ) t
   LEFT JOIN LATERAL (
-    SELECT c.addr1, c.city, c.state, c.zip
+    SELECT c.locno, c.addr1, c.city, c.state, c.zip
     FROM afw_clocation c
     WHERE c.polid = $1 AND c.clocid = t.clocid AND c.status != 'D'
     ORDER BY c.effdate DESC LIMIT 1
@@ -379,7 +379,7 @@ export function formatZip(zip: string | null): string {
 // followed by another digit, so a bare "0" (if that ever occurs) is left alone rather than emptied,
 // and a non-numeric locno (never seen in practice, but not guaranteed by the column's type) passes
 // through unchanged since it won't start with "0<digit>" anyway.
-function formatLocNo(locno: string): string {
+export function formatLocNo(locno: string): string {
   return locno.trim().replace(/^0+(?=\d)/, "")
 }
 
@@ -568,7 +568,7 @@ export async function fetchPolicyData(policy: ResolvedPolicy): Promise<PolicyDat
     runReadOnlyQuery(NAMED_INSUREDS_QUERY, [policy.polid]) as Promise<{ namedins: string }[]>,
     runReadOnlyQuery(LOCATIONS_QUERY, [policy.polid]) as Promise<{ locno: string; addr1: string | null; addr2: string | null; city: string | null; state: string | null; zip: string | null }[]>,
     runReadOnlyQuery(PROPERTY_QUERY, [policy.polid]) as Promise<PropertyQueryRow[]>,
-    runReadOnlyQuery(GL_EXPOSURE_QUERY, [policy.polid]) as Promise<{ classcode: string | null; classification: string | null; prembasis: string | null; exposure: string | null; addr1: string | null; city: string | null; state: string | null; zip: string | null; gl_description: string | null }[]>,
+    runReadOnlyQuery(GL_EXPOSURE_QUERY, [policy.polid]) as Promise<{ classcode: string | null; classification: string | null; prembasis: string | null; exposure: string | null; locno: string | null; addr1: string | null; city: string | null; state: string | null; zip: string | null; gl_description: string | null }[]>,
     runReadOnlyQuery(EQUIPMENT_BLANKET_QUERY, [policy.polid]) as Promise<{ category: string | null; totalitems: string | null; amtofins: string | null; schedule_description: string | null; addr1: string | null; city: string | null; state: string | null; zip: string | null; coverage: string | null; deduct: number | null }[]>,
     runReadOnlyQuery(EQUIPMENT_ITEMS_QUERY, [policy.polid]) as Promise<{ equipno: string | null; manufacturer: string | null; model: string | null; equipdesc: string | null; serialno: string | null; iinsamt: number | null }[]>,
     runReadOnlyQuery(VEHICLES_QUERY, [policy.polid]) as Promise<{ vehno: string | null; vehyear: string | null; make: string | null; model: string | null; vin: string | null }[]>,
@@ -587,6 +587,7 @@ export async function fetchPolicyData(policy: ResolvedPolicy): Promise<PolicyDat
     })),
     property: buildPropertyRows(propertyRows),
     glExposure: glRows.map((g) => ({
+      locNo: g.locno ? formatLocNo(g.locno) : "",
       location: formatAddress(g.addr1, g.city, g.state, g.zip),
       classCode: clean(g.classcode),
       classification: clean(g.gl_description) || clean(g.classification),

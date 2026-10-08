@@ -1,7 +1,7 @@
 import { readFileSync } from "node:fs"
 import path from "node:path"
 import {
-  AlignmentType, BorderStyle, CommentRangeEnd, CommentRangeStart, CommentReference, Document, HeadingLevel,
+  AlignmentType, BorderStyle, Document, HeadingLevel,
   ImageRun, Packer, PageBreak, Paragraph, ShadingType, Table, TableCell, TableLayoutType, TableRow, TextRun,
   VerticalAlign, WidthType
 } from "docx"
@@ -228,22 +228,6 @@ function h1(text: string): Paragraph {
 // and handed to renderDocument, which registers them on the Document.
 export type DocComment = { id: number; text: string }
 
-function commentedH1(text: string, comment: DocComment): Paragraph {
-  return new Paragraph({
-    heading: HeadingLevel.HEADING_1,
-    children: [
-      new CommentRangeStart(comment.id),
-      new TextRun(text),
-      new CommentRangeEnd(comment.id),
-      new TextRun({ children: [new CommentReference(comment.id)] })
-    ]
-  })
-}
-
-function bulletParagraph(text: string): Paragraph {
-  return new Paragraph({ indent: { left: 560, hanging: 280 }, spacing: { before: 30, after: 30 }, children: [new TextRun(`•\t${ text }`)] })
-}
-
 function h2(text: string): Paragraph {
   return new Paragraph({ heading: HeadingLevel.HEADING_2, children: [new TextRun(text)] })
 }
@@ -329,7 +313,8 @@ export type LocationRow = { locNo: string; address: string; city: string; state:
 // `description` is always blank — a free-text field for staff to annotate by hand during the renewal
 // meeting, matching the client's own reference layout; the tool has nothing to put there.
 export type PropertyRow = { address: string; buildingLimit: string; bppLimit: string; causesOfLossForm: string; deductible: string; description: string }
-export type GlExposureRow = { location: string; classCode: string; classification: string; basis: string; exposure: string }
+// locNo is only shown by the CL Renewal Summary's classification schedule (clProposalLines.ts).
+export type GlExposureRow = { locNo?: string; location: string; classCode: string; classification: string; basis: string; exposure: string }
 // Field set/order matches the client's own reference layout (client feedback, 2026-09-15): Covered
 // Location and Coverage/Deductible come from a separate join (afw_146locations/afw_clocation and
 // afw_cprem respectively — see EQUIPMENT_BLANKET_QUERY's comment), not columns on
@@ -614,144 +599,4 @@ export async function buildRiskProfileDoc(input: RiskProfileInput): Promise<{ bu
     { name: "Driver Information Schedule", section: driversSection(input.drivers) },
     { name: "Workers' Compensation Exposure", section: wcSection(input.wcExposure) }
   ])
-}
-
-// ---------- CL RENEWAL SUMMARY (exposures + coverage limits) ----------
-// Same document as the Pre-Renewal Review above, plus a limits table next to each line of
-// business's exposure schedule. See clCoverageData.ts for where each limit comes from in AMS360.
-
-export type CoverageLimitRow = { coverage: string; limit: string; deductible: string }
-// keyFacts/bulletGroups/comment are only set on a section built from an uploaded quote
-// (clQuoteMerge.ts) — AMS360 data never carries carrier ratings, enhancements, or bind conditions.
-export type CoverageSection = {
-  title: string
-  rows: CoverageLimitRow[]
-  keyFacts?: [string, string][]
-  bulletGroups?: { title: string; items: string[] }[]
-  comment?: string
-}
-// One row per subject of insurance (not per address, unlike the Risk Profile's PropertyRow) —
-// matches the AMS360 proposal-builder layout the client's own staff produce (Sarah Schultz's
-// Defatta version, 9/14/2026). A peril deductible (wind/hail) rides along in `deductible`, e.g.
-// "$1,000 ($100,000 Wind/Hail)", the same way that reference document shows it.
-export type PropertySubjectRow = { address: string; subject: string; limit: string; valuation: string; causeOfLoss: string; deductible: string }
-// Keyed by vehNo so it lines up with the Vehicle List above it; `values` keys are the column keys
-// passed alongside in RenewalSummaryInput.vehicleCoverageColumns.
-export type VehicleCoverageRow = { vehNo: string; description: string; values: Record<string, string> }
-export type HiredNonOwnedRow = { exposure: string; coverage: string; limit: string; deductible: string }
-
-export type CoverageSectionSlot = "property" | "liability" | "inlandMarine" | "auto" | "workersComp" | "umbrella" | "other"
-
-export type RenewalSummaryInput = Omit<RiskProfileInput, "property"> & {
-  propertySubjects: PropertySubjectRow[]
-  vehicleCoverages: VehicleCoverageRow[]
-  // Only the columns that have a value on at least one vehicle, in display order.
-  vehicleCoverageColumns: { key: string; label: string }[]
-  hiredNonOwned: HiredNonOwnedRow[]
-  coverageSections: (CoverageSection & { key: CoverageSectionSlot })[]
-}
-
-function propertySubjectSection(rows: PropertySubjectRow[]): DocSection | null {
-  if(rows.length === 0) return null
-
-  const headers = ["Address", "Subject of Insurance", "Limit", "Valuation", "Cause of Loss", "Deductible"]
-  const tableRows = rows.map((p) => [p.address, p.subject, p.limit, p.valuation, p.causeOfLoss, p.deductible])
-
-  return {
-    height: H1_HEIGHT + estimateTableHeight(headers, tableRows),
-    blocks: [h1("Property Coverage"), buildTable(headers, tableRows)]
-  }
-}
-
-// Deductible column only when at least one row has one — most liability limits tables never do.
-function coverageSection(section: CoverageSection, comments: DocComment[]): DocSection | null {
-  const keyFacts = section.keyFacts ?? []
-  const bulletGroups = (section.bulletGroups ?? []).filter((g) => g.items.length > 0)
-  if(section.rows.length === 0 && keyFacts.length === 0 && bulletGroups.length === 0) return null
-
-  let heading = h1(section.title)
-
-  if(section.comment) {
-    const comment = { id: comments.length, text: section.comment }
-    comments.push(comment)
-    heading = commentedH1(section.title, comment)
-  }
-
-  const blocks: (Paragraph | Table)[] = [heading]
-  let height = H1_HEIGHT
-
-  if(keyFacts.length > 0) {
-    blocks.push(fieldValueTable(keyFacts))
-    height += estimateTableHeight(["Field", "Value"], keyFacts)
-  }
-
-  if(section.rows.length > 0) {
-    const withDeductible = section.rows.some((r) => r.deductible !== "")
-    const headers = withDeductible ? ["Coverage", "Limit", "Deductible"] : ["Coverage", "Limit"]
-    const tableRows = section.rows.map((r) => withDeductible ? [r.coverage, r.limit, r.deductible] : [r.coverage, r.limit])
-    blocks.push(buildTable(headers, tableRows))
-    height += estimateTableHeight(headers, tableRows)
-  }
-
-  for(const group of bulletGroups) {
-    blocks.push(h2(group.title), ...group.items.map(bulletParagraph))
-    height += H2_HEIGHT + group.items.reduce((sum, item) => sum + estimateCellLines(item, 8800) * BODY_LINE_HEIGHT, 0)
-  }
-
-  return { height, blocks }
-}
-
-// A separate table keyed by Veh # rather than extra columns on the Vehicle List — the VIN column
-// plus five or more coverage columns doesn't fit portrait Letter at this font size.
-function vehicleCoverageSection(rows: VehicleCoverageRow[], columns: { key: string; label: string }[]): DocSection | null {
-  if(rows.length === 0 || columns.length === 0) return null
-
-  const headers = ["Veh #", "Vehicle", ...columns.map((c) => c.label)]
-  const tableRows = rows.map((v) => [v.vehNo, v.description, ...columns.map((c) => v.values[c.key] ?? "")])
-
-  return {
-    height: H1_HEIGHT + estimateTableHeight(headers, tableRows),
-    blocks: [h1("Vehicle Coverages"), buildTable(headers, tableRows)]
-  }
-}
-
-function hiredNonOwnedSection(rows: HiredNonOwnedRow[]): DocSection | null {
-  if(rows.length === 0) return null
-
-  const withDeductible = rows.some((r) => r.deductible !== "")
-  const headers = withDeductible ? ["Exposure", "Coverage", "Limit", "Deductible"] : ["Exposure", "Coverage", "Limit"]
-  const tableRows = rows.map((r) => withDeductible ? [r.exposure, r.coverage, r.limit, r.deductible] : [r.exposure, r.coverage, r.limit])
-
-  return {
-    height: H1_HEIGHT + estimateTableHeight(headers, tableRows),
-    blocks: [h1("Hired & Non-Owned Auto"), buildTable(headers, tableRows)]
-  }
-}
-
-export async function buildRenewalSummaryDoc(input: RenewalSummaryInput): Promise<{ buffer: Buffer; includedSections: string[] }> {
-  // Filled in document order as each commented section is built (slot() runs eagerly below).
-  const comments: DocComment[] = []
-  const slot = (key: CoverageSectionSlot) => input.coverageSections
-    .filter((s) => s.key === key)
-    .map((s) => ({ name: s.title, section: coverageSection(s, comments) }))
-
-  return renderDocument("RENEWAL SUMMARY", input, [
-    { name: "Named Insureds", section: namedInsuredsSection(input.clientName, input.additionalNamedInsureds) },
-    { name: "Locations Schedule", section: locationsSection(input.locations) },
-    { name: "Property Coverage", section: propertySubjectSection(input.propertySubjects) },
-    ...slot("property"),
-    ...slot("liability"),
-    { name: "General Liability Exposure", section: glSection(input.glExposure) },
-    ...slot("inlandMarine"),
-    { name: "Equipment List & Value", section: equipmentSection(input.equipmentBlanket, input.equipmentItems) },
-    { name: "Vehicle List", section: vehiclesSection(input.vehicles) },
-    { name: "Vehicle Coverages", section: vehicleCoverageSection(input.vehicleCoverages, input.vehicleCoverageColumns) },
-    { name: "Hired & Non-Owned Auto", section: hiredNonOwnedSection(input.hiredNonOwned) },
-    ...slot("auto"),
-    { name: "Driver Information Schedule", section: driversSection(input.drivers) },
-    ...slot("workersComp"),
-    { name: "Workers' Compensation Exposure", section: wcSection(input.wcExposure) },
-    ...slot("umbrella"),
-    ...slot("other")
-  ], comments)
 }

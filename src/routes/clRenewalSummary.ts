@@ -170,7 +170,10 @@ router.post(
     }
 
     const pdf = req.body
-    if(!Buffer.isBuffer(pdf) || pdf.length === 0 || pdf.subarray(0, 5).toString("latin1") !== "%PDF-") {
+    // The PDF header can sit a little way in: American Modern's portal download starts with a 22-byte
+    // wrapper before "%PDF-" (quoteExtraction.ts strips it before sending).
+    const headerAt = Buffer.isBuffer(pdf) ? pdf.indexOf("%PDF-") : -1
+    if(headerAt === -1 || headerAt > 1024) {
       res.status(400).json({ error: "invalid_pdf", error_description: "Upload a PDF file." })
       return
     }
