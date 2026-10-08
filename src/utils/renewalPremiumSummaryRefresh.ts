@@ -61,7 +61,7 @@ function combineSum(values: (number | null)[]): number | null {
 // OneDrive): cells are read and written straight from the package XML (xlsxCellPatch.ts) — no
 // ExcelJS load/re-serialize — so only the changed cells differ, and notes, comments, and anything
 // else in the package are carried over untouched. Nothing is written at all when there's nothing to change. Called by the index page's
-// Refresh button and by scripts/weeklyRenewalPremiumSummaryRefresh.ts.
+// Refresh button and by scripts/dailyRenewalPremiumSummaryRefresh.ts.
 export async function refreshRenewalPremiumSummary(filename: string, options: RefreshRenewalPremiumSummaryOptions = {}): Promise<RenewalPremiumSummaryRefreshResult> {
   const dryRun = options.dryRun ?? false
   const manifest = readManifest()

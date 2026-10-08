@@ -1,4 +1,4 @@
-// Weekly touch-up of every archived commercial Renewal Premium Summary workbook
+// Weekday touch-up of every archived commercial Renewal Premium Summary workbook
 // (scripts/output/cl-renewal-premium-summaries/, built monthly by monthlyRenewalPremiumSummaries.ts).
 // Walks the manifest and runs the same Refresh the index page's button does
 // (refreshRenewalPremiumSummary, src/utils/renewalPremiumSummaryRefresh.ts) against each one: fills a
@@ -10,7 +10,7 @@
 // No email — per direction to back off automated email except the download-report job; the log is
 // the record of what changed.
 //
-// Usage: npx tsx scripts/weeklyRenewalPremiumSummaryRefresh.ts [--dry-run]
+// Usage: npx tsx scripts/dailyRenewalPremiumSummaryRefresh.ts [--dry-run]
 //   --dry-run  reports what would change without writing any workbook or the manifest.
 
 import "dotenv/config"
@@ -19,7 +19,7 @@ import path from "node:path"
 import { RENEWAL_PREMIUM_SUMMARY_OUTPUT_DIR, readManifest } from "../src/utils/renewalPremiumSummaryArchive.js"
 import { refreshRenewalPremiumSummary } from "../src/utils/renewalPremiumSummaryRefresh.js"
 
-const LOG_PREFIX = "[weeklyRenewalPremiumSummaryRefresh]"
+const LOG_PREFIX = "[dailyRenewalPremiumSummaryRefresh]"
 
 function todayLocal(): string {
   return new Intl.DateTimeFormat("en-CA", { timeZone: "America/Chicago", year: "numeric", month: "2-digit", day: "2-digit" }).format(new Date())
