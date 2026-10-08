@@ -1,8 +1,8 @@
 import { readFileSync } from "node:fs"
 import path from "node:path"
 import {
-  AlignmentType, BorderStyle, CommentRangeEnd, CommentRangeStart, CommentReference, Document, ImageRun, LevelFormat,
-  Packer, PageBreak, Paragraph, ShadingType, Table, TableCell, TableLayoutType, TableRow, TextRun, VerticalAlign, WidthType
+  AlignmentType, BorderStyle, CommentRangeEnd, CommentRangeStart, CommentReference, Document, Footer, ImageRun, LevelFormat,
+  Packer, PageBreak, Paragraph, SectionType, ShadingType, Table, TableCell, TableLayoutType, TableRow, TextRun, VerticalAlign, WidthType
 } from "docx"
 import type { LocationRow } from "./riskProfileDoc.js"
 
@@ -414,8 +414,7 @@ function bindConditions(input: ClProposalInput, comments: DocComment[]): Block[]
   return [
     pageBreak(),
     ...banner("Bind Conditions & Notes", { withLogo: true, comment: register(comments, input.bindConditions.comment) }),
-    ...input.bindConditions.items.map(bullet),
-    pageBreak()
+    ...input.bindConditions.items.map(bullet)
   ]
 }
 
@@ -428,6 +427,8 @@ function specialtyAddOn(addOn: ProposalSpecialtyAddOn, comments: DocComment[]): 
   ]
 }
 
+// Patrick (2026-10-08): Why Boxwood always closes the document on a page by itself. It gets its own
+// section (so it starts a new page) and that section alone carries footerStrip as its page footer.
 function whyBoxwood(input: ClProposalInput): Block[] {
   return [
     ...banner("Why Boxwood Insurance Group", { withLogo: true }),
@@ -441,9 +442,10 @@ function whyBoxwood(input: ClProposalInput): Block[] {
   ]
 }
 
-function footerStrip(): Block[] {
+// A real page footer rather than body text, so it sits at the bottom of the last page and can't split across pages.
+function footerStrip(): Paragraph[] {
   return [
-    new Paragraph({ alignment: AlignmentType.CENTER, spacing: { before: 480, after: 80 }, children: [new ImageRun({ type: "png", data: readFileSync(PROPOSAL_LOGO_PATH), transformation: { width: 1905000 / 9525, height: 552450 / 9525 } })] }),
+    new Paragraph({ alignment: AlignmentType.CENTER, spacing: { after: 80 }, children: [new ImageRun({ type: "png", data: readFileSync(PROPOSAL_LOGO_PATH), transformation: { width: 1905000 / 9525, height: 552450 / 9525 } })] }),
     centered([run(`${ AGENCY.website } | ${ AGENCY.address } | ${ AGENCY.phone }`, { color: MUTED, size: 18 })]),
     centered([run(DISCLAIMER, { italics: true, color: FAINT, size: 16 })], { before: 60 })
   ]
@@ -454,6 +456,11 @@ export async function buildClProposalDoc(input: ClProposalInput): Promise<{ buff
   const lineBlocks = input.lines.flatMap((line) => lineSection(line, comments))
   const bindBlocks = bindConditions(input, comments)
   const addOnBlocks = input.specialtyAddOns.flatMap((addOn) => specialtyAddOn(addOn, comments))
+
+  const pageProperties = {
+    size: { width: PAGE_WIDTH, height: 15840 },
+    margin: { top: MARGIN, right: MARGIN, bottom: MARGIN, left: MARGIN, footer: MARGIN / 2 }
+  }
 
   const doc = new Document({
     comments: {
@@ -472,22 +479,20 @@ export async function buildClProposalDoc(input: ClProposalInput): Promise<{ buff
       }]
     },
     sections: [{
-      properties: {
-        page: {
-          size: { width: PAGE_WIDTH, height: 15840 },
-          margin: { top: MARGIN, right: MARGIN, bottom: MARGIN, left: MARGIN }
-        }
-      },
+      properties: { page: pageProperties },
       children: [
         ...coverPage(input),
         ...executiveSummary(input),
         ...lineBlocks,
-        // Add-ons and Why Boxwood flow on from whatever precedes them (skill: no forced break).
         ...bindBlocks,
-        ...addOnBlocks,
-        ...whyBoxwood(input),
-        ...footerStrip()
+        // Add-ons flow on from whatever precedes them (skill: no forced break), except Bind Conditions keeps its page alone.
+        ...(bindBlocks.length > 0 && addOnBlocks.length > 0 ? [pageBreak()] : []),
+        ...addOnBlocks
       ]
+    }, {
+      properties: { type: SectionType.NEXT_PAGE, page: pageProperties },
+      footers: { default: new Footer({ children: footerStrip() }) },
+      children: whyBoxwood(input)
     }]
   })
 
