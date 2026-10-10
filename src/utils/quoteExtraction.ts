@@ -110,25 +110,39 @@ function normalizedPdf(pdf: Buffer): Buffer {
   return start === 0 ? pdf : pdf.subarray(start)
 }
 
-const TOO_LONG = "This quote has more detail than can be read in one pass — upload the lines as separate PDFs."
-
 // Streamed with a 64K output budget: a full carrier proposal (Cincinnati's 53-page TN Equine quote)
 // plus high-effort thinking overran the previous 16K cap mid-JSON. Streaming is what lets max_tokens
 // go that high without an HTTP timeout. When the structured output can't be parsed, the partial
 // message's stop reason still says whether it was cut short.
 export async function extractQuote(pdf: Buffer, filename: string): Promise<QuoteExtraction> {
+  return readPdfStructured(pdf, filename, {
+    schema: QuoteExtractionSchema,
+    system: SYSTEM_PROMPT,
+    instruction: "Extract every coverage line in this quote.",
+    noun: "quote"
+  })
+}
+
+// One structured read of a PDF — shared with the Proposal Builder's AMS360 proposal reader
+// (amsProposalExtraction.ts). `noun` names the document in the errors staff see.
+export async function readPdfStructured<T extends z.ZodType>(
+  pdf: Buffer, filename: string, { schema, system, instruction, noun }: { schema: T; system: string; instruction: string; noun: string }
+): Promise<z.infer<T>> {
+  const tooLong = `This ${ noun } has more detail than can be read in one pass — upload the lines as separate PDFs.`
+  const unparsed = `The ${ noun } was read but the result couldn't be parsed — try uploading it again.`
+
   const stream = anthropic().beta.messages.stream({
     model: MODEL,
     max_tokens: 64000,
     betas: ["server-side-fallback-2026-07-01"],
     fallbacks: "default",
-    output_config: { effort: "high", format: betaZodOutputFormat(QuoteExtractionSchema) },
-    system: SYSTEM_PROMPT,
+    output_config: { effort: "high", format: betaZodOutputFormat(schema) },
+    system,
     messages: [{
       role: "user",
       content: [
         { type: "document", source: { type: "base64", media_type: "application/pdf", data: normalizedPdf(pdf).toString("base64") }, title: filename },
-        { type: "text", text: "Extract every coverage line in this quote." }
+        { type: "text", text: instruction }
       ]
     }]
   })
@@ -138,19 +152,17 @@ export async function extractQuote(pdf: Buffer, filename: string): Promise<Quote
     response = await stream.finalMessage()
   } catch(error) {
     if(error instanceof Anthropic.APIError) throw error
-    if(stream.currentMessage?.stop_reason === "max_tokens") throw new QuoteExtractionError(TOO_LONG)
-    throw new QuoteExtractionError("The quote was read but the result couldn't be parsed — try uploading it again.")
+    if(stream.currentMessage?.stop_reason === "max_tokens") throw new QuoteExtractionError(tooLong)
+    throw new QuoteExtractionError(unparsed)
   }
 
   if(response.stop_reason === "refusal") {
-    throw new QuoteExtractionError("The quote couldn't be read (the request was declined). Try a different copy of the PDF.")
+    throw new QuoteExtractionError(`The ${ noun } couldn't be read (the request was declined). Try a different copy of the file.`)
   }
 
-  if(response.stop_reason === "max_tokens") throw new QuoteExtractionError(TOO_LONG)
+  if(response.stop_reason === "max_tokens") throw new QuoteExtractionError(tooLong)
 
-  if(!response.parsed_output) {
-    throw new QuoteExtractionError("The quote was read but the result couldn't be parsed — try uploading it again.")
-  }
+  if(!response.parsed_output) throw new QuoteExtractionError(unparsed)
 
-  return response.parsed_output
+  return response.parsed_output as z.infer<T>
 }

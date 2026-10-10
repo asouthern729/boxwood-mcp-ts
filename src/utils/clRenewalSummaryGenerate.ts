@@ -85,7 +85,7 @@ function mostCommon(values: string[]): string {
 
 // Skill line order, then policy order; a line of business that appears on two policies (two CGL
 // policies, say) is told apart by policy number.
-function orderLines(lines: SlotLine[]): SlotLine[] {
+export function orderLines(lines: SlotLine[]): SlotLine[] {
   const ordered = lines
     .map((line, i) => ({ line, i }))
     .sort((a, b) => LINE_SLOTS.indexOf(a.line.slot) - LINE_SLOTS.indexOf(b.line.slot) || a.i - b.i)

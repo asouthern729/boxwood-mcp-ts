@@ -19,6 +19,7 @@ import { router as plRenewalSummaryRouter } from "./routes/plRenewalSummary.js"
 import { router as renewalPremiumSummariesRouter } from "./routes/renewalPremiumSummaries.js"
 import { router as boardRouter } from "./routes/board.js"
 import { router as plRenewalPremiumChangeRouter } from "./routes/plRenewalPremiumChange.js"
+import { router as proposalBuilderRouter } from "./routes/proposalBuilder.js"
 
 const app = createMcpExpressApp({ allowedHosts })
 
@@ -35,6 +36,7 @@ app.use(plRenewalSummaryRouter)
 app.use(renewalPremiumSummariesRouter)
 app.use(boardRouter)
 app.use(plRenewalPremiumChangeRouter)
+app.use(proposalBuilderRouter)
 
 app.use(csp)
 app.use(inputSanitation)

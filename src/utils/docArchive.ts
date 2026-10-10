@@ -49,7 +49,9 @@ export type DocArchiveEntry = {
   sections?: { title: string; polno: string; renewed: boolean }[]
 }
 
-export function createDocArchive<Entry extends DocArchiveEntry = DocArchiveEntry>(subdir: string) {
+// Entries only need a filename here; DocArchiveEntry is the CSR-grouped shape the CL index pages
+// share, and the Proposal Builder (proposalBuilderArchive.ts) keys its own entries on the creator.
+export function createDocArchive<Entry extends { filename: string } = DocArchiveEntry>(subdir: string) {
   const outputDir = path.join(import.meta.dirname, "..", "..", "scripts", "output", subdir)
   const manifestPath = path.join(outputDir, "manifest.json")
 

@@ -1,4 +1,5 @@
 import { query } from "@anthropic-ai/claude-agent-sdk"
+import type { McpServer } from "@modelcontextprotocol/sdk/server/mcp.js"
 import { createServer } from "../mcpServer.js"
 import { logger } from "./logger.js"
 
@@ -17,13 +18,13 @@ export type ScopedChatTurn = {
 }
 
 // The embedded chat behind a CL tool page (risk-profile, cl-renewal-summary): one turn against this
-// server's own MCP tools, restricted to exactly `toolNames`, resumable by session id.
+// server's own MCP tools, restricted to exactly `toolNames`, resumable by session id. `server`
+// replaces the standard tool set — the Proposal Builder's tool is bound to the signed-in user.
 export async function runScopedChatTurn(
   message: string,
   resumeSessionId: string | undefined,
-  { toolNames, systemPrompt, logLabel }: { toolNames: string[]; systemPrompt: string; logLabel: string }
+  { toolNames, systemPrompt, logLabel, server = createServer() }: { toolNames: string[]; systemPrompt: string; logLabel: string; server?: McpServer }
 ): Promise<ScopedChatTurn> {
-  const server = createServer()
 
   const result = query({
     prompt: message,

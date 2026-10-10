@@ -45,7 +45,7 @@ const SLOT_BY_LINE: Record<Exclude<LineOfBusiness, "specialty_addon">, LineSlot>
 // matched to the Crime section by its title (Cincinnati's TN Equine quote, 2026-10-08).
 const CRIME_TITLE = /crime|fidelity|employee (theft|dishonesty)/i
 
-function slotFor(line: QuoteLineExtraction): LineSlot {
+export function slotFor(line: Pick<QuoteLineExtraction, "line_of_business" | "title">): LineSlot {
   if(line.line_of_business === "other" && CRIME_TITLE.test(line.title)) return "crime"
   return SLOT_BY_LINE[line.line_of_business as Exclude<LineOfBusiness, "specialty_addon">]
 }
@@ -66,7 +66,7 @@ export type MergedProposal = {
   quoteNote?: string
 }
 
-function pageLabel(pages: number[]): string {
+export function pageLabel(pages: number[]): string {
   const sorted = [...new Set(pages)].filter((p) => p > 0).sort((a, b) => a - b)
   if(sorted.length === 0) return ""
   if(sorted.length === 1) return ` (page ${ sorted[0] })`

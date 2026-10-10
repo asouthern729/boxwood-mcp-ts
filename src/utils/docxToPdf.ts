@@ -33,12 +33,20 @@ export async function pdfForDocx(docxPath: string): Promise<{ buffer: Buffer; fi
     return { buffer: readFileSync(pdfPath), filename }
   }
 
+  const buffer = await convertDocxToPdf(readFileSync(docxPath))
+  writeFileSync(pdfPath, buffer)
+  return { buffer, filename }
+}
+
+// The conversion itself, for a .docx that isn't archived (the Proposal Builder reads an uploaded
+// AMS360 proposal as a PDF so its tables keep their layout).
+export async function convertDocxToPdf(docx: Buffer): Promise<Buffer> {
   const soffice = sofficePath()
   const workDir = mkdtempSync(path.join(tmpdir(), "docx2pdf-"))
 
   try {
     const input = path.join(workDir, "document.docx")
-    writeFileSync(input, readFileSync(docxPath))
+    writeFileSync(input, docx)
     await execFileAsync(soffice, [
       `-env:UserInstallation=file://${ path.join(workDir, "profile") }`,
       "--headless", "--norestore", "--convert-to", "pdf", "--outdir", workDir, input
@@ -47,9 +55,7 @@ export async function pdfForDocx(docxPath: string): Promise<{ buffer: Buffer; fi
     const output = path.join(workDir, "document.pdf")
     if(!existsSync(output)) throw new Error("LibreOffice finished without producing a PDF")
 
-    const buffer = readFileSync(output)
-    writeFileSync(pdfPath, buffer)
-    return { buffer, filename }
+    return readFileSync(output)
   } finally {
     rmSync(workDir, { recursive: true, force: true })
   }
