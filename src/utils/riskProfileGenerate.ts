@@ -1,6 +1,6 @@
 import { archiveRiskProfile, sanitizeForFilename } from "./riskProfileArchive.js"
 import {
-  buildPolicySummary, combineExposures, fetchPolicyData, formatDate, renewalDateFields, type ResolvedPolicy
+  buildCoverPolicies, combineExposures, fetchPolicyData, formatDate, renewalDateFields, type ResolvedPolicy
 } from "./clPolicyData.js"
 import { buildRiskProfileDoc } from "./riskProfileDoc.js"
 
@@ -22,13 +22,13 @@ export async function generateRiskProfile(matches: ResolvedPolicy[], clientName:
 
   const perPolicyData = await Promise.all(matches.map((policy) => fetchPolicyData(policy)))
   const exposures = combineExposures(perPolicyData, clientName)
-  const policySummary = await buildPolicySummary(matches, combining)
+  const coverPolicies = await buildCoverPolicies(matches)
 
   const { buffer, includedSections } = await buildRiskProfileDoc({
     clientName,
     currentPeriod: `${ formatDate(primaryPolicy.poleffdate) } – ${ formatDate(primaryPolicy.polexpdate) }`,
     renewalDate: formatDate(primaryPolicy.polexpdate),
-    policySummary,
+    coverPolicies,
     ...exposures
   })
 

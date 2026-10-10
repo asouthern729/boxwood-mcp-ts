@@ -21,7 +21,6 @@ const CL_SUCCESSOR_QUERY = `
     ${ CUSTOMER_SORT_NAME_EXPR } AS customer_sort_name,
     co.name AS carrier_name,
     COALESCE(NULLIF(TRIM(CONCAT_WS(' ', csr.firstname, csr.lastname)), ''), s.csrcode) AS csr_name,
-    s.fulltermpremium,
     NULLIF(TRIM(prod.email), '') AS producer_email
   FROM afw_basicpolinfo cur
   JOIN afw_basicpolinfo s ON s.priorpolid = cur.polid

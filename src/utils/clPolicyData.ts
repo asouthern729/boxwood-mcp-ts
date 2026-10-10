@@ -3,7 +3,7 @@ import { runReadOnlyQuery } from "../db.js"
 import { fetchPolicyLobInfo } from "./policyLineOfBusiness.js"
 import { money } from "./riskProfileDoc.js"
 import type {
-  DriverRow, EquipmentBlanket, EquipmentItemRow, GlExposureRow, LocationRow, PolicySummaryRow,
+  DriverRow, EquipmentBlanket, EquipmentItemRow, CoverPolicyRow, GlExposureRow, LocationRow,
   PropertyRow, VehicleRow, WcExposureRow
 } from "./riskProfileDoc.js"
 
@@ -32,10 +32,6 @@ export const CUSTOMER_NAME_EXPR = "COALESCE(c.dba, NULLIF(TRIM(CONCAT_WS(' ', c.
 // status='D' (polexpdate in the past), which is all the 2026-08-27 renewalrptflag='A' requirement
 // was ever actually doing (see book_summary's CURRENT_POLICIES_CTE comment) — so dropping the flag
 // condition here loses no real protection while fixing the Defatta-shaped gap.
-// fulltermpremium feeds the cover-page policy-summary table when several matched policies get
-// combined into one document (see below); its "type" column (Monoline/Package) comes separately
-// from fetchPolicyLobInfo — NOT from polsubtype, which looks like a monoline/package flag by name
-// but isn't one (see policyLineOfBusiness.ts's header comment).
 // The ResolvedPolicy columns and joins — shared by RESOLVE_POLICY_QUERY and
 // RESOLVE_POLIDS_QUERY so an archived document's rebuild sees exactly what its first build saw.
 const RESOLVED_POLICY_SELECT = `
@@ -44,7 +40,6 @@ const RESOLVED_POLICY_SELECT = `
     ${ CUSTOMER_SORT_NAME_EXPR } AS customer_sort_name,
     co.name AS carrier_name,
     COALESCE(NULLIF(TRIM(CONCAT_WS(' ', csr.firstname, csr.lastname)), ''), p.csrcode) AS csr_name,
-    p.fulltermpremium,
     NULLIF(TRIM(prod.email), '') AS producer_email
   FROM afw_basicpolinfo p
   LEFT JOIN afw_customer c ON c.custid = p.custid
@@ -112,7 +107,6 @@ export type ResolvedPolicy = {
   customer_sort_name: string | null
   carrier_name: string | null
   csr_name: string | null
-  fulltermpremium: string | number | null
   producer_email: string | null
 }
 
@@ -818,18 +812,15 @@ export function combineExposures(perPolicyData: PolicyData[], clientName: string
   }
 }
 
-// Only fetched when actually combining — the single-policy path (the vast majority of calls) has
-// no policy-summary table to populate, so skips this extra query entirely.
-export async function buildPolicySummary(matches: ResolvedPolicy[], combining: boolean): Promise<PolicySummaryRow[] | undefined> {
-  if(!combining) return undefined
-
-  const lobClassifications = await Promise.all(matches.map((policy) => fetchPolicyLobInfo(policy.polid)))
+// The Pre-Renewal Review cover's Carrier | Line of Business rows, one per policy. Line of business
+// comes from the policy's own lines (fetchPolicyLobInfo), not polsubtype (see
+// policyLineOfBusiness.ts's header comment).
+export async function buildCoverPolicies(matches: ResolvedPolicy[]): Promise<CoverPolicyRow[]> {
+  const lobInfo = await Promise.all(matches.map((policy) => fetchPolicyLobInfo(policy.polid)))
 
   return matches.map((policy, i) => ({
-    polNo: policy.polno,
-    type: lobClassifications[i].classification || "—",
-    premium: numericMoney(policy.fulltermpremium),
-    renewalDate: formatDate(policy.polexpdate)
+    carrier: policy.carrier_name?.trim() || "—",
+    lineOfBusiness: lobInfo[i].lobDescriptions.join(", ") || "—"
   }))
 }
 
