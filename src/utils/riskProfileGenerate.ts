@@ -1,4 +1,5 @@
 import { archiveRiskProfile, sanitizeForFilename } from "./riskProfileArchive.js"
+import type { DocArchiveEntry } from "./docArchive.js"
 import {
   buildCoverPolicies, combineExposures, fetchPolicyData, formatDate, renewalDateFields, type ResolvedPolicy
 } from "./clPolicyData.js"
@@ -17,6 +18,14 @@ export type GeneratedRiskProfile = {
 // by the risk_profile MCP tool and scripts/monthlyRiskProfiles.ts, so the monthly batch files
 // exactly what an on-demand request would. Resolution (which policies) stays with each caller.
 export async function generateRiskProfile(matches: ResolvedPolicy[], clientName: string): Promise<GeneratedRiskProfile> {
+  const { archiveEntry, ...generated } = await buildRiskProfile(matches, clientName)
+  archiveRiskProfile(generated.buffer, archiveEntry)
+  return generated
+}
+
+// Builds without archiving — scripts/rebuildRiskProfiles.ts archives with the entry's original
+// generated_at.
+export async function buildRiskProfile(matches: ResolvedPolicy[], clientName: string): Promise<GeneratedRiskProfile & { archiveEntry: DocArchiveEntry }> {
   const primaryPolicy = matches[0]
   const combining = matches.length > 1
 
@@ -52,7 +61,7 @@ export async function generateRiskProfile(matches: ResolvedPolicy[], clientName:
     ? `${ sanitizeForFilename(clientName) }_${ sanitizeForFilename(matches.map((m) => m.polno).join("_")) }_combined.docx`
     : `${ sanitizeForFilename(clientName) }_${ sanitizeForFilename(primaryPolicy.polno) }_${ primaryPolicy.polid }.docx`
 
-  archiveRiskProfile(buffer, {
+  const archiveEntry: DocArchiveEntry = {
     filename: archiveFilename,
     generated_at: new Date().toISOString(),
     csr_code: primaryPolicy.csrcode,
@@ -61,7 +70,7 @@ export async function generateRiskProfile(matches: ResolvedPolicy[], clientName:
     polnos: polnoLabel,
     polids: matches.map((m) => m.polid),
     ...renewalDateFields(matches)
-  })
+  }
 
-  return { buffer, filename, includedSections, combining, polnoLabel }
+  return { buffer, filename, includedSections, combining, polnoLabel, archiveEntry }
 }
