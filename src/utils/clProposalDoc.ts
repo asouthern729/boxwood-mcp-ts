@@ -27,7 +27,7 @@ const BORDER = "CCCCCC"
 
 const PAGE_WIDTH = 12240
 const MARGIN = 900
-// Every table, banner and callout spans the full text width (Andrew, 2026-10-08: "it should always
+// Every table and banner spans the full text width (Andrew, 2026-10-08: "it should always
 // take up the available space"). The skill specifies 9360 DXA, which with its 0.625" margins left
 // tables ~0.75" short of the right margin and narrower than the sub-header rules above them.
 const TABLE_WIDTH = PAGE_WIDTH - 2 * MARGIN // 10440 DXA
@@ -66,9 +66,6 @@ export type ProposalLine = {
   tables: ProposalTable[]
   bulletGroups: ProposalBulletGroup[]
   comment?: string
-  // Set while this line still shows the expiring term because its renewal isn't in AMS360 yet —
-  // rendered as a callout under the banner so nobody mistakes these figures for the renewal.
-  pendingNote?: string
 }
 
 // Skill Section 5 — a quoted add-on that doesn't fit a standard line (e.g. a wind/hail deductible
@@ -90,10 +87,6 @@ export type ClProposalInput = {
   // When the document's lines don't share one policy period (skill: "see individual coverage
   // sections for details").
   policyPeriodsDiffer: boolean
-  // Set while AMS360 has no renewal term yet for some line, so the coverage shown is still the
-  // expiring program — a callout on the cover rather than presented as the renewal (Andrew,
-  // 2026-10-08: "it should be apparent that we are awaiting the renewal values").
-  renewalNote?: string
   // Every line shows the expiring term: the cover's period is labelled "Current Policy Period".
   allTermsCurrent: boolean
   // e.g. "Cincinnati quote prepared 08/20/2026 – valid for 60 days" — only from an uploaded quote.
@@ -333,7 +326,6 @@ function coverPage(input: ClProposalInput): Block[] {
     ...(input.clientAddress ? [centered([run(input.clientAddress, { color: MUTED, size: 22 })])] : []),
     centered([run(`${ input.allTermsCurrent ? "Current Policy Period" : "Policy Period" }: ${ input.policyPeriod }`, { size: 26 })], { before: 120 }),
     ...(input.policyPeriodsDiffer ? [centered([run("(see individual coverage sections for details)", { color: MUTED, size: 20 })])] : []),
-    ...(input.renewalNote ? [new Paragraph({ spacing: { before: 200 }, children: [] }), callout("RENEWAL TERMS PENDING", input.renewalNote)] : []),
     ...(input.quoteNote ? [centered([run(input.quoteNote, { italics: true, color: MUTED, size: 18 })])] : []),
     new Paragraph({ spacing: { before: 240 }, border: { bottom: { style: BorderStyle.SINGLE, size: 12, color: GREEN, space: 1 } }, children: [] }),
     ...(prepared
@@ -364,35 +356,10 @@ function executiveSummary(input: ClProposalInput): Block[] {
   ]
 }
 
-// A shaded, bordered box for "renewal pending" notices — brand palette only (the skill bans other
-// colours), so it stands out by its border and fill rather than a warning colour.
-function callout(heading: string, text: string): Table {
-  const side = { style: BorderStyle.SINGLE, size: 12, color: DARK_GREEN }
-  return new Table({
-    width: { size: TABLE_WIDTH, type: WidthType.DXA },
-    columnWidths: [TABLE_WIDTH],
-    layout: TableLayoutType.FIXED,
-    rows: [new TableRow({
-      cantSplit: true,
-      children: [new TableCell({
-        width: { size: TABLE_WIDTH, type: WidthType.DXA },
-        shading: { fill: HEADER_FILL, type: ShadingType.CLEAR },
-        borders: { top: side, bottom: side, left: side, right: side },
-        margins: { top: 100, bottom: 100, left: 200, right: 200 },
-        children: [
-          new Paragraph({ alignment: AlignmentType.CENTER, children: [run(heading, { bold: true, color: DARK_GREEN, size: 22 })] }),
-          new Paragraph({ alignment: AlignmentType.CENTER, spacing: { before: 40 }, children: [run(text, { color: TEXT, size: 19 })] })
-        ]
-      })]
-    })]
-  })
-}
-
 function lineSection(line: ProposalLine, comments: DocComment[]): Block[] {
   return [
     pageBreak(),
     ...banner(line.title, { withLogo: true, comment: register(comments, line.comment) }),
-    ...(line.pendingNote ? [callout("RENEWAL TERMS PENDING", line.pendingNote), spacer()] : []),
     ...(line.overview ? [overview(line.overview)] : []),
     ...line.keyFacts.map(([label, value]) => keyFact(label, value)),
     ...line.tables.flatMap(tableBlocks),

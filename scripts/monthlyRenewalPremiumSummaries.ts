@@ -1,5 +1,5 @@
 // Monthly batch build of Patrick's "Commercial Renewal Premium Summary" workbook
-// (renewal_premium_summary MCP tool) for every commercial account with a policy expiring two
+// (renewal_premium_spreadsheet MCP tool) for every commercial account with a policy expiring two
 // calendar months out — run on the 1st of month M, this covers everything expiring in month M+2,
 // so the workbook is already archived by the time an account manager starts renewal prep.
 //

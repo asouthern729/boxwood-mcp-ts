@@ -81,10 +81,10 @@ export async function refreshRenewalPremiumSummary(filename: string, options: Re
   const entry = manifest.find((e) => e.filename === filename)
 
   if(!entry) {
-    throw new RenewalPremiumSummaryRefreshError(`No archived renewal premium summary found for "${ filename }".`)
+    throw new RenewalPremiumSummaryRefreshError(`No archived renewal premium spreadsheet found for "${ filename }".`)
   }
   if(!entry.custid || !entry.cell_map) {
-    throw new RenewalPremiumSummaryRefreshError(`"${ entry.client_name }" was generated before Refresh support existed — regenerate it once (renewal_premium_summary) to enable Refresh.`)
+    throw new RenewalPremiumSummaryRefreshError(`"${ entry.client_name }" was generated before Refresh support existed — regenerate it once (renewal_premium_spreadsheet) to enable Refresh.`)
   }
 
   const freshByPolno = await fetchCurrentRenewalByPolno(entry.custid)

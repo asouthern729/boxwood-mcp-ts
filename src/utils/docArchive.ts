@@ -43,10 +43,10 @@ export type DocArchiveEntry = {
   // CL Renewal Summary only: why that last rebuild happened, in staff-facing words (e.g. "Quote added:
   // Travelers.pdf") — the index page shows it on hover. Absent on entries rebuilt before it existed.
   last_refresh_reason?: string
-  // CL Renewal Summary only: the sections still printed with the "Renewal Terms Pending" callout (no
-  // renewal term in AMS360 and no uploaded quote for that line) — exactly what the document itself
-  // flags. Empty means every section is addressed; absent means the entry predates this field.
-  pending_sections?: { title: string; polno: string }[]
+  // CL Renewal Summary only: every coverage section in the document, in order, with whether it shows
+  // renewal values (AMS360 renewal term or an uploaded quote) or still the expiring term — the index
+  // page lists these under the policy numbers. Absent means the entry predates this field.
+  sections?: { title: string; polno: string; renewed: boolean }[]
 }
 
 export function createDocArchive<Entry extends DocArchiveEntry = DocArchiveEntry>(subdir: string) {

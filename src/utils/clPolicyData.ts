@@ -36,7 +36,9 @@ export const CUSTOMER_NAME_EXPR = "COALESCE(c.dba, NULLIF(TRIM(CONCAT_WS(' ', c.
 // combined into one document (see below); its "type" column (Monoline/Package) comes separately
 // from fetchPolicyLobInfo — NOT from polsubtype, which looks like a monoline/package flag by name
 // but isn't one (see policyLineOfBusiness.ts's header comment).
-export const RESOLVE_POLICY_QUERY = `
+// The ResolvedPolicy columns and joins — shared by RESOLVE_POLICY_QUERY and
+// RESOLVE_POLIDS_QUERY so an archived document's rebuild sees exactly what its first build saw.
+const RESOLVED_POLICY_SELECT = `
   SELECT p.polid, p.polno, p.poleffdate, p.polexpdate, p.custid, p.csrcode,
     ${ CUSTOMER_NAME_EXPR } AS customer_name,
     ${ CUSTOMER_SORT_NAME_EXPR } AS customer_sort_name,
@@ -49,6 +51,10 @@ export const RESOLVE_POLICY_QUERY = `
   LEFT JOIN afw_company co ON co.cocode = p.cocode
   LEFT JOIN afw_employee csr ON csr.empcode = p.csrcode
   LEFT JOIN afw_employee prod ON prod.empcode = p.execcode
+`
+
+export const RESOLVE_POLICY_QUERY = `
+  ${ RESOLVED_POLICY_SELECT }
   -- $5 is the book: 2 = commercial (risk_profile, cl_renewal_summary), 1 = personal
   -- (pl_renewal_summary). Everything else below applies the same to both.
   WHERE p.typeofbus = $5
@@ -77,6 +83,21 @@ export const RESOLVE_POLICY_QUERY = `
   ORDER BY customer_name, p.polexpdate
   LIMIT $6
 `
+
+// Specific terms by polid with no in-force or renewal-window filter — for rebuilding an archived
+// document, whose terms may have expired since it was built (the renewal then prints via
+// withClRenewalTerms). Same book/marketing-shell/deleted exclusions as RESOLVE_POLICY_QUERY.
+const RESOLVE_POLIDS_QUERY = `
+  ${ RESOLVED_POLICY_SELECT }
+  WHERE p.polid = ANY($1::uuid[])
+    AND p.typeofbus = $2
+    AND p.polsubtype != 'S'
+    AND p.status != 'D'
+`
+
+export async function resolvePolicyTerms(polids: string[], book: PolicyBook = COMMERCIAL_BOOK): Promise<ResolvedPolicy[]> {
+  return await runReadOnlyQuery(RESOLVE_POLIDS_QUERY, [polids, book.typeofbus]) as ResolvedPolicy[]
+}
 
 export type ResolvedPolicy = {
   polid: string
@@ -667,7 +688,7 @@ export async function resolveClPolicies({ polno, custid, customer_name, renewal_
   const customerNameParam = customerName ? `%${ customerName }%` : null
 
   // An account-level request (custid/customer_name, no polno) defaults to policies renewing within
-  // the next 90 days — same default and source as renewal_premium_summary (Patrick: "the next 90
+  // the next 90 days — same default and source as renewal_premium_spreadsheet (Patrick: "the next 90
   // days"). Without it, "a renewal summary for [client]" combined every current commercial policy on
   // the account, including bonds and other lines not renewing until next spring (client-reported
   // 2026-09-22: a 5/2027 surety bond on Defatta's combined document). A specific polno is taken as an

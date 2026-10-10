@@ -1,7 +1,7 @@
 import { runReadOnlyQuery } from "../db.js"
 
 // Single source of truth for "what's this policy's Current/Renewal premium right now," shared by
-// renewal_premium_summary's full generation (renewalPremiumSummary.ts) and the Refresh path
+// renewal_premium_spreadsheet's full generation (renewalPremiumSummary.ts) and the Refresh path
 // (renewalPremiumSummaryRefresh.ts) — both need the exact same fallback rules (see comments below,
 // carried over verbatim from the original tool) so a refreshed cell can never disagree with what a
 // fresh full regeneration would have written for the same policy. Only the columns Current/Renewal

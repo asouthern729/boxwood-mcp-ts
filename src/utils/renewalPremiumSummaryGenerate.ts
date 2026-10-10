@@ -118,7 +118,7 @@ export type GenerateRenewalPremiumSummaryResult =
       otherPolicies: OtherPolicyRow[]
     }
 
-// Extracted from the renewal_premium_summary MCP tool (src/tools/policies/renewalPremiumSummary.ts)
+// Extracted from the renewal_premium_spreadsheet MCP tool (src/tools/policies/renewalPremiumSummary.ts)
 // so a batch/cron job can call the exact same build+archive logic directly — no MCP transport, no
 // Agent SDK/LLM turn — while the tool itself stays the single interactive entry point that wraps
 // this in an MCP result envelope. Keep both callers' behavior identical: any change here changes
@@ -207,7 +207,7 @@ export async function generateRenewalPremiumSummary(params: GenerateRenewalPremi
 
   const { buffer, cellMap } = await buildRenewalPremiumSummaryWorkbook({ clientName, renewalDateLabel, lobRows, extraRows, otherPolicies, premiumAsOfNotes, premiumFallbackNotes })
 
-  const filename = `${ clientName.replace(/[^A-Za-z0-9]+/g, "_").replace(/^_+|_+$/g, "") || "Unknown" }_Renewal_Premium_Summary.xlsx`
+  const filename = `${ clientName.replace(/[^A-Za-z0-9]+/g, "_").replace(/^_+|_+$/g, "") || "Unknown" }_Renewal_Premium_Spreadsheet.xlsx`
   const token = storeDownload(buffer, filename, XLSX_MIME_TYPE)
   const downloadUrl = `${ publicBaseUrl }/downloads/${ token }`
 

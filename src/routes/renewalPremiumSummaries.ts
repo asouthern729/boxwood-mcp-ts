@@ -65,14 +65,14 @@ router.get(`${ BASE }/renewal-premium-summaries/files/:filename`, auth0, (req: R
   const entry = readManifest().find((e) => e.filename === filename)
 
   if(!entry) {
-    res.status(404).json({ error: "not_found", error_description: "This renewal premium summary doesn't exist." })
+    res.status(404).json({ error: "not_found", error_description: "This renewal premium spreadsheet doesn't exist." })
     return
   }
 
   const filePath = path.join(RENEWAL_PREMIUM_SUMMARY_OUTPUT_DIR, filename)
 
   if(!existsSync(filePath)) {
-    res.status(404).json({ error: "not_found", error_description: "This renewal premium summary doesn't exist." })
+    res.status(404).json({ error: "not_found", error_description: "This renewal premium spreadsheet doesn't exist." })
     return
   }
 
@@ -90,7 +90,7 @@ router.delete(`${ BASE }/renewal-premium-summaries/files/:filename`, auth0, (req
   const { filename } = req.params
 
   if(!deleteRenewalPremiumSummary(filename)) {
-    res.status(404).json({ error: "not_found", error_description: "This renewal premium summary doesn't exist." })
+    res.status(404).json({ error: "not_found", error_description: "This renewal premium spreadsheet doesn't exist." })
     return
   }
 
@@ -106,7 +106,7 @@ router.post(`${ BASE }/renewal-premium-summaries/files/:filename/refresh`, auth0
   const entry = readManifest().find((e) => e.filename === filename)
 
   if(!entry) {
-    return next(new ErrorResponse("This renewal premium summary doesn't exist.", 404))
+    return next(new ErrorResponse("This renewal premium spreadsheet doesn't exist.", 404))
   }
 
   try {

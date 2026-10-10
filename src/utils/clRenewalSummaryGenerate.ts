@@ -4,7 +4,7 @@ import { completedQuoteExtractions } from "./clQuoteStore.js"
 import { mergeQuotesIntoProposal, type QuoteSource } from "./clQuoteMerge.js"
 import { sanitizeForFilename, type DocArchiveEntry } from "./docArchive.js"
 import {
-  clean, combineExposures, fetchPolicyData, formatAddress, renewalDateFields, resolveClPolicies, type ResolvedPolicy
+  clean, combineExposures, fetchPolicyData, formatAddress, renewalDateFields, resolvePolicyTerms, type ResolvedPolicy
 } from "./clPolicyData.js"
 import { LINE_SLOTS, fetchPolicyCoverageData } from "./clCoverageData.js"
 import { buildClProposalDoc, type ServiceTeamMember } from "./clProposalDoc.js"
@@ -143,23 +143,15 @@ export async function buildClRenewalSummary(
     if(line.period && line.period !== policyPeriod) line.overview = `${ line.overview } Written for the policy period ${ line.period }.`.trim()
   }
 
-  // Until a policy's renewal term is in AMS360 its sections print the expiring term — flagged on the
-  // cover and on each of those sections (Andrew, 2026-10-08), unless an uploaded quote has already
-  // supplied that line's renewal values (a quote-built section carries a comment).
+  // Until a policy's renewal term is in AMS360 its sections print the expiring term, unless an
+  // uploaded quote has already supplied that line's renewal values (a quote-built section carries a
+  // comment). The document itself doesn't flag these (users didn't want the banners, 2026-10-10) —
+  // the manifest's `sections` carries each line's status for the index page instead.
   const pending = terms.filter((t) => !t.isRenewal).map((t) => t.current)
   const pendingPolnos = new Set(pending.map((p) => p.polno))
-  for(const line of lines) {
-    if(pendingPolnos.has(line.polno) && !line.comment) {
-      line.pendingNote = `The figures below are from the current policy term (${ line.period }). This section will be updated when the renewal terms are received.`
-    }
-  }
-  const pendingLines = lines.filter((l) => l.pendingNote)
-  const allTermsCurrent = pendingLines.length > 0 && pendingLines.length === lines.length
-  const renewalNote = pendingLines.length === 0
-    ? undefined
-    : allTermsCurrent
-      ? `Coverage shown is the current program, which renews ${ longDate(primaryPolicy.polexpdate) }. This proposal will be updated when the renewal terms are received.`
-      : `Sections marked "Renewal Terms Pending" (${ pendingLines.map((l) => l.title).join(", ") }) show the current program and will be updated when the renewal terms are received.`
+  const isPending = (line: { polno: string; comment?: string }) => pendingPolnos.has(line.polno) && !line.comment
+  const pendingCount = lines.filter(isPending).length
+  const allTermsCurrent = pendingCount > 0 && pendingCount === lines.length
 
   const namedInsureds = [clientName, ...exposures.additionalNamedInsureds]
   const narrativeFacts = {
@@ -167,7 +159,7 @@ export async function buildClRenewalSummary(
     lines,
     policyPeriod,
     policyPeriodsDiffer,
-    isRenewal: pendingLines.length === 0,
+    isRenewal: pendingCount === 0,
     locationStates: exposures.locations.map((l) => l.state).filter(Boolean),
     locationCount: exposures.locations.length,
     vehicleCount: exposures.vehicles.length,
@@ -187,7 +179,6 @@ export async function buildClRenewalSummary(
       : "",
     policyPeriod,
     policyPeriodsDiffer,
-    renewalNote,
     allTermsCurrent,
     quoteNote: merged.quoteNote,
     preparedBy: contacts?.producer_name
@@ -219,7 +210,7 @@ export async function buildClRenewalSummary(
     polids: matches.map((m) => m.polid),
     built_from: pending.length === 0 ? "renewal" : "current",
     renewal_polids: terms.filter((t) => t.isRenewal).map((t) => t.current.polid),
-    pending_sections: pendingLines.map((l) => ({ title: l.title, polno: l.polno })),
+    sections: lines.map((l) => ({ title: l.title, polno: l.polno, renewed: !isPending(l) })),
     ...renewalDateFields(matches)
   }
 
@@ -250,23 +241,19 @@ export function archivedPolids(entry: DocArchiveEntry): string[] | null {
 
 export class ClRenewalSummaryRebuildError extends Error {}
 
-// The policy terms an archived document was built from, re-resolved through resolveClPolicies (same
-// in-force filter and joins as every other build) for the terms' customer, keeping exactly those terms.
+// The policy terms an archived document was built from, by polid — not through resolveClPolicies'
+// in-force filter, so a document stays rebuildable (quote upload/removal, renewal landing) after its
+// terms expire; withClRenewalTerms then prints their renewals. Same joins as every other build.
 export async function resolveArchivedClPolicies(entry: DocArchiveEntry): Promise<{ matches: ResolvedPolicy[]; clientName: string }> {
   const polids = archivedPolids(entry)
   if(!polids) throw new ClRenewalSummaryRebuildError("This document predates quote uploads — build it again from the chat, then upload the quote.")
 
-  const owners = await runReadOnlyQuery("SELECT DISTINCT custid FROM afw_basicpolinfo WHERE polid = ANY($1::uuid[])", [polids]) as { custid: string }[]
-  if(owners.length !== 1) throw new ClRenewalSummaryRebuildError("Couldn't find this document's policies in AMS360 any more.")
+  const found = await resolvePolicyTerms(polids)
+  const matches = polids.flatMap((polid) => found.filter((m) => m.polid === polid))
+  if(matches.length !== polids.length) throw new ClRenewalSummaryRebuildError("Some of this document's policies are no longer in AMS360, so it can't be rebuilt.")
+  if(new Set(matches.map((m) => m.custid)).size !== 1) throw new ClRenewalSummaryRebuildError("This document's policies no longer belong to one customer in AMS360.")
 
-  // A wide window: the account-level default (90 days) would drop a term renewing later than that.
-  const resolution = await resolveClPolicies({ custid: owners[0].custid, renewal_within_days: 400 })
-  if(resolution.kind !== "ok") throw new ClRenewalSummaryRebuildError("This document's policies are no longer in force, so it can't be rebuilt.")
-
-  const matches = polids.flatMap((polid) => resolution.matches.filter((m) => m.polid === polid))
-  if(matches.length !== polids.length) throw new ClRenewalSummaryRebuildError("Some of this document's policies are no longer in force, so it can't be rebuilt.")
-
-  return { matches, clientName: resolution.clientName }
+  return { matches, clientName: matches[0].customer_name?.trim() || "[NOT PROVIDED — PLEASE CONFIRM]" }
 }
 
 // Rebuilds an archived document in place — after a quote upload or deletion, or once a renewal term

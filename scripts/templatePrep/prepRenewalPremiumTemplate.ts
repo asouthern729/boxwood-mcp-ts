@@ -1,4 +1,4 @@
-// One-time (re-runnable) prep step for the renewal_premium_summary tool's real template.
+// One-time (re-runnable) prep step for the renewal_premium_spreadsheet tool's real template.
 //
 // Patrick emailed the original (assets/templates/CL_Renewal_Premium_Summary.xlsx, permission given
 // to reuse it directly rather than reproduce its styling by hand) built around a fixed 8-row

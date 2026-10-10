@@ -4,7 +4,7 @@ import type { RenewalPremiumSummaryCellMapEntry } from "./renewalPremiumSummaryW
 
 // Same on-disk convention as riskProfileArchive.ts's cl-risk-profile dir — written under
 // scripts/output/ (gitignored, retention-cron-cleaned), its own subdirectory since this is a
-// distinct tool/output (renewal_premium_summary's xlsx, not risk_profile's docx).
+// distinct tool/output (renewal_premium_spreadsheet's xlsx, not risk_profile's docx).
 export const RENEWAL_PREMIUM_SUMMARY_OUTPUT_DIR = path.join(import.meta.dirname, "..", "..", "scripts", "output", "cl-renewal-premium-summaries")
 const MANIFEST_PATH = path.join(RENEWAL_PREMIUM_SUMMARY_OUTPUT_DIR, "manifest.json")
 
@@ -20,7 +20,7 @@ export type RenewalPremiumSummaryManifestEntry = {
   csr_code: string | null
   csr_name: string | null
   client_name: string
-  // renewal_premium_summary is always account-scoped (custid, not polno) and can combine several
+  // renewal_premium_spreadsheet is always account-scoped (custid, not polno) and can combine several
   // policies' lines of business into one workbook — a comma-joined label of every included policy's
   // polno, not a single value like riskProfile.ts's own polnos field.
   polnos: string
