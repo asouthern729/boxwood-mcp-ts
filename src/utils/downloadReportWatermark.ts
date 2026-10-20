@@ -1,5 +1,6 @@
 import { existsSync, mkdirSync, readFileSync, writeFileSync } from "node:fs"
 import path from "node:path"
+import { stateDir } from "../config/config.js"
 
 // Persists the boundary between "already covered by a successfully-generated morning download
 // report" and "not yet reported" — see the 2026-09-16/17 vendor-download-gap incident: a row's
@@ -16,7 +17,7 @@ import path from "node:path"
 // this watermark instead drives an *additional* `synced_since` bound scripts/morningDownload.ts
 // passes alongside a generous `entereddate` lookback, so nothing that syncs late gets silently
 // skipped by the next day's run.
-const WATERMARK_PATH = path.join(import.meta.dirname, "..", "..", "scripts", "state", "download-report-watermark.json")
+const WATERMARK_PATH = stateDir("download-report-watermark.json")
 
 export interface DownloadReportWatermark {
   syncedUntil: Date

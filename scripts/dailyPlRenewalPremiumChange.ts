@@ -31,13 +31,14 @@
 import "dotenv/config"
 import { existsSync, mkdirSync, readFileSync, writeFileSync } from "node:fs"
 import path from "node:path"
+import { stateDir } from "../src/config/config.js"
 import { pool } from "../src/db.js"
 import { fetchPlRenewalChangeGroups } from "../src/utils/plRenewalPremiumChange.js"
 import { archivePlRenewalChange } from "../src/utils/plRenewalPremiumChangeArchive.js"
 import { buildAndArchivePlRenewalSummary } from "../src/utils/plRenewalSummaryBuild.js"
 
-const PREMIUM_CHANGE_CURSOR_PATH = path.join(import.meta.dirname, "state", "pl-renewal-premium-change-cursor.json")
-const RENEWAL_SUMMARY_CURSOR_PATH = path.join(import.meta.dirname, "state", "pl-renewal-summary-cursor.json")
+const PREMIUM_CHANGE_CURSOR_PATH = stateDir("pl-renewal-premium-change-cursor.json")
+const RENEWAL_SUMMARY_CURSOR_PATH = stateDir("pl-renewal-summary-cursor.json")
 // First run only (no cursor yet): look back this far on synced_at instead of the whole history.
 const FIRST_RUN_LOOKBACK_HOURS = 24
 
