@@ -7,6 +7,7 @@
 # rotated by /etc/logrotate.d/boxwood-mcp (see scripts/logrotate.conf).
 set -uo pipefail
 cd /home/andrew/apps/boxwood-mcp-ts
+source scripts/notifyFailure.sh
 
 LOG_DIR="${LOG_ROOT:-/var/log/boxwood-mcp}/morning-download"
 mkdir -p "$LOG_DIR"
@@ -15,5 +16,8 @@ mkdir -p "$LOG_DIR"
   echo "===== $(date -Iseconds) ====="
   npx tsx scripts/morningDownload.ts && npx tsx scripts/sendReportEmail.ts
 } >> "$LOG_DIR/morning-download.log" 2>&1
+CODE=$?
+notify_failure morning-download "$CODE" "$LOG_DIR/morning-download.log"
 # The PL Renewal Premium Change (8:30) and PL Renewal Summary (9:00) builds for today's renewal
 # downloads run from their own cron lines — see scripts/dailyPlRenewalJob.sh.
+exit "$CODE"

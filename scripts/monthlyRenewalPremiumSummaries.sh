@@ -7,6 +7,7 @@
 # fragile cron string.
 set -uo pipefail
 cd /home/andrew/apps/boxwood-mcp-ts
+source scripts/notifyFailure.sh
 
 LOG_ROOT="${LOG_ROOT:-/var/log/boxwood-mcp}"
 mkdir -p "$LOG_ROOT/renewal-premium-summaries" "$LOG_ROOT/risk-profiles"
@@ -15,6 +16,8 @@ mkdir -p "$LOG_ROOT/renewal-premium-summaries" "$LOG_ROOT/risk-profiles"
   echo "===== $(date -Iseconds) ====="
   npx tsx scripts/monthlyRenewalPremiumSummaries.ts
 } >> "$LOG_ROOT/renewal-premium-summaries/monthly.log" 2>&1
+CODE=$?
+notify_failure monthly-renewal-premium-summaries "$CODE" "$LOG_ROOT/renewal-premium-summaries/monthly.log"
 
 # Companion job, same schedule (Patrick, 2026-09-15): the CL Pre-Renewal Review (risk_profile) for
 # the same target month. Runs from this script rather than its own cron line so the two can never
@@ -23,3 +26,7 @@ mkdir -p "$LOG_ROOT/renewal-premium-summaries" "$LOG_ROOT/risk-profiles"
   echo "===== $(date -Iseconds) ====="
   npx tsx scripts/monthlyRiskProfiles.ts
 } >> "$LOG_ROOT/risk-profiles/monthly-risk-profiles.log" 2>&1
+RISK_CODE=$?
+notify_failure monthly-risk-profiles "$RISK_CODE" "$LOG_ROOT/risk-profiles/monthly-risk-profiles.log"
+[ "$CODE" -ne 0 ] && exit "$CODE"
+exit "$RISK_CODE"
