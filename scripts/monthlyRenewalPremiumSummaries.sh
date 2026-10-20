@@ -8,12 +8,13 @@
 set -uo pipefail
 cd /home/andrew/apps/boxwood-mcp-ts
 
-mkdir -p scripts/logs
+LOG_ROOT="${LOG_ROOT:-/var/log/boxwood-mcp}"
+mkdir -p "$LOG_ROOT/renewal-premium-summaries" "$LOG_ROOT/risk-profiles"
 
 {
   echo "===== $(date -Iseconds) ====="
   npx tsx scripts/monthlyRenewalPremiumSummaries.ts
-} >> scripts/logs/monthly-renewal-premium-summaries.log 2>&1
+} >> "$LOG_ROOT/renewal-premium-summaries/monthly.log" 2>&1
 
 # Companion job, same schedule (Patrick, 2026-09-15): the CL Pre-Renewal Review (risk_profile) for
 # the same target month. Runs from this script rather than its own cron line so the two can never
@@ -21,4 +22,4 @@ mkdir -p scripts/logs
 {
   echo "===== $(date -Iseconds) ====="
   npx tsx scripts/monthlyRiskProfiles.ts
-} >> scripts/logs/monthly-risk-profiles.log 2>&1
+} >> "$LOG_ROOT/risk-profiles/monthly-risk-profiles.log" 2>&1

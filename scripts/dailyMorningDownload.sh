@@ -3,15 +3,17 @@
 # Invoked by cron; see crontab -l (fires at 8am America/Chicago via the same UTC-pair +
 # runtime-TZ-check pattern used by ~/scripts/ams360-etl/run_daily_sync.sh, since this box's cron
 # doesn't support CRON_TZ). Kept as a script rather than a cron one-liner so logging doesn't have
-# to live in a fragile cron string.
+# to live in a fragile cron string. Logs go to /var/log/boxwood-mcp/<job>/ (LOG_ROOT overrides),
+# rotated by /etc/logrotate.d/boxwood-mcp (see scripts/logrotate.conf).
 set -uo pipefail
 cd /home/andrew/apps/boxwood-mcp-ts
 
-mkdir -p scripts/logs
+LOG_DIR="${LOG_ROOT:-/var/log/boxwood-mcp}/morning-download"
+mkdir -p "$LOG_DIR"
 
 {
   echo "===== $(date -Iseconds) ====="
   npx tsx scripts/morningDownload.ts && npx tsx scripts/sendReportEmail.ts
-} >> scripts/logs/morning-download.log 2>&1
+} >> "$LOG_DIR/morning-download.log" 2>&1
 # The PL Renewal Premium Change (8:30) and PL Renewal Summary (9:00) builds for today's renewal
 # downloads run from their own cron lines — see scripts/dailyPlRenewalJob.sh.

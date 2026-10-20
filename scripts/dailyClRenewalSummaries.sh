@@ -7,9 +7,10 @@
 set -uo pipefail
 cd /home/andrew/apps/boxwood-mcp-ts
 
-mkdir -p scripts/logs
+LOG_DIR="${LOG_ROOT:-/var/log/boxwood-mcp}/cl-renewal-summaries"
+mkdir -p "$LOG_DIR"
 
 {
   echo "===== $(date -Iseconds) ====="
   npx tsx scripts/dailyClRenewalSummaries.ts
-} >> scripts/logs/daily-cl-renewal-summaries.log 2>&1
+} >> "$LOG_DIR/cl-renewal-summaries.log" 2>&1

@@ -9,9 +9,10 @@ set -uo pipefail
 cd /home/andrew/apps/boxwood-mcp-ts
 
 JOB="${1:?usage: dailyPlRenewalJob.sh premium-change|renewal-summary}"
-mkdir -p scripts/logs
+LOG_DIR="${LOG_ROOT:-/var/log/boxwood-mcp}/pl-${JOB}"
+mkdir -p "$LOG_DIR"
 
 {
   echo "===== $(date -Iseconds) ====="
   npx tsx scripts/dailyPlRenewalPremiumChange.ts --job="$JOB"
-} >> "scripts/logs/pl-${JOB}.log" 2>&1
+} >> "$LOG_DIR/pl-${JOB}.log" 2>&1
