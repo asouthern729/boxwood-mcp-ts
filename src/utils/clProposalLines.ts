@@ -18,6 +18,10 @@ export type LineTable = ProposalTable & { kind: "limits" | "schedule" }
 // sits over (skill: per-occurrence for GL/Auto, EL limits for WC).
 export type UnderlyingEntry = { line: string; carrier: string; limit: string }
 
+// A line's premium as its source file states it — only the Proposal Builder prints it (its Premium
+// Summary); the CL Renewal Summary ignores it.
+export type LinePremium = { amount: number | null; note: string | null; current?: boolean }
+
 export type SlotLine = Omit<ProposalLine, "tables"> & {
   slot: LineSlot
   tables: LineTable[]
@@ -25,6 +29,7 @@ export type SlotLine = Omit<ProposalLine, "tables"> & {
   polno: string
   period: string
   underlying?: UnderlyingEntry
+  premium?: LinePremium
 }
 
 export const SLOT_TITLES: Record<LineSlot, string> = {

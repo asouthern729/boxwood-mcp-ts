@@ -22,7 +22,10 @@ export type ProposalEntry = {
   generated_at: string
   last_refreshed_at?: string
   last_refresh_reason?: string
-  sections: { title: string; carrier: string; source: ProposalSectionSource }[]
+  // source_file: the uploaded file the section was built from (absent on entries before 2026-10-10).
+  sections: { title: string; carrier: string; source: ProposalSectionSource; source_file?: string }[]
+  // Section titles the person asked to leave out; kept so a rebuild leaves them out too.
+  omitted_sections?: string[]
   // Every attachment the document is built from, oldest first.
   sources: { id: string; filename: string; kind: "quote_pdf" | "ams_docx" | "ams_pdf" }[]
 }

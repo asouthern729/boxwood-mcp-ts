@@ -38,15 +38,16 @@ export function registerProposalBuilderTool(server: McpServer, user: ProposalCre
   server.registerTool(
     "proposal_builder",
     {
-      description: "Builds (or updates) a branded Commercial Insurance Proposal .docx from files the person attached in this chat — carrier quote PDFs and/or AMS360-generated proposals (.docx or PDF). An AMS360 proposal supplies the current program (coverage sections, schedules, named insureds, locations, service team); each quote replaces the same line from the same carrier or adds a new section. No premiums appear in the document. Waits for files still being read (up to a few minutes). To add files to a proposal already built in this conversation, pass its filename as proposal_filename together with the new attachment_ids — the proposal is rebuilt in place with every file it was built from plus the new ones. Returns a download link; the proposal also appears on the Proposal Builder page.",
+      description: "Builds (or updates) a branded Commercial Insurance Proposal .docx from files the person attached in this chat — carrier quote PDFs and/or AMS360-generated proposals (.docx or PDF). An AMS360 proposal supplies the current program (coverage sections, schedules, named insureds, locations, service team); each quote replaces the same line from the same carrier or adds a new section. A Premium Summary lists each quoted line's annual premium (or the current premium for AMS360-only lines). Waits for files still being read (up to a few minutes). To add files to a proposal already built in this conversation, pass its filename as proposal_filename together with the new attachment_ids — the proposal is rebuilt in place with every file it was built from plus the new ones. To change an existing proposal without new files (e.g. leave a section out), pass proposal_filename with an empty attachment_ids. Returns a download link; the proposal also appears on the Proposal Builder page.",
       inputSchema: {
-        attachment_ids: z.array(z.string()).min(1).describe("Ids of the attachments to build from, as listed in the message"),
+        attachment_ids: z.array(z.string()).describe("Ids of the attachments to build from, as listed in the message — may be empty only when proposal_filename is given"),
         proposal_filename: z.string().optional().describe("An existing proposal's filename (from an earlier proposal_builder result in this conversation) to add these files to"),
         client_name: z.string().optional().describe("The client's name as it should print, only if the person gives one — otherwise it's read from the files"),
-        prepared_by: z.string().describe("Who the proposal is prepared by, as \"Firstname Lastname\" — exactly as the person told you in this chat. Ask for it if they haven't said; never guess it or use an email or username")
+        prepared_by: z.string().describe("Who the proposal is prepared by, as \"Firstname Lastname\" — exactly as the person told you in this chat. Ask for it if they haven't said; never guess it or use an email or username"),
+        omit_sections: z.array(z.string()).optional().describe("Coverage section titles to leave out, as proposal_builder reported them (e.g. \"Cyber Liability\"), only when the person asks. On a rebuild, omit it to keep the proposal's earlier choice; pass [] to put every section back")
       }
     },
-    async ({ attachment_ids, proposal_filename, client_name, prepared_by }) => {
+    async ({ attachment_ids, proposal_filename, client_name, prepared_by, omit_sections }) => {
       const refuse = (reason: string) => {
         logger.warn({ sub: user.sub, attachment_ids, proposal_filename, reason }, "proposal_builder refused")
         return errorResult(new Error(reason))
@@ -58,6 +59,7 @@ export function registerProposalBuilderTool(server: McpServer, user: ProposalCre
         if(!PERSON_NAME.test(preparedBy)) {
           return refuse(`"${ prepared_by }" isn't a first and last name. Ask the person who the proposal is prepared by (first and last name), then try again.`)
         }
+        if(attachment_ids.length === 0 && !proposal_filename) return refuse("Pass the attachment ids to build from, or proposal_filename to rebuild an existing proposal.")
         const unknown = attachment_ids.filter((id) => !getOwnedAttachment(id, user.sub))
         if(unknown.length > 0) return refuse(`These attachment ids weren't found among the files you uploaded: ${ unknown.join(", ") }`)
 
@@ -93,6 +95,7 @@ export function registerProposalBuilderTool(server: McpServer, user: ProposalCre
           preparedBy,
           clientName: client_name,
           existing,
+          omitSections: omit_sections,
           refreshReason: newNames.length > 0 ? `Added: ${ newNames.join(", ") }` : "Rebuilt"
         })
 
@@ -107,6 +110,7 @@ export function registerProposalBuilderTool(server: McpServer, user: ProposalCre
           proposal_filename: entry.filename,
           download_url: `${ publicBaseUrl }/downloads/${ token }`,
           sections: entry.sections,
+          ...(entry.omitted_sections ? { omitted_sections: entry.omitted_sections } : {}),
           ...(failed.length > 0 ? { files_not_used: failed.map((r) => ({ filename: r.filename, error: r.error })) } : {})
         })
       } catch(error) {

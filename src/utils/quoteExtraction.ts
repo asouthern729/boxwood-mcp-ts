@@ -43,12 +43,14 @@ const QuoteLine = z.object({
   // by Location", "Coverage Limits by Dwelling") instead of one flat row per building and coverage.
   // Extractions stored before then lack it; readers default it (clQuoteMerge.ts).
   schedules: z.array(z.object({
-    title: z.string().describe("e.g. \"Coverage Limits by Location\", \"Coverage Limits by Dwelling\""),
+    // "Exposure: " titles carry what's insured (GL classes, vehicles, drivers) — added 2026-10-20 for
+    // Patrick's Landon feedback, in this field because a separate one made the grammar too large again.
+    title: z.string().describe("e.g. \"Coverage Limits by Location\", \"Coverage Limits by Dwelling\"; an exposure table's title starts with \"Exposure: \""),
     // Headers and cells joined with " | " rather than arrays — nested arrays (and per-table page
     // lists) made the structured-output grammar too large for the API to compile (400, 2026-10-08).
     headers: z.string().describe("Column headings separated by \" | \", e.g. \"Loc. / Bldg. | Location Address | Building | Business Personal Property | Business Income / Extra Expense\""),
     rows: z.array(z.string()).describe("One row per location/building/dwelling: one cell per heading, in heading order, separated by \" | \", as printed; \"—\" where a column doesn't apply")
-  })).describe("Tables of limits that vary by location, building, dwelling, or other scheduled item — never premiums or rates"),
+  })).describe("Tables of limits that vary by location, building, dwelling, or other scheduled item, plus the exposure tables (titles starting \"Exposure: \") — never premiums or rates"),
   key_facts: z.array(z.object({
     label: z.string().describe("e.g. \"Covered Autos (Symbol)\", \"Coinsurance\", \"Experience Mod\", \"States Covered\""),
     value: z.string()
@@ -62,7 +64,7 @@ const QuoteLine = z.object({
   exclusions: z.array(z.object({ text: z.string() }))
     .describe("Notable exclusions worth flagging to the client, one concise line each"),
   bind_conditions: z.array(z.object({ text: z.string() }))
-    .describe("Subjectivities, conditions to bind, requote triggers, quote-validity terms, and program-wide notes (e.g. coinsurance or ACV reminders) — not exclusions"),
+    .describe("Subjectivities, conditions to bind, requote triggers, and program-wide notes (e.g. coinsurance or ACV reminders), about six at most, one concise line each — not exclusions, not the quote's expiration date (that's quote_expiration_date)"),
   pages: z.array(PageRef).describe("Every page this line's information came from")
 })
 
@@ -85,9 +87,11 @@ const SYSTEM_PROMPT = `You extract coverage details from commercial insurance qu
 - One entry in "lines" per coverage line (property, general liability, auto, workers' comp, umbrella, etc.). A package policy quoting several lines gets one entry per line. A stand-alone add-on that doesn't fit a standard line (e.g. a wind/hail deductible buy-back) is "specialty_addon".
 - Never put a premium, rate, or rate-per-$100 figure into limits, key_facts, enhancements, or bind_conditions — premium belongs only in annual_premium (the line's total; convert a monthly premium to annual and say so in premium_note). Skip per-vehicle and per-class premiums entirely.
 - When limits vary by location, building, or dwelling, put them in schedules as one table — one row per location/building/dwelling (cells separated by " | "), the location/building identifier and address first, then one column per coverage limit (e.g. Building, Business Personal Property, Business Income / Extra Expense; or Dwelling, Other Structures). Six columns at most. Add a non-limit column only when the value differs from row to row and matters to the client (e.g. a roof payout percentage); leave descriptive attributes (occupancy, construction, roof type, yes/no provisions) out of the table — a provision that applies to only some locations belongs in enhancements or exclusions, naming the locations. Keep deductibles, valuation, and coinsurance that apply to every row as key_facts, and don't repeat the table's rows in limits or key_facts.
-- Commercial auto: list each scheduled vehicle as a key_fact labeled "Vehicle <n>" with year/make/model and VIN, not as a limit.
+- Exposures go in schedules as their own tables, titled with an "Exposure: " prefix — not in key_facts. General liability: one "Exposure: Classification & Exposure Schedule" table — Class Code | Description | Basis | Estimated Exposure (basis in words, e.g. "Payroll", "Subcontracted Cost", "Gross Sales"; exposure as a dollar amount or count, e.g. "$20,000,000"). Commercial auto: an "Exposure: Scheduled Vehicle Coverage" table — Veh. No. | Vehicle Description (year make model, plus stated amount or ACV and any attached-equipment amount) | VIN — and, when the quote lists rated drivers, an "Exposure: Scheduled Drivers" table — Driver | License State (blank if not shown). Never a driver's date of birth, license number, points or violations, and never a per-class or per-vehicle premium.
 - Umbrella: list the underlying schedule as key_facts labeled "Underlying: <line>".
 - Name the line's endorsement package in enhancement_package_name when the quote names one (e.g. "CinciPlus Commercial Property XC+"). Notable exclusions go in exclusions; bind_conditions is for subjectivities, requote triggers, quote validity, and program notes.
+- Keep enhancements and exclusions short enough to read at a glance: about eight lines each at most. Give the ones that matter most to the client a line of their own, in plain words with the form number in parentheses (e.g. "Bodily injury to contractors or subcontractors is excluded (CSGA3177)"); group related forms into one line (e.g. "The definition of \"insured contract\" is amended (CG 24 26) and the duties-in-the-event-of-occurrence condition is amended (CSGA439)"); and finish with one line naming the remaining routine exclusions together (e.g. "Other exclusions include EIFS, fungi or bacteria, silica, total pollution, communicable disease, war"). Leave out standard boilerplate (nuclear energy, the policy jacket, state amendatory endorsements).
+- key_facts are for what a client would want to know about the coverage. Leave out administrative details — carrier admitted/non-admitted status, the premises address, UMR or quote reference numbers, number of employees, payment plans, premium discounts, Lloyd's syndicate participation — except put minimum premium and audit terms in bind_conditions.
 - List in pages every 1-indexed PDF page the line's information came from.`
 
 let client: Anthropic | null = null

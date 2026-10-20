@@ -18,7 +18,12 @@ import type { LineOfBusiness, QuoteExtraction, QuoteLineExtraction } from "./quo
 //     own title when the line already has a section from another carrier (Patrick's TN Equine
 //     example: American Modern dwelling fire beside Cincinnati property); a stand-alone add-on
 //     (specialty_addon) becomes its own Section 5 add-on.
-//   - Premiums are never shown — the Premium Summary page is dropped (Patrick, 2026-10-07).
+//   - The CL Renewal Summary never shows premiums — its Premium Summary page is dropped (Patrick,
+//     2026-10-07). Each quoted line still carries its premium (SlotLine.premium) for the Proposal
+//     Builder's Premium Summary (Patrick, 2026-10-18).
+//   - With withExposures (the Proposal Builder), a quoted line with no AMS360 schedules gets the
+//     quote's own GL class, vehicle and driver tables — built from quotes alone, nothing else
+//     supplies them (Patrick's Landon proposal, 2026-10-18).
 //   - Bind conditions from every quote are gathered into one "Bind Conditions & Notes" section, and
 //     each quote's number/expiry into the cover's validity note — Patrick's example does both.
 //   - When two uploads quote the same line, the later upload wins.
@@ -97,23 +102,125 @@ function verifyComment(filename: string, pages: number[]): string {
 // lists them as key facts ("Vehicle 3", "Underlying: General Liability"), which would repeat them.
 const SCHEDULE_FACT = /^(vehicle\b|underlying\b)/i
 
-function quoteKeyFacts(line: QuoteLineExtraction): [string, string][] {
+function quoteKeyFacts(line: QuoteLineExtraction, tabled: Set<string>): [string, string][] {
   const keyFacts: [string, string][] = []
   if(line.carrier) keyFacts.push(["Carrier", line.carrier])
   if(line.am_best_rating) keyFacts.push(["A.M. Best Rating", line.am_best_rating])
   if(line.policy_form) keyFacts.push(["Policy Form", line.policy_form])
   if(line.retroactive_date) keyFacts.push(["Retroactive Date", line.retroactive_date])
   for(const fact of line.key_facts) {
-    if(!SCHEDULE_FACT.test(fact.label)) keyFacts.push([fact.label, fact.value])
+    if(!SCHEDULE_FACT.test(fact.label) && !tabled.has(fact.label)) keyFacts.push([fact.label, fact.value])
   }
   return keyFacts
 }
 
+// Columns never printed from an extracted table even if the extraction kept them: premium, and driver
+// PII (date of birth, license number — same rule as the Pre-Renewal Review's driver schedule).
+const DROPPED_COLUMN = /\bpremium\b(?!\s*basis)|\bdob\b|date of birth|birth ?date|licen[sc]e ?(#|no\b|num)|\bpoints\b|violation/i
+
+// AMS360 repeats a long value on every row (the Subjects of Insurance address, once per subject) —
+// a column like that moves to one line under the table so the rows stay short (Andrew, 2026-10-10).
+// Short repeated values (a state, an "x") stay in their column.
+const REPEATED_MIN_ROWS = 3
+const REPEATED_MIN_LENGTH = 16
+
+// An extracted " | "-joined table as a LineTable, without dropped columns or empty rows.
+export function extractedTable(kind: LineTable["kind"], t: { title: string; headers: string; rows: string[] }): LineTable | null {
+  const cells = (text: string) => text.split("|").map((cell) => cell.trim())
+  const allHeaders = cells(t.headers)
+  const printable = allHeaders.map((h) => !DROPPED_COLUMN.test(h))
+  const filled = (c: string | undefined) => Boolean(c) && c !== "—"
+  const rowsWithData = t.rows.map((r) => cells(r)).filter((r) => r.some((c, i) => printable[i] && filled(c)))
+  // A column the extraction left blank on every row (a quote's drivers with no license state) is dropped.
+  allHeaders.forEach((_, i) => { if(!rowsWithData.some((r) => filled(r[i]))) printable[i] = false })
+  const allRows = rowsWithData
+  if(allRows.length === 0 || !printable.some(Boolean)) return null
+
+  const repeated = allHeaders.map((_, i) => printable[i]
+    && allRows.length >= REPEATED_MIN_ROWS
+    && (allRows[0][i] ?? "").length >= REPEATED_MIN_LENGTH
+    && allRows.every((r) => r[i] === allRows[0][i]))
+  const keep = printable.map((p, i) => p && !repeated[i])
+  if(!keep.some(Boolean)) return null
+
+  const notes = allHeaders.flatMap((h, i) => (repeated[i] ? [`${ h }: ${ allRows[0][i] } (all rows)`] : []))
+  return {
+    kind,
+    title: t.title,
+    headers: allHeaders.filter((_, i) => keep[i]),
+    rows: allRows.map((r) => r.filter((_, i) => keep[i])),
+    ...(notes.length > 0 ? { footnote: notes.join("; ") } : {})
+  }
+}
+
+// Quotes extracted before the exposure tables (2026-10-20) list classes, vehicles and drivers as key facts:
+//   "Classification 91583 (Loc 1)": "Contractors - subcontracted work - …; Premium Base O, 20000000"
+//   "Vehicle 1": "2019 FORD F350, VIN 1FD8W3HT1KEF51492; Stated Amount $70,000 (…)"
+//   "Rated Drivers": "Jimmie Johnson (9 points); Yohana Asgedom (0 points)"
+const EXPOSURE_TITLE = /^exposure:\s*/i
+const CLASS_FACT = /^Classification (\d{4,6})\b/i
+const VEHICLE_FACT = /^Vehicle (\d+)$/i
+const DRIVERS_FACT = /^(rated )?drivers$/i
+
+function exposureFromFacts(line: QuoteLineExtraction): { tables: LineTable[]; tabled: Set<string> } {
+  const tabled = new Set<string>()
+  const tables: LineTable[] = []
+
+  const classes = line.key_facts.flatMap((f) => {
+    const code = f.label.match(CLASS_FACT)?.[1]
+    if(!code) return []
+    tabled.add(f.label)
+    const [description, base = ""] = f.value.split(/;\s*Premium Base\s*/i)
+    const basis = base.match(/\(([^)]+)\)/)?.[1] ?? base.replace(/[\d,.\s]+$/, "").replace(/,$/, "").trim()
+    const amount = base.match(/([\d,.]+)\s*$/)?.[1]?.replace(/,/g, "")
+    const exposure = amount && Number(amount) > 0 ? `${ /payroll|cost|sales|receipts/i.test(basis) ? "$" : "" }${ Number(amount).toLocaleString("en-US") }` : ""
+    return [[code, description.trim(), basis, exposure]]
+  })
+  if(classes.length > 0) {
+    tables.push({ kind: "schedule", title: "Classification & Exposure Schedule", headers: ["Class Code", "Description", "Basis", "Estimated Exposure"], rows: classes, fractions: [0.12, 0.54, 0.14, 0.2] })
+  }
+
+  const vehicles = line.key_facts.flatMap((f) => {
+    const no = f.label.match(VEHICLE_FACT)?.[1]
+    if(!no) return []
+    tabled.add(f.label)
+    const [head, ...rest] = f.value.split(";").map((p) => p.trim())
+    const vin = head.match(/,?\s*VIN:?\s*([A-HJ-NPR-Z0-9]{11,17})/i)
+    const detail = rest.filter((p) => !/^no .* shown$/i.test(p)).join("; ")
+    const description = [(vin ? head.replace(vin[0], "") : head).trim(), detail].filter(Boolean).join(" – ")
+    return [[no, description, vin?.[1] ?? ""]]
+  })
+  if(vehicles.length > 0) {
+    tables.push({ kind: "schedule", title: "Scheduled Vehicle Coverage", headers: ["Veh. No.", "Vehicle Description", "VIN"], rows: vehicles, fractions: [0.1, 0.6, 0.3] })
+  }
+
+  const drivers = line.key_facts.find((f) => DRIVERS_FACT.test(f.label))
+  if(drivers) {
+    tabled.add(drivers.label)
+    const names = drivers.value.split(/;|,(?![^(]*\))/).map((n) => n.replace(/\([^)]*\)/g, "").trim()).filter(Boolean)
+    tables.push({ kind: "schedule", title: "Scheduled Drivers", headers: ["Driver No.", "Name"], rows: names.map((n, i) => [`${ i + 1 }`, n]), fractions: [0.2, 0.8] })
+  }
+
+  return { tables, tabled }
+}
+
+// The quote's own exposure tables, plus any still listed as key facts (older extractions; a table
+// the quote already gives isn't rebuilt from facts).
+function quoteExposures(line: QuoteLineExtraction): { tables: LineTable[]; tabled: Set<string> } {
+  const extracted = (line.schedules ?? [])
+    .filter((s) => EXPOSURE_TITLE.test(s.title))
+    .map((s) => extractedTable("schedule", { ...s, title: s.title.replace(EXPOSURE_TITLE, "") }))
+    .filter((t): t is LineTable => t !== null)
+  const fromFacts = exposureFromFacts(line)
+  return { tables: [...extracted, ...fromFacts.tables.filter((t) => !extracted.some((e) => e.title === t.title))], tabled: fromFacts.tabled }
+}
+
 // Per-location tables first (they carry most of a property quote), then the policy-wide limits.
+// Exposure tables are left to quoteExposures.
 function quoteLimitsTable(line: QuoteLineExtraction): LineTable[] {
   const cells = (text: string) => text.split("|").map((cell) => cell.trim())
   const schedules: LineTable[] = (line.schedules ?? [])
-    .filter((s) => s.headers.trim() !== "" && s.rows.length > 0)
+    .filter((s) => s.headers.trim() !== "" && s.rows.length > 0 && !EXPOSURE_TITLE.test(s.title))
     .map((s) => ({ kind: "limits", title: s.title, headers: cells(s.headers), rows: s.rows.map(cells) }))
   if(line.limits.length === 0) return schedules
   const withDeductible = line.limits.some((l) => l.deductible)
@@ -157,9 +264,12 @@ function sameCarrier(line: SlotLine, quoted: QuoteLineExtraction): boolean {
   return carrierKey(line.carrier) === carrierKey(quoted.carrier)
 }
 
-function applyQuote(existing: SlotLine | undefined, slot: LineSlot, line: QuoteLineExtraction, filename: string, ownTitle = false): SlotLine {
+function applyQuote(existing: SlotLine | undefined, slot: LineSlot, line: QuoteLineExtraction, filename: string, ownTitle: boolean, withExposures: boolean): SlotLine {
   const carrier = line.carrier ?? existing?.carrier ?? ""
-  const schedules = existing?.tables.filter((t) => t.kind === "schedule" && t.title !== "Underlying Coverage Schedule") ?? []
+  const amsSchedules = existing?.tables.filter((t) => t.kind === "schedule" && t.title !== "Underlying Coverage Schedule") ?? []
+  // AMS360's schedules win; the quote's own only fill in when AMS360 has none for this line.
+  const quoted = withExposures && amsSchedules.length === 0 ? quoteExposures(line) : { tables: [], tabled: new Set<string>() }
+  const schedules = [...amsSchedules, ...quoted.tables]
 
   return {
     slot,
@@ -170,11 +280,12 @@ function applyQuote(existing: SlotLine | undefined, slot: LineSlot, line: QuoteL
     // A second carrier's section for the same line (dwelling fire beside commercial property) isn't
     // what the line's standard overview describes.
     overview: existing?.overview ?? overviewFor(ownTitle ? "other" : slot, line.title),
-    keyFacts: quoteKeyFacts(line),
+    keyFacts: quoteKeyFacts(line, quoted.tabled),
     tables: [...quoteLimitsTable(line), ...schedules],
     // AMS360's per-vehicle coverage notes describe the expiring term, not the quote.
     bulletGroups: quoteBulletGroups(line),
     underlying: quoteUnderlying(slot, line, carrier) ?? existing?.underlying,
+    premium: { amount: line.annual_premium, note: line.premium_note },
     comment: verifyComment(filename, line.pages)
   }
 }
@@ -204,7 +315,7 @@ function quoteNote(quotes: QuoteSource[]): string | undefined {
   return notes.length > 0 ? `${ [...new Set(notes)].join("; ") }.` : undefined
 }
 
-export function mergeQuotesIntoProposal(lines: SlotLine[], quotes: QuoteSource[]): MergedProposal {
+export function mergeQuotesIntoProposal(lines: SlotLine[], quotes: QuoteSource[], { withExposures = false } = {}): MergedProposal {
   if(quotes.length === 0) return { lines, bindConditions: { items: [] }, specialtyAddOns: [] }
 
   // Later uploads win per line of business and carrier: keep only the last quote's entry for each.
@@ -235,8 +346,8 @@ export function mergeQuotesIntoProposal(lines: SlotLine[], quotes: QuoteSource[]
     const slot = slotFor(line)
     // "other" lines only replace an AMS360 "other" section of the same name.
     const index = merged.findIndex((l) => l.slot === slot && sameCarrier(l, line) && (slot !== "other" || l.title.toLowerCase() === line.title.toLowerCase()))
-    if(index >= 0) merged[index] = applyQuote(merged[index], slot, line, filename)
-    else merged.push(applyQuote(undefined, slot, line, filename, merged.some((l) => l.slot === slot)))
+    if(index >= 0) merged[index] = applyQuote(merged[index], slot, line, filename, false, withExposures)
+    else merged.push(applyQuote(undefined, slot, line, filename, merged.some((l) => l.slot === slot), withExposures))
   }
 
   const used = [...latestByLine.values()]

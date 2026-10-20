@@ -10,6 +10,7 @@ import type { LocationRow } from "./riskProfileDoc.js"
 // Claude skill, SKILL.md "Global brand spec") — the format he asked cl_renewal_summary to produce
 // (email "FW: TN Equine", 2026-10-07, with TEH_Land_Tennessee_Equine_Hospital_Proposal.docx as the
 // example), minus the Premium Summary page: "we will use the renewal premium tool for that". The
+// Proposal Builder passes premiumSummary and gets that page back (Patrick, 2026-10-18). The
 // skill's palette, banners and data tables live in proposalStyle.ts, shared with the Pre-Renewal
 // Review (riskProfileDoc.ts).
 //
@@ -56,6 +57,9 @@ export type ProposalSpecialtyAddOn = {
 
 export type ServiceTeamMember = { role: string; name: string; phone: string; email: string }
 
+// Skill Section 4. Rows are [line of business, carrier, annual premium]; notes print under the table.
+export type ProposalPremiumSummary = { rows: [string, string, string][]; total: string; notes: string[]; comment?: string }
+
 export type ClProposalInput = {
   clientName: string
   clientAddress: string
@@ -69,11 +73,15 @@ export type ClProposalInput = {
   quoteNote?: string
   preparedBy: { name: string; email: string; phone: string } | null
   proposalDate: string
-  executiveSummary: string[]
+  // null leaves the Executive Summary page out (the Proposal Builder, Patrick 2026-10-18: straight from
+  // the cover into the coverages); named insureds and locations then print only when there's more
+  // than one of either.
+  executiveSummary: string[] | null
   namedInsureds: string[]
   locations: LocationRow[]
   lines: ProposalLine[]
   bindConditions: { items: string[]; comment?: string }
+  premiumSummary?: ProposalPremiumSummary
   specialtyAddOns: ProposalSpecialtyAddOn[]
   whyBoxwood: string[]
   serviceTeam: ServiceTeamMember[]
@@ -148,23 +156,32 @@ function coverPage(input: ClProposalInput): Block[] {
   ]
 }
 
-function executiveSummary(input: ClProposalInput): Block[] {
+function insuredTables(namedInsureds: string[], locations: LocationRow[]): Block[] {
   return [
-    ...banner("Executive Summary", { withLogo: false }),
-    ...input.executiveSummary.map(plain),
-    ...tableBlocks({ title: "Named Insureds", headers: ["Named Insured"], rows: input.namedInsureds.map((n) => [n]) }),
+    ...tableBlocks({ title: "Named Insureds", headers: ["Named Insured"], rows: namedInsureds.map((n) => [n]) }),
     ...tableBlocks({
       title: "Location Schedule",
       headers: ["Loc.", "Address", "City", "State", "Zip"],
-      rows: input.locations.map((l) => [l.locNo, l.address, l.city, l.state, l.zip]),
+      rows: locations.map((l) => [l.locNo, l.address, l.city, l.state, l.zip]),
       fractions: [0.08, 0.44, 0.24, 0.1, 0.14]
     })
   ]
 }
 
-function lineSection(line: ProposalLine, comments: DocComment[]): Block[] {
+// Ends with a page break when it prints anything, so the first coverage section starts a new page.
+function executiveSummary(input: ClProposalInput): Block[] {
+  if(input.executiveSummary) {
+    return [...banner("Executive Summary", { withLogo: false }), ...input.executiveSummary.map(plain), ...insuredTables(input.namedInsureds, input.locations), pageBreak()]
+  }
+  const namedInsureds = input.namedInsureds.length > 1 ? input.namedInsureds : []
+  const locations = input.locations.length > 1 ? input.locations : []
+  if(namedInsureds.length === 0 && locations.length === 0) return []
+  return [...banner("Named Insureds & Locations", { withLogo: false }), ...insuredTables(namedInsureds, locations), pageBreak()]
+}
+
+function lineSection(line: ProposalLine, comments: DocComment[], first: boolean): Block[] {
   return [
-    pageBreak(),
+    ...(first ? [] : [pageBreak()]),
     ...banner(line.title, { withLogo: true, comment: register(comments, line.comment) }),
     ...(line.overview ? [overview(line.overview)] : []),
     ...line.keyFacts.map(([label, value]) => keyFact(label, value)),
@@ -181,13 +198,22 @@ function register(comments: DocComment[], text: string | undefined): DocComment 
 }
 
 // Skill Section 4 puts "Bind Conditions & Notes" under the Premium Summary, on a page of its own.
-// The premium table is dropped here (Patrick, 2026-10-07), so the notes keep that page by themselves.
+// The CL Renewal Summary drops the premium table (Patrick, 2026-10-07), so its notes keep that page
+// by themselves.
 function bindConditions(input: ClProposalInput, comments: DocComment[]): Block[] {
-  if(input.bindConditions.items.length === 0) return []
+  const premium = input.premiumSummary
+  if(input.bindConditions.items.length === 0 && !premium) return []
+  const items = input.bindConditions.items.map(bullet)
+  if(!premium) return [pageBreak(), ...banner("Bind Conditions & Notes", { withLogo: true, comment: register(comments, input.bindConditions.comment) }), ...items]
+
+  // One page: the premium table, then the notes under a sub-heading; one comment covers both.
+  const comment = [premium.comment, input.bindConditions.comment].filter(Boolean).join(" ")
   return [
     pageBreak(),
-    ...banner("Bind Conditions & Notes", { withLogo: true, comment: register(comments, input.bindConditions.comment) }),
-    ...input.bindConditions.items.map(bullet)
+    ...banner("Premium Summary", { withLogo: true, comment: register(comments, comment || undefined) }),
+    dataTable(["Line of Business", "Carrier", "Annual Premium"], [...premium.rows, ["TOTAL PROGRAM PREMIUM", "", premium.total]], [0.36, 0.44, 0.2], { keepBlank: true }),
+    ...premium.notes.map(footnote),
+    ...(items.length > 0 ? [subHeader("Bind Conditions & Notes"), ...items] : [])
   ]
 }
 
@@ -226,7 +252,9 @@ function footerStrip(): Paragraph[] {
 
 export async function buildClProposalDoc(input: ClProposalInput): Promise<{ buffer: Buffer; includedSections: string[] }> {
   const comments: DocComment[] = []
-  const lineBlocks = input.lines.flatMap((line) => lineSection(line, comments))
+  const summaryBlocks = executiveSummary(input)
+  // The cover and the Executive Summary each end on a page break, so the first section needs none.
+  const lineBlocks = input.lines.flatMap((line, i) => lineSection(line, comments, i === 0))
   const bindBlocks = bindConditions(input, comments)
   const addOnBlocks = input.specialtyAddOns.flatMap((addOn) => specialtyAddOn(addOn, comments))
 
@@ -255,7 +283,7 @@ export async function buildClProposalDoc(input: ClProposalInput): Promise<{ buff
       properties: { page: pageProperties },
       children: [
         ...coverPage(input),
-        ...executiveSummary(input),
+        ...summaryBlocks,
         ...lineBlocks,
         ...bindBlocks,
         // Add-ons flow on from whatever precedes them (skill: no forced break), except Bind Conditions keeps its page alone.
@@ -270,8 +298,9 @@ export async function buildClProposalDoc(input: ClProposalInput): Promise<{ buff
   })
 
   const includedSections = [
-    "Executive Summary",
+    ...(input.executiveSummary ? ["Executive Summary"] : []),
     ...input.lines.map((l) => l.title),
+    ...(input.premiumSummary ? ["Premium Summary"] : []),
     ...(input.bindConditions.items.length > 0 ? ["Bind Conditions & Notes"] : []),
     ...input.specialtyAddOns.map((a) => a.title),
     "Why Boxwood Insurance Group"

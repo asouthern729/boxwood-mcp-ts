@@ -1,9 +1,9 @@
 import { randomBytes } from "node:crypto"
 import type { AmsLineExtraction, AmsProposalExtraction } from "./amsProposalExtraction.js"
-import { buildClProposalDoc, type ServiceTeamMember } from "./clProposalDoc.js"
-import { completeUmbrellas, overviewFor, periodLabel, SLOT_TITLES, type LineTable, type SlotLine } from "./clProposalLines.js"
-import { executiveSummary, whyBoxwood } from "./clProposalText.js"
-import { mergeQuotesIntoProposal, pageLabel, slotFor, type QuoteSource } from "./clQuoteMerge.js"
+import { buildClProposalDoc, type ProposalPremiumSummary, type ServiceTeamMember } from "./clProposalDoc.js"
+import { carrierKey, completeUmbrellas, overviewFor, periodLabel, SLOT_TITLES, type LinePremium, type LineTable, type SlotLine } from "./clProposalLines.js"
+import { whyBoxwood } from "./clProposalText.js"
+import { extractedTable, mergeQuotesIntoProposal, pageLabel, slotFor, type QuoteSource } from "./clQuoteMerge.js"
 import { orderLines } from "./clRenewalSummaryGenerate.js"
 import { sanitizeForFilename } from "./docArchive.js"
 import type { ProposalAttachment } from "./proposalAttachments.js"
@@ -16,50 +16,38 @@ import type { LocationRow } from "./riskProfileDoc.js"
 // program — sections, schedules, named insureds, locations and service team — and carrier quotes
 // replace or add lines exactly as they do on a Renewal Summary (clQuoteMerge.ts: a quoted line takes
 // over the same line from the same carrier, keeping the AMS360 schedules of what's insured). Built
-// from quotes alone, every section comes from the quotes. No premiums anywhere (Andrew, 2026-10-10)
-// — the AMS360 Premium Summary's expiring premiums are stored on the attachment, not printed.
+// from quotes alone, every section comes from the quotes, GL class, vehicle and driver schedules
+// included.
+//
+// Patrick's Landon feedback (2026-10-18), against his insurance-proposal skill's version of the same
+// proposal: a Premium Summary (premiums were left out until then, Andrew 2026-10-10), schedules of
+// exposures, vehicles and drivers, and a more condensed document — no Executive Summary page, excess
+// layers in one section side by side, no administrative key facts.
 
 const QUOTE_COMMENT = /^Added by Claude from uploaded quote/
-
-// Columns never printed from an AMS360 table even if the extraction kept them: premium, and driver
-// PII (date of birth, license number — same rule as the Pre-Renewal Review's driver schedule).
-const DROPPED_COLUMN = /\bpremium\b(?!\s*basis)|\bdob\b|date of birth|birth ?date|licen[sc]e ?(#|no\b|num)/i
-
-// AMS360 repeats a long value on every row (the Subjects of Insurance address, once per subject) —
-// a column like that moves to one line under the table so the rows stay short (Andrew, 2026-10-10).
-// Short repeated values (a state, an "x") stay in their column.
-const REPEATED_MIN_ROWS = 3
-const REPEATED_MIN_LENGTH = 16
-
-function table(kind: LineTable["kind"], t: { title: string; headers: string; rows: string[] }): LineTable | null {
-  const cells = (text: string) => text.split("|").map((cell) => cell.trim())
-  const allHeaders = cells(t.headers)
-  const printable = allHeaders.map((h) => !DROPPED_COLUMN.test(h))
-  const allRows = t.rows.map((r) => cells(r)).filter((r) => r.some((c, i) => printable[i] && c && c !== "—"))
-  if(allRows.length === 0 || !printable.some(Boolean)) return null
-
-  const repeated = allHeaders.map((_, i) => printable[i]
-    && allRows.length >= REPEATED_MIN_ROWS
-    && (allRows[0][i] ?? "").length >= REPEATED_MIN_LENGTH
-    && allRows.every((r) => r[i] === allRows[0][i]))
-  const keep = printable.map((p, i) => p && !repeated[i])
-  if(!keep.some(Boolean)) return null
-
-  const notes = allHeaders.flatMap((h, i) => (repeated[i] ? [`${ h }: ${ allRows[0][i] } (all rows)`] : []))
-  return {
-    kind,
-    title: t.title,
-    headers: allHeaders.filter((_, i) => keep[i]),
-    rows: allRows.map((r) => r.filter((_, i) => keep[i])),
-    ...(notes.length > 0 ? { footnote: notes.join("; ") } : {})
-  }
-}
 
 function amsComment(filename: string, pages: number[]): string {
   return `Added by Claude from uploaded AMS360 proposal "${ filename }"${ pageLabel(pages) }. Please verify against it before sending to the client.`
 }
 
-function amsLine(line: AmsLineExtraction, filename: string): SlotLine {
+const words = (text: string) => text.toLowerCase().replace(/[^a-z0-9 ]/g, " ").split(/\s+/).filter((w) => w.length > 2)
+
+// The AMS360 Premium Summary names lines its own way ("Commercial General Liability", "Business
+// Auto"): the row sharing the most words with the section's title, preferring the same company.
+function amsPremium(line: AmsLineExtraction, premiums: AmsProposalExtraction["expiring_premiums"]): LinePremium | undefined {
+  const title = new Set(words(line.title))
+  const carrier = carrierKey(line.carrier ?? line.writing_company ?? "")
+  const best = premiums
+    .filter((p) => p.premium)
+    .map((p) => ({ p, score: words(p.line).filter((w) => title.has(w)).length * 2 + (p.company && carrierKey(p.company) === carrier ? 1 : 0) }))
+    .filter((c) => c.score >= 2)
+    .sort((a, b) => b.score - a.score)[0]
+  if(!best) return undefined
+  const amount = Number(best.p.premium!.replace(/[$,\s]/g, ""))
+  return { amount: Number.isFinite(amount) ? amount : null, note: null, current: true }
+}
+
+function amsLine(line: AmsLineExtraction, filename: string, premiums: AmsProposalExtraction["expiring_premiums"]): SlotLine {
   const slot = line.line_of_business === "specialty_addon" ? "other" : slotFor(line)
   const carrier = line.carrier ?? line.writing_company ?? ""
   const withDeductible = line.limits.some((l) => l.deductible)
@@ -71,7 +59,7 @@ function amsLine(line: AmsLineExtraction, filename: string): SlotLine {
   ]
 
   const tables = [
-    ...line.limit_schedules.map((t) => table("limits", t)),
+    ...line.limit_schedules.map((t) => extractedTable("limits", t)),
     ...(line.limits.length > 0
       ? [{
           kind: "limits" as const,
@@ -81,7 +69,7 @@ function amsLine(line: AmsLineExtraction, filename: string): SlotLine {
           fractions: withDeductible ? [0.5, 0.25, 0.25] : [0.6, 0.4]
         }]
       : []),
-    ...line.exposure_schedules.map((t) => table("schedule", t))
+    ...line.exposure_schedules.map((t) => extractedTable("schedule", t))
   ].filter((t): t is LineTable => t !== null)
 
   return {
@@ -94,9 +82,176 @@ function amsLine(line: AmsLineExtraction, filename: string): SlotLine {
     keyFacts,
     tables,
     bulletGroups: line.endorsements.length > 0 ? [{ title: "Included Options & Endorsements", items: line.endorsements.map((e) => e.text) }] : [],
+    premium: amsPremium(line, premiums),
     comment: amsComment(filename, line.pages)
   }
 }
+
+// ---------- Condensing ----------
+
+// Key facts a client doesn't need (Patrick's Landon example leaves them all out). Minimum premium and
+// audit terms are left to Bind Conditions & Notes, where the quotes already state them.
+const ADMIN_FACT = /carrier status|^premises\b|payment (options?|plans?)|syndicate|^umr$|number of employees|premium discount|description of risk|billing|minimum (earned )?premium|audit/i
+
+function dropAdminFacts(lines: SlotLine[]): void {
+  for(const line of lines) line.keyFacts = line.keyFacts.filter(([label]) => !ADMIN_FACT.test(label))
+}
+
+// Each quote is read on its own, so the same condition arrives once per quote ("Quote expires
+// 11/08/2026" three times for Landon). A condition is dropped when another says the same thing or
+// more; quote validity is already on the cover.
+const QUOTE_VALIDITY = /^quotes? (expires?|valid)[^;.]*\.?$/i
+
+function condensedConditions(items: string[], hasQuoteNote: boolean): string[] {
+  const norm = (s: string) => s.toLowerCase().replace(/[^a-z0-9]+/g, " ").trim()
+  const kept = items.filter((item) => !(hasQuoteNote && QUOTE_VALIDITY.test(item.trim())))
+  return kept.filter((item, i) => {
+    const n = norm(item)
+    return !kept.some((other, j) => j !== i && (norm(other) === n ? j < i : norm(other).includes(n)))
+  })
+}
+
+// "Policy Form" (read from the quote's form field) and "Coverage Form" (a key fact) are the same row.
+const FIELD_ALIASES: Record<string, string> = { "Policy Form": "Coverage Form" }
+
+const dollars = (text: string | undefined) => Number(text?.match(/\$?\s*([\d,]+(?:\.\d+)?)/)?.[1]?.replace(/,/g, "") ?? Number.NaN)
+const money = (n: number, cents = false) => n.toLocaleString("en-US", { style: "currency", currency: "USD", minimumFractionDigits: cents ? 2 : 0, maximumFractionDigits: cents ? 2 : 0 })
+
+function limitRow(line: SlotLine, pattern: RegExp): string | undefined {
+  return line.tables.filter((t) => t.kind === "limits").flatMap((t) => t.rows).find((r) => pattern.test(r[0]))?.[1]
+}
+
+// Excess layers in attachment order: the smaller each-occurrence limit sits lower.
+function excessLayers(lines: SlotLine[]): SlotLine[] {
+  const layers = lines.filter((l) => l.slot === "umbrella_excess")
+  return layers.length < 2 ? layers : [...layers].sort((a, b) => (dollars(limitRow(a, /occurrence/i)) || 0) - (dollars(limitRow(b, /occurrence/i)) || 0))
+}
+
+function layerLabel(line: SlotLine, index: number): string {
+  const occurrence = limitRow(line, /occurrence/i)
+  return `Excess Liability – Layer ${ index + 1 }${ occurrence ? ` (${ occurrence })` : "" }`
+}
+
+// Two or more excess layers become one section with the layers side by side (Patrick's Landon
+// example). Runs before completeUmbrellas, which then adds the primary underlying lines.
+function combineExcessLayers(lines: SlotLine[]): { lines: SlotLine[]; layerBelow?: { label: string; carrier: string; limit: string } } {
+  const layers = excessLayers(lines)
+  if(layers.length < 2) return { lines }
+
+  const occurrence = layers.map((l) => limitRow(l, /occurrence/i))
+  const aggregate = layers.map((l) => limitRow(l, /aggregate/i))
+  const cell = (values: (string | undefined)[]) => values.map((v) => v || "—")
+
+  // Every other fact or limit, one row each, so nothing a layer carried is lost.
+  const otherRows = new Map<string, (string | undefined)[]>()
+  layers.forEach((layer, i) => {
+    const facts: [string, string][] = [
+      ...layer.keyFacts.filter(([label]) => label !== "Carrier"),
+      ...layer.tables.filter((t) => t.kind === "limits").flatMap((t) => t.rows).filter((r) => !/occurrence|aggregate/i.test(r[0])).map((r): [string, string] => [r[0], r.slice(1).filter(Boolean).join(" / ")])
+    ]
+    for(const [rawLabel, value] of facts) {
+      const label = FIELD_ALIASES[rawLabel] ?? rawLabel
+      if(!otherRows.has(label)) otherRows.set(label, layers.map(() => undefined))
+      otherRows.get(label)![i] ??= value
+    }
+  })
+  const periods = layers.map((l) => l.period)
+
+  const details: LineTable = {
+    kind: "limits",
+    title: "Excess Policy Details",
+    headers: ["Field", ...layers.map((_, i) => `Excess Layer ${ i + 1 }`)],
+    rows: [
+      ["Carrier", ...cell(layers.map((l) => l.carrier))],
+      ["Each Occurrence Limit", ...cell(occurrence)],
+      ["Annual Aggregate Limit", ...cell(aggregate)],
+      ...(new Set(periods).size > 1 ? [["Policy Period", ...cell(periods)]] : []),
+      ...[...otherRows].map(([label, values]) => [label, ...cell(values)])
+    ],
+    fractions: [0.28, ...layers.map(() => 0.72 / layers.length)]
+  }
+
+  const groups = new Map<string, Set<string>>()
+  for(const group of layers.flatMap((l) => l.bulletGroups)) {
+    if(!groups.has(group.title)) groups.set(group.title, new Set())
+    group.items.forEach((item) => groups.get(group.title)!.add(item))
+  }
+
+  const amounts = occurrence.map(dollars)
+  const overview = amounts.every((n) => n > 0)
+    ? `Excess liability adds ${ layers.length } layers of limits above the primary liability policies – ${ occurrence.join(" followed by ") } – for ${ money(amounts.reduce((a, b) => a + b, 0)) } of excess limits in total.`
+    : ""
+
+  const combined: SlotLine = {
+    slot: "umbrella_excess",
+    title: SLOT_TITLES.umbrella_excess,
+    carrier: layers[0].carrier,
+    polno: "",
+    period: layers[0].period,
+    overview,
+    keyFacts: [],
+    tables: [details, ...layers.flatMap((l) => l.tables.filter((t) => t.kind === "schedule" && t.title !== "Underlying Coverage Schedule"))],
+    bulletGroups: [...groups].map(([title, items]) => ({ title, items: [...items] })),
+    comment: [...new Set(layers.map((l) => l.comment).filter(Boolean))].join(" ")
+  }
+
+  const first = lines.findIndex((l) => l.slot === "umbrella_excess")
+  const rest = lines.filter((l) => l.slot !== "umbrella_excess")
+  rest.splice(first, 0, combined)
+
+  const below = layers[layers.length - 2]
+  const belowIndex = layers.length - 2
+  return {
+    lines: rest,
+    layerBelow: {
+      label: `Excess Layer ${ belowIndex + 1 } (underlying to Layer ${ belowIndex + 2 })`,
+      carrier: below.carrier,
+      limit: [occurrence[belowIndex] && `${ occurrence[belowIndex] } each occurrence`, aggregate[belowIndex] && `${ aggregate[belowIndex] } aggregate`].filter(Boolean).join(" / ")
+    }
+  }
+}
+
+// ---------- Premium Summary ----------
+
+function premiumSummary(lines: SlotLine[]): ProposalPremiumSummary | undefined {
+  const priced = lines.filter((l) => l.premium)
+  if(!priced.some((l) => l.premium!.amount !== null)) return undefined
+
+  const layers = excessLayers(lines)
+  const label = (line: SlotLine) => {
+    const layer = layers.length > 1 ? layers.indexOf(line) : -1
+    const title = layer >= 0 ? layerLabel(line, layer) : line.title
+    return line.premium?.current ? `${ title } (current)` : title
+  }
+
+  const rows: [string, string, string][] = lines.map((l) => [
+    label(l),
+    l.carrier,
+    l.premium?.amount != null ? money(l.premium.amount, true) : l.premium && !l.premium.current ? "See quote options" : "Not shown"
+  ])
+  const total = lines.reduce((sum, l) => sum + (l.premium?.amount ?? 0), 0)
+
+  const unpriced = lines.filter((l) => l.premium?.amount == null).map((l) => l.title)
+  const current = lines.some((l) => l.premium?.current)
+  const notes = [
+    "Quoted amounts are the annual totals shown on each quote, including taxes and fees where the quote's total includes them.",
+    ...(current ? ["Lines marked (current) show the current premium from the AMS360 proposal."] : []),
+    ...(unpriced.length > 0 ? [`The total excludes ${ unpriced.join(", ") }, which ${ unpriced.length > 1 ? "have" : "has" } no premium shown.`] : []),
+    "All amounts are estimates, subject to change at binding."
+  ]
+
+  // The quotes' own premium notes (what the total includes, pay-in-full discounts, audit) can carry
+  // reviewer remarks, so they go to the account manager in the comment, not to the client.
+  const quoteNotes = lines.filter((l) => l.premium?.note).map((l) => `${ label(l) }: ${ l.premium!.note }`)
+  return {
+    rows,
+    total: money(total, true),
+    notes,
+    comment: `Premiums added by Claude from the uploaded files — please verify each against its quote before sending.${ quoteNotes.length > 0 ? ` Quote notes: ${ quoteNotes.join(" | ") }` : "" }`
+  }
+}
+
+// ---------- Helpers ----------
 
 function addressKey(l: LocationRow): string {
   return `${ l.address.toLowerCase().replace(/\broad\b/g, "rd").replace(/[^a-z0-9]/g, "") }|${ l.zip.slice(0, 5) }`
@@ -130,6 +285,13 @@ function todayInChicago(): string {
   return new Intl.DateTimeFormat("en-US", { timeZone: "America/Chicago", month: "long", day: "numeric", year: "numeric" }).format(new Date())
 }
 
+// Every section's review comment names the file it came from ("…uploaded quote "x.pdf" (pages …)").
+function sourceFile(comment: string | undefined): string | undefined {
+  return comment?.match(/"([^"]+)"/)?.[1]
+}
+
+const sectionKey = (title: string) => title.toLowerCase().replace(/[^a-z0-9]/g, "")
+
 export class ProposalBuildError extends Error {}
 
 export type BuildProposalInput = {
@@ -140,6 +302,8 @@ export type BuildProposalInput = {
   // that printed "andrew@tyneside.io").
   preparedBy: string
   clientName?: string
+  // Section titles to leave out. Undefined keeps an existing proposal's earlier choice.
+  omitSections?: string[]
   // Rebuilding an existing proposal keeps its filename and creation time.
   existing?: ProposalEntry
   refreshReason?: string
@@ -151,10 +315,27 @@ export async function buildProposal(input: BuildProposalInput): Promise<{ buffer
   const quotes: QuoteSource[] = ready.filter((a) => a.quote).map((a) => ({ filename: a.filename, extraction: a.quote! }))
   if(amsSources.length === 0 && quotes.length === 0) throw new ProposalBuildError("None of these files has been read successfully, so there's nothing to build from.")
 
-  const amsLines = amsSources.flatMap(({ filename, ams }) => ams.lines.map((line) => amsLine(line, filename)))
-  const merged = mergeQuotesIntoProposal(amsLines, quotes)
-  const lines = orderLines(merged.lines)
+  const amsLines = amsSources.flatMap(({ filename, ams }) => ams.lines.map((line) => amsLine(line, filename, ams.expiring_premiums)))
+  const merged = mergeQuotesIntoProposal(amsLines, quotes, { withExposures: true })
+
+  const omitted = (input.omitSections ?? input.existing?.omitted_sections ?? []).map((t) => t.trim()).filter(Boolean)
+  const omittedKeys = new Set(omitted.map(sectionKey))
+  const kept = orderLines(merged.lines).filter((l) => !omittedKeys.has(sectionKey(l.title)))
+  dropAdminFacts(kept)
+
+  // An omitted line's own bind conditions go with it (Landon's cyber application), unless a kept
+  // line states the same condition.
+  const quoteLines = quotes.flatMap((q) => q.extraction.lines)
+  const lineTitles = (l: typeof quoteLines[number]) => [l.title, l.line_of_business === "specialty_addon" ? l.title : SLOT_TITLES[slotFor(l)]].map(sectionKey)
+  const omittedOnly = new Set(quoteLines.filter((l) => lineTitles(l).some((t) => omittedKeys.has(t))).flatMap((l) => l.bind_conditions.map((c) => c.text)))
+  for(const l of quoteLines.filter((l) => !lineTitles(l).some((t) => omittedKeys.has(t)))) l.bind_conditions.forEach((c) => omittedOnly.delete(c.text))
+  const premiums = premiumSummary(kept)
+
+  const { lines, layerBelow } = combineExcessLayers(kept)
   completeUmbrellas(lines)
+  if(layerBelow) {
+    lines.find((l) => l.slot === "umbrella_excess")?.tables.find((t) => t.title === "Underlying Coverage Schedule")?.rows.push([layerBelow.label, layerBelow.carrier, layerBelow.limit])
+  }
 
   const clientName = input.clientName?.trim()
     || input.existing?.client_name
@@ -206,15 +387,16 @@ export async function buildProposal(input: BuildProposalInput): Promise<{ buffer
     quoteNote: merged.quoteNote,
     preparedBy: { name: input.preparedBy, email: "", phone: AGENCY.phone },
     proposalDate: todayInChicago(),
-    executiveSummary: executiveSummary(narrativeFacts),
+    executiveSummary: null,
     namedInsureds,
     locations,
     lines,
     bindConditions: {
-      items: [...merged.bindConditions.items, ...amsSources.flatMap((s) => s.ams.subject_to.map((c) => c.text))],
+      items: condensedConditions([...merged.bindConditions.items.filter((c) => !omittedOnly.has(c)), ...amsSources.flatMap((s) => s.ams.subject_to.map((c) => c.text))], Boolean(merged.quoteNote)),
       comment: merged.bindConditions.comment
     },
-    specialtyAddOns: merged.specialtyAddOns,
+    premiumSummary: premiums,
+    specialtyAddOns: merged.specialtyAddOns.filter((a) => !omittedKeys.has(sectionKey(a.title))),
     whyBoxwood: whyBoxwood(narrativeFacts),
     serviceTeam
   })
@@ -229,9 +411,10 @@ export async function buildProposal(input: BuildProposalInput): Promise<{ buffer
     generated_at: input.existing?.generated_at ?? now,
     ...(input.existing ? { last_refreshed_at: now, last_refresh_reason: input.refreshReason ?? "Rebuilt" } : {}),
     sections: [
-      ...lines.map((l) => ({ title: l.title, carrier: l.carrier, source: QUOTE_COMMENT.test(l.comment ?? "") ? "quote" as const : "ams" as const })),
-      ...merged.specialtyAddOns.map((a) => ({ title: a.title, carrier: "", source: "quote" as const }))
+      ...lines.map((l) => ({ title: l.title, carrier: l.carrier, source: QUOTE_COMMENT.test(l.comment ?? "") ? "quote" as const : "ams" as const, source_file: sourceFile(l.comment) })),
+      ...merged.specialtyAddOns.map((a) => ({ title: a.title, carrier: "", source: "quote" as const, source_file: sourceFile(a.comment) }))
     ],
+    ...(omitted.length > 0 ? { omitted_sections: omitted } : {}),
     sources: input.attachments.map((a) => ({ id: a.id, filename: a.filename, kind: a.kind }))
   }
 
