@@ -1,8 +1,9 @@
 import { existsSync, mkdirSync, readFileSync, unlinkSync, writeFileSync } from "node:fs"
 import path from "node:path"
+import { outputDir as outputPath } from "../config/config.js"
 
 // The shared archive shape behind the CL document index pages (risk-profile, cl-renewal-summary):
-// the generated .docx files under scripts/output/<subdir>/ (gitignored, retention-cron-cleaned) plus
+// the generated .docx files under <OUTPUT_ROOT>/<subdir>/ (retention-cron-cleaned) plus
 // a manifest.json of entries keyed by filename. A JSON manifest (not a filename-derived listing like
 // reports.ts's download-report page) because the index pages group by CSR, which isn't reliably
 // recoverable by parsing a filename alone. renewalPremiumSummaryArchive.ts predates this and keeps
@@ -52,7 +53,7 @@ export type DocArchiveEntry = {
 // Entries only need a filename here; DocArchiveEntry is the CSR-grouped shape the CL index pages
 // share, and the Proposal Builder (proposalBuilderArchive.ts) keys its own entries on the creator.
 export function createDocArchive<Entry extends { filename: string } = DocArchiveEntry>(subdir: string) {
-  const outputDir = path.join(import.meta.dirname, "..", "..", "scripts", "output", subdir)
+  const outputDir = outputPath(subdir)
   const manifestPath = path.join(outputDir, "manifest.json")
 
   function readManifest(): Entry[] {

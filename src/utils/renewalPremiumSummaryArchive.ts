@@ -1,11 +1,12 @@
 import { existsSync, mkdirSync, readFileSync, unlinkSync, writeFileSync } from "node:fs"
 import path from "node:path"
+import { outputDir } from "../config/config.js"
 import type { RenewalPremiumSummaryCellMapEntry } from "./renewalPremiumSummaryWorkbook.js"
 
 // Same on-disk convention as riskProfileArchive.ts's cl-risk-profile dir — written under
-// scripts/output/ (gitignored, retention-cron-cleaned), its own subdirectory since this is a
+// <OUTPUT_ROOT>/ (retention-cron-cleaned), its own subdirectory since this is a
 // distinct tool/output (renewal_premium_spreadsheet's xlsx, not risk_profile's docx).
-export const RENEWAL_PREMIUM_SUMMARY_OUTPUT_DIR = path.join(import.meta.dirname, "..", "..", "scripts", "output", "cl-renewal-premium-summaries")
+export const RENEWAL_PREMIUM_SUMMARY_OUTPUT_DIR = outputDir("cl-renewal-premium-summaries")
 const MANIFEST_PATH = path.join(RENEWAL_PREMIUM_SUMMARY_OUTPUT_DIR, "manifest.json")
 
 export type RenewalPremiumSummaryManifestEntry = {
@@ -54,7 +55,7 @@ export function readManifest(): RenewalPremiumSummaryManifestEntry[] {
   }
 }
 
-// Writes the finished .xlsx to scripts/output/cl-renewal-premium-summaries/ and upserts its
+// Writes the finished .xlsx to <OUTPUT_ROOT>/cl-renewal-premium-summaries/ and upserts its
 // manifest.json entry. Regenerating for the same account overwrites both the file and its manifest
 // entry (matched on filename) rather than accumulating duplicates — the tool always rebuilds the
 // account's full current picture, so there's never a reason to keep a stale prior version around.

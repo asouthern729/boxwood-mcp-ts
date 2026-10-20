@@ -6,7 +6,7 @@ import {
 } from "./uploadStore.js"
 
 // Quote PDFs uploaded against an archived CL Renewal Summary, and what was extracted from each —
-// scripts/output/cl-renewal-summary/quotes/<document>/<id>.pdf + <id>.json, where <document> is the
+// <OUTPUT_ROOT>/cl-renewal-summary/quotes/<document>/<id>.pdf + <id>.json, where <document> is the
 // archive filename minus ".docx". That archive filename is keyed on the policy terms the document
 // covers (see clRenewalSummaryGenerate.ts), so every rebuild of the same terms — a rebuild after
 // another upload, after a deletion, or once the renewal term lands — finds the same quotes again.

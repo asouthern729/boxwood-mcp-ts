@@ -1,6 +1,6 @@
 // Unattended morning-download automation: drives download_report -> accuracy judgment ->
 // download_report_workbook end to end via the Claude Agent SDK, then writes the resulting .xlsx
-// to scripts/output/download-report/. Runs its own in-process McpServer instance (createServer()) — no subprocess,
+// to <OUTPUT_ROOT>/download-report/. Runs its own in-process McpServer instance (createServer()) — no subprocess,
 // no HTTP, no Auth0 — since this script always runs on the same machine as the deployed server, and
 // reads the generated file straight out of its own in-process downloadStore rather than fetching
 // the public download link download_report_workbook returns (see the comment above
@@ -26,12 +26,13 @@
 import "dotenv/config"
 import { mkdirSync, writeFileSync } from "node:fs"
 import path from "node:path"
+import { outputDir } from "../src/config/config.js"
 import { query } from "@anthropic-ai/claude-agent-sdk"
 import { createServer } from "../src/mcpServer.js"
 import { readDownloadReportWatermark, writeDownloadReportWatermark } from "../src/utils/downloadReportWatermark.js"
 import { getDownload } from "../src/utils/downloadStore.js"
 
-const OUTPUT_DIR = path.join(import.meta.dirname, "output", "download-report")
+const OUTPUT_DIR = outputDir("download-report")
 
 // This script runs unattended via cron (see scripts/dailyMorningDownload.sh), so it must not
 // depend on whatever `claude login` session happens to be active on the box — that's a personal,

@@ -9,7 +9,7 @@
 // scripts/morningDownload.ts's pattern, there's nothing here for an LLM to decide; every custid is
 // already known from the discovery query below). No email is sent — per direction to back off
 // automated email except the download-report job, this script only generates + archives to
-// scripts/output/cl-renewal-premium-summaries/; the manifest.json it updates is what the
+// <OUTPUT_ROOT>/cl-renewal-premium-summaries/; the manifest.json it updates is what the
 // renewal-premium-summaries index page (and, eventually, the download site) reads from.
 //
 // Usage: npx tsx scripts/monthlyRenewalPremiumSummaries.ts [--month=YYYY-MM]

@@ -1,7 +1,7 @@
 import { createDocArchive } from "./docArchive.js"
 import type { DocArchiveEntry } from "./docArchive.js"
 
-// scripts/output/cl-renewal-summary/ — same manifest/file conventions as the risk profile archive
+// <OUTPUT_ROOT>/cl-renewal-summary/ — same manifest/file conventions as the risk profile archive
 // (see docArchive.ts), its own directory so the two index pages stay independent.
 const clRenewalSummaryArchive = createDocArchive("cl-renewal-summary")
 

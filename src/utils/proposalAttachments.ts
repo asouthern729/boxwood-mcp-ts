@@ -17,7 +17,7 @@ const execFileAsync = promisify(execFile)
 // (.docx or PDF). Each is read by Claude in the background as soon as it's uploaded — the chat polls
 // its status — and owned by whoever uploaded it. A proposal records which attachments built it
 // (proposalBuilderArchive.ts), so they stay on disk until that proposal is deleted.
-//   scripts/output/proposal-builder/attachments/<id>.<pdf|docx> + <id>.json
+//   <OUTPUT_ROOT>/proposal-builder/attachments/<id>.<pdf|docx> + <id>.json
 
 export type ProposalAttachmentKind = "quote_pdf" | "ams_docx" | "ams_pdf"
 

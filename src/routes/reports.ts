@@ -3,13 +3,14 @@ import type { Request, Response } from "express"
 import { existsSync, readdirSync, readFileSync, statSync } from "node:fs"
 import path from "node:path"
 import auth0 from "../middleware/auth/auth0/index.js"
+import { outputDir } from "../config/config.js"
 import { readDownloadReportWatermark } from "../utils/downloadReportWatermark.js"
 
 export const router = Router()
 
 // Same directory scripts/morningDownload.ts writes to and scripts/sendReportEmail.ts reads
 // from — this route only reads it, never writes.
-const OUTPUT_DIR = path.join(import.meta.dirname, "..", "..", "scripts", "output", "download-report")
+const OUTPUT_DIR = outputDir("download-report")
 const BASE = "/api/v1/boxwood-mcp" as const
 const REPORT_FILENAME_PATTERN = /^\d{4}-\d{2}-\d{2}_download_report\.xlsx$/
 const XLSX_MIME_TYPE = "application/vnd.openxmlformats-officedocument.spreadsheetml.sheet"

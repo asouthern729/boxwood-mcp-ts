@@ -15,7 +15,7 @@
 //
 // Calls generateClRenewalSummary() (src/utils/clRenewalSummaryGenerate.ts) directly — the same
 // build+archive the interactive tool uses, no MCP transport or LLM turn. No email; archives to
-// scripts/output/cl-renewal-summary/, whose manifest.json backs the CL Renewal Summary index page.
+// <OUTPUT_ROOT>/cl-renewal-summary/, whose manifest.json backs the CL Renewal Summary index page.
 //
 // Usage: npx tsx scripts/dailyClRenewalSummaries.ts [--dry-run] [--rebuild]
 //   --dry-run  lists what would be built without building or archiving anything.

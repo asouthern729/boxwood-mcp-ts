@@ -1,7 +1,7 @@
 import { createDocArchive } from "./docArchive.js"
 import type { DocArchiveEntry } from "./docArchive.js"
 
-// scripts/output/pl-renewal-summary/ — same manifest/file conventions as the CL renewal summary
+// <OUTPUT_ROOT>/pl-renewal-summary/ — same manifest/file conventions as the CL renewal summary
 // archive (see docArchive.ts), its own directory so the personal and commercial index pages stay
 // independent.
 const plRenewalSummaryArchive = createDocArchive("pl-renewal-summary")

@@ -1,7 +1,7 @@
 // Daily PL Renewal Premium Change run (the "auto-triggered from the download report" half of
 // Patrick's 2026-09-29 spec). It covers every personal-lines renewal (RWL) a carrier downloaded
 // since the last successful run. For each one it builds or rebuilds that client's Renewal Calculator
-// workbook for the renewal date and archives it to scripts/output/pl-renewal-premium-change/, where
+// workbook for the renewal date and archives it to <OUTPUT_ROOT>/pl-renewal-premium-change/, where
 // the dashboard's PL Premium Change page lists it. The group is re-read in full, so a client whose
 // auto downloads today next to a home that downloaded last week gets one workbook covering both.
 // Nothing is emailed (Andrew, 2026-09-30: written to the server only). OneDrive filing hooks into

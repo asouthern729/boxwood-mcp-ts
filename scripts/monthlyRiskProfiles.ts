@@ -11,7 +11,7 @@
 //
 // Calls generateRiskProfile() (src/utils/riskProfileGenerate.ts) directly — the same build+archive
 // the interactive tool uses, no MCP transport or LLM turn. No email; archives to
-// scripts/output/cl-risk-profile/, whose manifest.json backs the risk-profile index page.
+// <OUTPUT_ROOT>/cl-risk-profile/, whose manifest.json backs the risk-profile index page.
 //
 // Usage: npx tsx scripts/monthlyRiskProfiles.ts [--month=YYYY-MM]
 //   --month  overrides the target month (for manual/backtesting runs) instead of computing

@@ -1,6 +1,6 @@
 import { createDocArchive } from "./docArchive.js"
 
-// scripts/output/proposal-builder/ — proposals built in the Proposal Builder chat purely from
+// <OUTPUT_ROOT>/proposal-builder/ — proposals built in the Proposal Builder chat purely from
 // uploaded files (proposalBuilderGenerate.ts). Unlike the CL index pages, these belong to the staff
 // member who built them, not a CSR: the list defaults to your own, with an "All" view grouped by
 // creator, and only the creator can delete one.

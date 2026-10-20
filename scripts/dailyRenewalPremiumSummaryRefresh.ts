@@ -1,5 +1,5 @@
 // Weekday touch-up of every archived commercial Renewal Premium Summary workbook
-// (scripts/output/cl-renewal-premium-summaries/, built monthly by monthlyRenewalPremiumSummaries.ts).
+// (<OUTPUT_ROOT>/cl-renewal-premium-summaries/, built monthly by monthlyRenewalPremiumSummaries.ts).
 // Walks the manifest and runs the same Refresh the index page's button does
 // (refreshRenewalPremiumSummary, src/utils/renewalPremiumSummaryRefresh.ts) against each one: fills a
 // still-blank Renewal cell once AMS360 has a priced successor term, and updates Current when AMS360's
