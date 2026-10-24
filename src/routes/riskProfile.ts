@@ -3,6 +3,7 @@ import type { Request, Response, NextFunction } from "express"
 import { existsSync, readFileSync, statSync } from "node:fs"
 import path from "node:path"
 import auth0 from "../middleware/auth/auth0/index.js"
+import { recordDownload } from "../utils/downloadLog.js"
 import asyncHandler from "../middleware/async/index.js"
 import { ErrorResponse } from "../utils/errorResponse.js"
 import type { RiskProfileManifestEntry } from "../utils/riskProfileArchive.js"
@@ -81,6 +82,7 @@ router.get(`${ BASE }/risk-profile/files/:filename`, auth0, (req: Request<{ file
   res.setHeader("Content-Type", DOCX_MIME_TYPE)
   res.setHeader("Content-Disposition", `attachment; filename="${ filename }"`)
   res.send(readFileSync(filePath))
+  recordDownload(req, "risk-profile", filename)
 })
 
 // Deletes the archived file and its manifest entry — the frontend's own two-click confirm is the

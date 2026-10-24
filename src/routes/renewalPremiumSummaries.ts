@@ -3,6 +3,7 @@ import type { Request, Response, NextFunction } from "express"
 import { existsSync, readFileSync, statSync } from "node:fs"
 import path from "node:path"
 import auth0 from "../middleware/auth/auth0/index.js"
+import { recordDownload } from "../utils/downloadLog.js"
 import asyncHandler from "../middleware/async/index.js"
 import { ErrorResponse } from "../utils/errorResponse.js"
 import type { RenewalPremiumSummaryManifestEntry } from "../utils/renewalPremiumSummaryArchive.js"
@@ -79,6 +80,7 @@ router.get(`${ BASE }/renewal-premium-summaries/files/:filename`, auth0, (req: R
   res.setHeader("Content-Type", XLSX_MIME_TYPE)
   res.setHeader("Content-Disposition", `attachment; filename="${ filename }"`)
   res.send(readFileSync(filePath))
+  recordDownload(req, "renewal-premium-summaries", filename)
 })
 
 // Deletes the archived file and its manifest entry — the frontend's own two-click confirm is the

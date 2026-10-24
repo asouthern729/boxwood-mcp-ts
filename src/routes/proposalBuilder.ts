@@ -3,6 +3,7 @@ import type { Request, Response, NextFunction } from "express"
 import { existsSync, readFileSync, statSync } from "node:fs"
 import path from "node:path"
 import auth0 from "../middleware/auth/auth0/index.js"
+import { recordDownload } from "../utils/downloadLog.js"
 import asyncHandler from "../middleware/async/index.js"
 import { fetchUserInfo } from "../utils/auth0.js"
 import { PdfConverterUnavailableError, pdfForDocx } from "../utils/docxToPdf.js"
@@ -107,6 +108,7 @@ router.get(`${ BASE }/files/:filename`, auth0, (req: Request<{ filename: string 
   res.setHeader("Content-Type", DOCX_MIME_TYPE)
   res.setHeader("Content-Disposition", `attachment; filename="${ req.params.filename }"`)
   res.send(readFileSync(filePath))
+  recordDownload(req, "proposal-builder", req.params.filename)
 })
 
 router.get(`${ BASE }/files/:filename/pdf`, auth0, asyncHandler(async(req: Request<{ filename: string }>, res: Response) => {
@@ -121,6 +123,7 @@ router.get(`${ BASE }/files/:filename/pdf`, auth0, asyncHandler(async(req: Reque
     res.setHeader("Content-Type", "application/pdf")
     res.setHeader("Content-Disposition", `attachment; filename="${ pdf.filename }"`)
     res.send(pdf.buffer)
+    recordDownload(req, "proposal-builder", pdf.filename)
   } catch(err) {
     if(err instanceof PdfConverterUnavailableError) {
       res.status(503).json({ error: "converter_unavailable", error_description: err.message })

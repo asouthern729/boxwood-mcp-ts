@@ -3,6 +3,7 @@ import type { Request, Response, NextFunction } from "express"
 import { existsSync, readFileSync, statSync } from "node:fs"
 import path from "node:path"
 import auth0 from "../middleware/auth/auth0/index.js"
+import { recordDownload } from "../utils/downloadLog.js"
 import asyncHandler from "../middleware/async/index.js"
 import { ErrorResponse } from "../utils/errorResponse.js"
 import { PdfConverterUnavailableError, pdfForDocx } from "../utils/docxToPdf.js"
@@ -59,6 +60,7 @@ router.get(`${ BASE }/cl-renewal-summary/files/:filename`, auth0, (req: Request<
   res.setHeader("Content-Type", DOCX_MIME_TYPE)
   res.setHeader("Content-Disposition", `attachment; filename="${ filename }"`)
   res.send(readFileSync(filePath))
+  recordDownload(req, "cl-renewal-summary", filename)
 })
 
 // PDF of the same archived .docx, same as routes/plRenewalSummary.ts. Cached beside the .docx; a quote
@@ -78,6 +80,7 @@ router.get(`${ BASE }/cl-renewal-summary/files/:filename/pdf`, auth0, asyncHandl
     res.setHeader("Content-Type", "application/pdf")
     res.setHeader("Content-Disposition", `attachment; filename="${ pdf.filename }"`)
     res.send(pdf.buffer)
+    recordDownload(req, "cl-renewal-summary", pdf.filename)
   } catch(err) {
     if(err instanceof PdfConverterUnavailableError) {
       res.status(503).json({ error: "converter_unavailable", error_description: err.message })

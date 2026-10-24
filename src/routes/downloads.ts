@@ -1,5 +1,6 @@
 import { Router } from "express"
 import { getDownload } from "../utils/downloadStore.js"
+import { recordDownload } from "../utils/downloadLog.js"
 
 export const router = Router()
 
@@ -17,4 +18,5 @@ router.get("/downloads/:token", (req, res) => {
   res.setHeader("Content-Type", entry.mimeType)
   res.setHeader("Content-Disposition", `attachment; filename="${ entry.filename }"`)
   res.send(entry.buffer)
+  recordDownload(req, "chat-link", entry.filename)
 })

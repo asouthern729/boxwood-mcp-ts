@@ -3,6 +3,7 @@ import type { Request, Response } from "express"
 import { existsSync, readdirSync, readFileSync, statSync } from "node:fs"
 import path from "node:path"
 import auth0 from "../middleware/auth/auth0/index.js"
+import { recordDownload } from "../utils/downloadLog.js"
 import { outputDir } from "../config/config.js"
 import { readDownloadReportWatermark } from "../utils/downloadReportWatermark.js"
 
@@ -62,4 +63,5 @@ router.get(`${ BASE }/reports/files/:filename`, auth0, (req: Request<{ filename:
   res.setHeader("Content-Type", XLSX_MIME_TYPE)
   res.setHeader("Content-Disposition", `attachment; filename="${ filename }"`)
   res.send(readFileSync(filePath))
+  recordDownload(req, "download-report", filename)
 })
