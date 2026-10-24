@@ -1,6 +1,7 @@
 import { Router } from "express"
+import auth0 from "../middleware/auth/auth0/index.js"
 import { getDownload } from "../utils/downloadStore.js"
-import { recordDownload } from "../utils/downloadLog.js"
+import { downloadCounts, recordDownload } from "../utils/downloadLog.js"
 
 export const router = Router()
 
@@ -19,4 +20,10 @@ router.get("/downloads/:token", (req, res) => {
   res.setHeader("Content-Disposition", `attachment; filename="${ entry.filename }"`)
   res.send(entry.buffer)
   recordDownload(req, "chat-link", entry.filename)
+})
+
+// All-time download count per tool page, keyed by the same tool ids the records use:
+// { counts: { "risk-profile": 3, "cl-renewal-summary": 0, ... } }
+router.get("/api/v1/boxwood-mcp/downloads/stats", auth0, (_req, res) => {
+  res.json({ counts: downloadCounts() })
 })
