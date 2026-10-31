@@ -7,16 +7,17 @@
 # dailyMorningDownload.sh (this box's cron doesn't support CRON_TZ).
 set -uo pipefail
 cd /home/andrew/apps/boxwood-mcp-ts
-source scripts/notifyFailure.sh
+source scripts/cronJob.sh
 
 JOB="${1:?usage: dailyPlRenewalJob.sh premium-change|renewal-summary}"
 LOG_DIR="${LOG_ROOT:-/var/log/boxwood-mcp}/pl-${JOB}"
 mkdir -p "$LOG_DIR"
 
+STARTED_AT=$(date -Iseconds)
 {
   echo "===== $(date -Iseconds) ====="
   npx tsx scripts/dailyPlRenewalPremiumChange.ts --job="$JOB"
 } >> "$LOG_DIR/pl-${JOB}.log" 2>&1
 CODE=$?
-notify_failure "pl-${JOB}" "$CODE" "$LOG_DIR/pl-${JOB}.log"
+finish_job "pl-${JOB}" "$STARTED_AT" "$CODE" "$LOG_DIR/pl-${JOB}.log"
 exit "$CODE"

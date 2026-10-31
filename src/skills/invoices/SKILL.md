@@ -16,7 +16,7 @@ Two modes:
   - `polid` — invoices for one specific policy term
   - `iscancelled` — exact `"Y"`/`"N"`
   - `closedstatus` — exact match, but NOT `"Y"`/`"N"` despite how that reads — real values are `"A"` (the overwhelming majority) and `"X"` (rare, ~2 rows in 55k). What `"X"` actually signifies isn't confirmed yet, so don't treat this as an "outstanding balance" filter (see gotcha below — this tool has no dollar amounts at all).
-  - `invtype` — exact match, integer code (raw AMS360 passthrough, no fixed enum resolved yet — `afw_constant` isn't built)
+  - `invtype` — exact match, integer code (e.g. `1` Agency Bill, `2` Direct Bill, `101`+ on-account variants — results carry `invtype_description`; see gotcha below)
 
   `sort` (default `inveffdate_desc`): `inveffdate_asc/desc`, `invno_asc/desc`, `duedate_asc/desc`. `limit` (default 10, max 50) + `offset` paginate; response includes `has_more`.
 

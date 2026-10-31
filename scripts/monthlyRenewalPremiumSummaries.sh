@@ -7,26 +7,28 @@
 # fragile cron string.
 set -uo pipefail
 cd /home/andrew/apps/boxwood-mcp-ts
-source scripts/notifyFailure.sh
+source scripts/cronJob.sh
 
 LOG_ROOT="${LOG_ROOT:-/var/log/boxwood-mcp}"
 mkdir -p "$LOG_ROOT/renewal-premium-summaries" "$LOG_ROOT/risk-profiles"
 
+STARTED_AT=$(date -Iseconds)
 {
   echo "===== $(date -Iseconds) ====="
   npx tsx scripts/monthlyRenewalPremiumSummaries.ts
 } >> "$LOG_ROOT/renewal-premium-summaries/monthly.log" 2>&1
 CODE=$?
-notify_failure monthly-renewal-premium-summaries "$CODE" "$LOG_ROOT/renewal-premium-summaries/monthly.log"
+finish_job monthly-renewal-premium-summaries "$STARTED_AT" "$CODE" "$LOG_ROOT/renewal-premium-summaries/monthly.log"
 
 # Companion job, same schedule (Patrick, 2026-09-15): the CL Pre-Renewal Review (risk_profile) for
 # the same target month. Runs from this script rather than its own cron line so the two can never
 # drift apart; its own log keeps the two runs readable.
+STARTED_AT=$(date -Iseconds)
 {
   echo "===== $(date -Iseconds) ====="
   npx tsx scripts/monthlyRiskProfiles.ts
 } >> "$LOG_ROOT/risk-profiles/monthly-risk-profiles.log" 2>&1
 RISK_CODE=$?
-notify_failure monthly-risk-profiles "$RISK_CODE" "$LOG_ROOT/risk-profiles/monthly-risk-profiles.log"
+finish_job monthly-risk-profiles "$STARTED_AT" "$RISK_CODE" "$LOG_ROOT/risk-profiles/monthly-risk-profiles.log"
 [ "$CODE" -ne 0 ] && exit "$CODE"
 exit "$RISK_CODE"

@@ -323,6 +323,11 @@ description says so explicitly rather than silently dropping them:
 - `lookback_days` (default 30, was 60 until 2026-09-30 per Patrick) — how far back, from when the
   download was entered, to search for candidate staff notes on flagged items (by the note's
   `trandate`). A legitimate request documented further back won't surface as a candidate.
+- `synced_since` — automation only, a true UTC instant (`"2026-09-17T13:01:00.000Z"`, not
+  agency-local). On top of the `since`/`until` window, keeps only rows this project's ETL first
+  ingested (`synced_at`) at or after that instant. `scripts/morningDownload.ts` drives it from a
+  persisted watermark so a row entered in AMS360 just before one morning's sync, but not synced until
+  the next day, still gets reported (the 2026-09-16/17 gap). Don't pass it for an interactive ask.
 
 **Response is compact, not the full dataset.** A busy day's full item list (every rep's routine
 *and* flagged items) can exceed the MCP tool-result size cap on its own — confirmed: 119
@@ -362,8 +367,9 @@ throws away real signal the note is supposed to carry. Only the numeric identifi
 observation stays.
 
 The builder itself (`src/utils/downloadWorkbook.ts`'s `buildDownloadReportWorkbook`) is a plain
-buffer-in/buffer-out function with no MCP dependency, so a future automation script (the eventual
-tool-call-1 → tool-call-2 → email plan) can call it directly without going through the MCP tool.
+buffer-in/buffer-out function with no MCP dependency. The weekday 8am automation
+(`scripts/morningDownload.ts`, then `sendReportEmail.ts`) runs `download_report` → verdicts →
+`download_report_workbook` end to end through the Claude Agent SDK and emails the finished `.xlsx`.
 
 Returns a plain download link (`https://mcp.boxwoodins.com/downloads/<token>`, valid 24 hours)
 rather than embedding the file in the tool result — pass it back to the user as-is.

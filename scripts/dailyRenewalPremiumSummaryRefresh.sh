@@ -7,15 +7,16 @@
 # Kept as a script rather than a cron one-liner so logging doesn't have to live in a fragile cron string.
 set -uo pipefail
 cd /home/andrew/apps/boxwood-mcp-ts
-source scripts/notifyFailure.sh
+source scripts/cronJob.sh
 
 LOG_DIR="${LOG_ROOT:-/var/log/boxwood-mcp}/renewal-premium-summaries"
 mkdir -p "$LOG_DIR"
 
+STARTED_AT=$(date -Iseconds)
 {
   echo "===== $(date -Iseconds) ====="
   npx tsx scripts/dailyRenewalPremiumSummaryRefresh.ts
 } >> "$LOG_DIR/daily-refresh.log" 2>&1
 CODE=$?
-notify_failure renewal-premium-summary-refresh "$CODE" "$LOG_DIR/daily-refresh.log"
+finish_job renewal-premium-summary-refresh "$STARTED_AT" "$CODE" "$LOG_DIR/daily-refresh.log"
 exit "$CODE"

@@ -6,15 +6,16 @@
 # box's cron doesn't support CRON_TZ).
 set -uo pipefail
 cd /home/andrew/apps/boxwood-mcp-ts
-source scripts/notifyFailure.sh
+source scripts/cronJob.sh
 
 LOG_DIR="${LOG_ROOT:-/var/log/boxwood-mcp}/cl-renewal-summaries"
 mkdir -p "$LOG_DIR"
 
+STARTED_AT=$(date -Iseconds)
 {
   echo "===== $(date -Iseconds) ====="
   npx tsx scripts/dailyClRenewalSummaries.ts
 } >> "$LOG_DIR/cl-renewal-summaries.log" 2>&1
 CODE=$?
-notify_failure cl-renewal-summaries "$CODE" "$LOG_DIR/cl-renewal-summaries.log"
+finish_job cl-renewal-summaries "$STARTED_AT" "$CODE" "$LOG_DIR/cl-renewal-summaries.log"
 exit "$CODE"

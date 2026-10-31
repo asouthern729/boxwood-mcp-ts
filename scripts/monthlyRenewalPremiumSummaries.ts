@@ -18,6 +18,7 @@
 
 import "dotenv/config"
 import { generateRenewalPremiumSummary, NoCommercialPoliciesError } from "../src/utils/renewalPremiumSummaryGenerate.js"
+import { nameList, recordJobSummary } from "../src/utils/jobStatus.js"
 import { discoverCommercialAccounts, monthArgFromArgv, resolveTargetMonthWindow } from "../src/utils/monthlyRenewalWindow.js"
 
 // Target month + account discovery are shared with scripts/monthlyRiskProfiles.ts (Patrick's
@@ -64,6 +65,11 @@ async function main() {
   console.log(`[monthlyRenewalPremiumSummaries] done — generated ${ generated.length }, skipped ${ skipped.length }, failed ${ failed.length }`)
   if(skipped.length > 0) console.log("[monthlyRenewalPremiumSummaries] skipped:", skipped)
   if(failed.length > 0) console.log("[monthlyRenewalPremiumSummaries] failed:", failed)
+
+  recordJobSummary("monthly-renewal-premium-summaries", [
+    `Built ${ generated.length } ${ generated.length === 1 ? "spreadsheet" : "spreadsheets" } for ${ new Date(`${ startDate }T12:00:00`).toLocaleString("en-US", { month: "long", year: "numeric" }) } renewals`,
+    ...(failed.length > 0 ? [`${ failed.length } failed: ${ nameList(failed.map((f) => f.customerName ?? "unknown client")) }`] : [])
+  ].join("; "))
 
   process.exit(failed.length > 0 ? 1 : 0)
 }

@@ -1,17 +1,20 @@
 ---
 name: renewals
-description: Domain knowledge for boxwood-mcp-ts's renewal-related MCP tools — upcoming_renewals (Boxwood Insurance's AMS360 book of business filtered to active policy terms expiring within a day window, with marketing shells and, by default, already-renewed terms excluded — pass include_already_renewed for a calendar/exposure view instead) risk_profile (builds a branded Pre-Renewal Review .docx, exposures only, for one or more commercial policies), cl_renewal_summary (a Commercial Insurance Proposal-format renewal document: coverage limits/deductibles and schedules by line of business, no premiums), pl_renewal_summary (the personal-lines Personal Insurance Portfolio Summary .docx — auto, home, personal articles, umbrella limits), and pl_renewal_premium_change (fills the PL team's Renewal Calculator .xlsx with each downloaded personal-lines renewal's premium change vs the expiring term, per line of business, plus a paste-ready AMS note). Use when answering questions about what's renewing soon, a producer's or carrier's upcoming renewal book, which accounts need renewal outreach, building a renewal-meeting packet for a commercial client, building a personal-lines coverage summary for a household, or how much a personal-lines renewal went up or down.
+description: Domain knowledge for boxwood-mcp-ts's renewal tools for Boxwood Insurance's AMS360 book — upcoming_renewals (active terms expiring in a day window; already-renewed terms excluded unless include_already_renewed), risk_profile (exposures-only Pre-Renewal Review .docx for commercial policies), renewal_premium_spreadsheet (Commercial Renewal Premium Spreadsheet .xlsx, current premium and carrier per line), cl_renewal_summary (Commercial Insurance Proposal-format renewal .docx, limits and schedules, no premiums), pl_renewal_summary (Personal Insurance Portfolio Summary .docx) and pl_renewal_premium_change (PL Renewal Calculator .xlsx, premium change per line vs the expiring term, plus an AMS note). Use for what's renewing soon, a producer's or carrier's renewal book, renewal outreach, commercial renewal packets, proposals or premium spreadsheets, personal-lines coverage summaries, or how much a personal renewal changed.
 ---
 
 # Boxwood renewals
 
-Five tools cover renewal work today: `upcoming_renewals` (find what's coming due),
+Six tools cover renewal work today: `upcoming_renewals` (find what's coming due),
 `risk_profile` (build the exposures-only renewal-meeting document for one or more commercial
-accounts), `cl_renewal_summary` (the renewal proposal: coverage limits and schedules by line),
+accounts), `renewal_premium_spreadsheet` (current premium per line for a commercial account's
+renewal), `cl_renewal_summary` (the renewal proposal: coverage limits and schedules by line),
 `pl_renewal_summary` (the personal-lines coverage summary for a household), and
 `pl_renewal_premium_change` (how much a downloaded personal-lines renewal changed in premium). More
 renewal-related tools will land in this same skill over time rather than each getting its own skill
-— check here first for anything renewal-shaped.
+— check here first for anything renewal-shaped. (`proposal_builder`, which builds a proposal from
+uploaded quote PDFs, is only available inside the dashboard's Proposal Builder chat, not on the
+general MCP endpoint.)
 
 ## upcoming_renewals
 
@@ -23,10 +26,10 @@ The window is either `within_days` (default 30, max 365 — a rolling window fro
 - `producer_code` — exact match against `afw_basicpolinfo.execcode` (the producer/agent of record, distinct from CSR)
 - `csr_code` — exact match against `afw_basicpolinfo.csrcode`
 - `carrier_code` — exact match against `afw_basicpolinfo.cocode`
-- `typeofbus` — exact match, integer code. `1` (personal) and `2` (commercial) dominate the book; other codes (`0`, `3`-`7`) also appear in small numbers and aren't decoded anywhere — don't assume it's strictly binary
-- `book_type` — friendlier alias over `typeofbus` for the book's two dominant segments: `"commercial"` restricts to `typeofbus = 2`, `"personal"` to `typeofbus = 1`. The book has other, undecoded `typeofbus` codes too (`0`, `3`-`7`) that `book_type` doesn't cover — pass `typeofbus` directly for those. Combines with an explicit `typeofbus` via AND if both are given (redundant if consistent, zero rows if not)
+- `typeofbus` — exact match, integer code. `1` (personal) and `2` (commercial) dominate the book; other codes (`0`, `3`-`7`) also appear in small numbers (`policy_query` returns their `typeofbus_description`) — don't assume it's strictly binary
+- `book_type` — friendlier alias over `typeofbus` for the book's two dominant segments: `"commercial"` restricts to `typeofbus = 2`, `"personal"` to `typeofbus = 1`. The book has other `typeofbus` codes too (`0`, `3`-`7`) that `book_type` doesn't cover — pass `typeofbus` directly for those. Combines with an explicit `typeofbus` via AND if both are given (redundant if consistent, zero rows if not)
 
-`group_by` (default `"none"`) adds a `breakdown` array grouped by `"producer"` or `"carrier"` — a separate count query over the same filters, not a client-side tally. Each breakdown row is `{ code, label, count }`. `limit` (default 25, max 200) + `offset` paginate; response includes `has_more`. Results are always sorted `polexpdate` ascending — soonest-expiring first — there's no `sort` param.
+`group_by` (default `"none"`) adds a `breakdown` array grouped by `"producer"` or `"carrier"` — a separate count query over the same filters, not a client-side tally. Each breakdown row is `{ code, label, count, premium_sum, premium_avg }` (sum/average of `fulltermpremium` over the matched terms — answers "premium renewing next quarter, by carrier"). `limit` (default 25, max 200) + `offset` paginate; response includes `has_more`. Results are always sorted `polexpdate` ascending — soonest-expiring first — there's no `sort` param.
 
 ### What's excluded, and why
 
@@ -52,7 +55,7 @@ Note: `policy_query`'s `renewalrptflag: "A"` filter and `book_summary` both addi
 
 A boolean per row: `true` if `afw_policytransaction` has a row for this `polid` with `trantype IN ('RWL', 'RWQ')` (renewal / renewal-quote). This is a *narrower* signal than the already-renewed exclusion above — a row can pass the exclusion (no successor term exists yet) and still have `has_renewal_activity: true`, meaning a renewal has been quoted/bound but the new term hasn't synced as its own `afw_basicpolinfo` row yet. Use it to distinguish "renewal already in motion, don't call this account" from "nothing's happened, needs outreach."
 
-There are three other renewal-adjacent `trantype` codes in the data (`RWX`, `RRQ`, `RWR`) that are **not** included in this flag — they're undecoded (no lookup table backs `trantype`) and rare enough (under 40 rows combined, vs. ~9,500 for `RWL`/`RWQ`) that including them without knowing what they mean risked false positives. If a caller needs those, they show up via `policy_query`'s `include: ["transactions"]` on the specific `polid`.
+There are three other renewal-adjacent `trantype` codes in the data (`RWX`, `RRQ`, `RWR`) that are **not** included in this flag — they're rare enough (under 40 rows combined, vs. ~9,500 for `RWL`/`RWQ`) that including them without knowing what they mean risked false positives. If a caller needs those, they show up via `policy_query`'s `include: ["transactions"]` on the specific `polid`.
 
 ### Domain gotcha: output timestamps are agency-local
 
@@ -103,12 +106,38 @@ A section can legitimately come back empty even when raw row counts (e.g. from `
 
 ### Archiving and the 24-hour link
 
-The response includes a `download_url` (same `/downloads/<token>` pattern as `download_report`/`download_report_workbook`) that expires after 24 hours. Separately, every generated document is also written to `scripts/output/cl-risk-profile/` (same convention as `scripts/morningDownload.ts`'s download-report `.xlsx`, gitignored) with a `manifest.json` entry — `filename`, `generated_at`, `csr_code`, `csr_name`, `client_name`, `polnos`, `renewal_date`, `renewal_date_label` — backing the `/cl-risk-profile/` index page (`site/cl-risk-profile.html`, `reports.html`'s counterpart for these — same Auth0/PKCE-protected pattern, served via `src/routes/riskProfile.ts`). That page groups by CSR (alphabetical, unassigned last) and sorts each CSR's accounts by `renewal_date` ascending — soonest-due first, not `generated_at`. **At most one archived file per policy (`polid`), or per exact combined policy set** — a customer can carry several distinct commercial policies at once (confirmed against real data: one account has 4), so a single-policy archive filename keys on `polid` (unique per term) and a combined document keys on the full matched `polno` set. Regenerating the exact same policy's packet, or the exact same combination, overwrites its own prior copy; a different policy or combination gets its own separate file; a future renewal of the same policy (a new term, new `polid`, new `renewal_date`) becomes its own new file rather than clobbering the current one. Archived files are cleaned up after 30 days via a host crontab entry, same retention as the download report — note this does NOT prune the now-stale `manifest.json` entry for a deleted file, so the route filters out any manifest entry whose file no longer exists on disk before returning results.
+The response includes a `download_url` (same `/downloads/<token>` pattern as `download_report`/`download_report_workbook`) that expires after 24 hours. Separately, every generated document is also written to `<OUTPUT_ROOT>/cl-risk-profile/` (`/var/lib/boxwood-mcp/output` in production, outside the checkout — same convention as the morning download-report `.xlsx`) with a `manifest.json` entry — `filename`, `generated_at`, `csr_code`, `csr_name`, `client_name`, `polnos`, `renewal_date`, `renewal_date_label` — backing the `/cl-risk-profile/` index page (`site/cl-risk-profile.html`, `reports.html`'s counterpart for these — same Auth0/PKCE-protected pattern, served via `src/routes/riskProfile.ts`). That page groups by CSR (alphabetical, unassigned last) and sorts each CSR's accounts by `renewal_date` ascending — soonest-due first, not `generated_at`. **At most one archived file per policy (`polid`), or per exact combined policy set** — a customer can carry several distinct commercial policies at once (confirmed against real data: one account has 4), so a single-policy archive filename keys on `polid` (unique per term) and a combined document keys on the full matched `polno` set. Regenerating the exact same policy's packet, or the exact same combination, overwrites its own prior copy; a different policy or combination gets its own separate file; a future renewal of the same policy (a new term, new `polid`, new `renewal_date`) becomes its own new file rather than clobbering the current one. There's no retention cron on this archive (only the download report is pruned after 30 days); a file removed by hand or via the page's delete leaves no visible entry, because the route filters out any manifest entry whose file no longer exists on disk.
+
+**Built automatically** on the 1st of each month by `scripts/monthlyRiskProfiles.ts` (run from `monthlyRenewalPremiumSummaries.sh`, 8:30am CT): one document per commercial account with a policy expiring in month M+2 (Oct 1 builds December's), combining only that account's policies expiring in the target month. Nothing is emailed.
 
 ### Common questions → calls
 
 - "Build a risk profile / pre-renewal review for [client]" → `polno` or `custid` for that client
 - "Build one for everything [client] has renewing in the next 90 days" → `custid`, `renewal_within_days: 90`
+
+## renewal_premium_spreadsheet
+
+Fills Patrick's own **Commercial Renewal Premium Spreadsheet** (`assets/templates/commercial-renewal-template.xlsx`) for one commercial account. It's the premium counterpart to `risk_profile` and `cl_renewal_summary`, which carry no premiums.
+
+### Calling the tool
+
+`custid` only (resolve the customer first). The tool is always account-scoped, because its job is to separate "renewing soon" from "everything else on the account." `renewal_within_days` (default 90) decides which current commercial policies go in the main table. Every other current commercial policy goes in a second table with its expiration date. If nothing renews in the window, the tool returns the soonest renewal date and builds nothing.
+
+### What gets filled
+
+- **Current premium and Carrier** for each of the template's 8 fixed lines: General Liability, Property, Auto, Umbrella, Workers Comp, EPLI, Inland Marine, D&O. A monoline policy maps to its one line. A Package policy's full blended premium goes on its "primary" line and is never split, because AMS360 doesn't split a package rate reliably (`afw_cprem` per-line sums came to only 62% of `fulltermpremium` on a real Package policy).
+- A line that matches none of the 8 goes in a spare row.
+- **Left blank at build time:** Renewal premium, renewal carrier, the market-option carrier columns, and Trending Percent Increase (removed per Patrick). Staff fill these in by hand as the renewal is shopped. TOTAL PREMIUM and Percent Change are template formulas.
+- An **internal-only note block** below the table gives each policy's "premium as of" date (its latest AMS360 transaction). Staff delete it before forwarding the workbook to the client.
+
+### Archiving
+
+The tool returns a 24-hour `download_url`. It also archives to `<OUTPUT_ROOT>/cl-renewal-premium-summaries/`, one file per account (rebuilding overwrites it), backing the CSR-grouped renewal-premium-summaries index page. **Built automatically** on the 1st of each month for every commercial account with a policy expiring in month M+2 (`scripts/monthlyRenewalPremiumSummaries.ts`), and refreshed each weekday at 9am CT (`scripts/dailyRenewalPremiumSummaryRefresh.ts`, the same Refresh as the index page's button). The refresh fills a still-blank Renewal cell once AMS360 has a priced successor term. It also updates Current when AMS360's figure changed, unless someone edited that cell by hand. It never touches anything else in the workbook. Nothing is emailed.
+
+### Common questions → calls
+
+- "Build the renewal premium spreadsheet for [client]" → `customer_lookup` for the `custid`, then `renewal_premium_spreadsheet`
+- "What's each line costing [client] now?" as a quick question → `policy_query` with `custid` is lighter; build the workbook only when they want the deliverable
 
 ## cl_renewal_summary
 
@@ -119,6 +148,8 @@ Builds the commercial-lines "Renewal Summary" Word document (`.docx`) in the lay
 Identical inputs and policy resolution to `risk_profile` (`customer_name`, `polno`, and/or `custid`, optional `renewal_within_days` — same advice to prefer `customer_name` over `customer_lookup`) — both tools share the same resolution/combine code (`src/utils/clPolicyData.ts`), so they always cover the same in-force terms, combine the same way for one customer, and treat cross-customer matches as ambiguous the same way. Download link only, no email.
 
 **Renewal term.** For each matched policy, when AMS360 already has its renewal term (the next term, not cancelled at inception, with coverage detail in `afw_cprem`), the document prints that term's limits, schedules and dates. Otherwise it prints the current term — nothing in the document flags this (users didn't want "Renewal Terms Pending" banners, 2026-10-10); instead each manifest entry's `sections` lists every coverage section with `renewed: true|false`, which the index page shows under the policy numbers. The tool returns those policies in `renewal_pending_polnos`, and the daily job rebuilds the document once the renewal lands.
+
+**Built automatically** each weekday at 9am CT by `scripts/dailyClRenewalSummaries.ts`: every commercial term expiring within the next 30 days that has no archived Renewal Summary yet gets one, built once (the same account's new terms are combined into one document). Nothing is emailed.
 
 ### Layout
 
@@ -140,7 +171,7 @@ AMS360 has no A.M. Best ratings, enhancement lists or exclusions, so those appea
 
 ### Archiving
 
-Same manifest shape and keying rules as `risk_profile`, under `scripts/output/cl-renewal-summary/`, backing `GET /api/v1/boxwood-mcp/cl-renewal-summary/manifest`, `GET`/`DELETE .../cl-renewal-summary/files/:filename`, and `POST .../cl-renewal-summary/chat` (`src/routes/clRenewalSummary.ts`, mirroring the risk-profile routes). The client's requirement is that these be filed to SharePoint (Commercial Lines/Client Renewal Info/<client>/<year>/), not emailed — the local archive is the interim until that Graph access exists.
+Same manifest shape and keying rules as `risk_profile`, under `<OUTPUT_ROOT>/cl-renewal-summary/`, backing `GET /api/v1/boxwood-mcp/cl-renewal-summary/manifest`, `GET`/`DELETE .../cl-renewal-summary/files/:filename`, and `POST .../cl-renewal-summary/chat` (`src/routes/clRenewalSummary.ts`, mirroring the risk-profile routes). The client's requirement is that these be filed to SharePoint (Commercial Lines/Client Renewal Info/<client>/<year>/), not emailed — the local archive is the interim until that Graph access exists.
 
 ### Common questions → calls
 
@@ -175,9 +206,9 @@ With several carriers (or the same line on two policies), each section shows its
 
 ### Archiving
 
-Same manifest shape and keying as `cl_renewal_summary`, under `scripts/output/pl-renewal-summary/`, backing `GET /api/v1/boxwood-mcp/pl-renewal-summary/manifest`, `GET`/`DELETE .../pl-renewal-summary/files/:filename`, and `POST .../pl-renewal-summary/chat` (`src/routes/plRenewalSummary.ts`), consumed by the employee dashboard's /personal/renewal-summary page. `GET .../pl-renewal-summary/files/:filename/pdf` returns a PDF of the same .docx: headless LibreOffice, cached beside the .docx and removed with it, 503 `converter_unavailable` if LibreOffice isn't installed. An account-level summary is archived as one file per client per soonest upcoming renewal date (`<Client>_<YYYY-MM-DD>_Personal_Insurance_Summary.docx`); a single-policy request, per polid.
+Same manifest shape and keying as `cl_renewal_summary`, under `<OUTPUT_ROOT>/pl-renewal-summary/`, backing `GET /api/v1/boxwood-mcp/pl-renewal-summary/manifest`, `GET`/`DELETE .../pl-renewal-summary/files/:filename`, and `POST .../pl-renewal-summary/chat` (`src/routes/plRenewalSummary.ts`), consumed by the employee dashboard's /personal/renewal-summary page. `GET .../pl-renewal-summary/files/:filename/pdf` returns a PDF of the same .docx: headless LibreOffice, cached beside the .docx and removed with it, 503 `converter_unavailable` if LibreOffice isn't installed. An account-level summary is archived as one file per client per soonest upcoming renewal date (`<Client>_<YYYY-MM-DD>_Personal_Insurance_Summary.docx`); a single-policy request, per polid.
 
-**Built automatically** each morning by `scripts/dailyPlRenewalPremiumChange.ts` (run from `dailyMorningDownload.sh`). Every client with a new PL renewal download gets their account-level summary rebuilt, alongside the Renewal Calculator workbook. Nothing is emailed; OneDrive filing is pending Entra access.
+**Built automatically** each weekday at 9am CT by `scripts/dailyPlRenewalPremiumChange.ts --job=renewal-summary` (run from `dailyPlRenewalJob.sh`). Every client with a new PL renewal download gets their account-level summary rebuilt. The Renewal Calculator workbooks are a separate 8:30am run of the same script (`--job=premium-change`). Nothing is emailed; OneDrive filing is pending Entra access.
 
 ### Common questions → calls
 
@@ -190,7 +221,7 @@ Fills the PL team's own **Renewal Calculator** workbook (`assets/templates/pl-re
 - **6-month auto:** accounts with a 6-month auto term use the template's 6-month table.
 - **Package policies** are split per line from each term's latest transaction.
 - **Personal Articles** is carved out of HOME via the SPP premium.
-- **Where it's filed:** archived to `scripts/output/pl-renewal-premium-change/` for the dashboard's /personal/premium-change-tool page, and built automatically each morning. Nothing is emailed.
+- **Where it's filed:** archived to `<OUTPUT_ROOT>/pl-renewal-premium-change/` for the dashboard's /personal/premium-change-tool page, and built automatically each weekday at 8:30am CT. Nothing is emailed.
 
 ### Calling the tool
 

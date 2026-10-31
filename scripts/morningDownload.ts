@@ -27,6 +27,7 @@ import "dotenv/config"
 import { mkdirSync, writeFileSync } from "node:fs"
 import path from "node:path"
 import { outputDir } from "../src/config/config.js"
+import { recordJobSummary } from "../src/utils/jobStatus.js"
 import { query } from "@anthropic-ai/claude-agent-sdk"
 import { createServer } from "../src/mcpServer.js"
 import { readDownloadReportWatermark, writeDownloadReportWatermark } from "../src/utils/downloadReportWatermark.js"
@@ -172,6 +173,8 @@ async function main() {
 
   let token: string | undefined
   let succeeded = false
+  // "7 rep(s), 57 item(s), 25 flagged" from download_report_workbook's result, for the job summary.
+  let workbookCounts: { reps: number; items: number; flagged: number } | undefined
 
   // download_report's own response now also contains a /downloads/<uuid> link (the JSON report,
   // not the workbook) — and, observed live, the agent doesn't reliably stop calling download_report
@@ -220,6 +223,8 @@ async function main() {
 
             if(!block.is_error && workbookToolUseIds.has(block.tool_use_id)) {
               const found = findDownloadToken(block.content)
+              const counts = text?.match(/(\d+) rep\(s\), (\d+) item\(s\), (\d+) flagged/)
+              if(counts) workbookCounts = { reps: Number(counts[1]), items: Number(counts[2]), flagged: Number(counts[3]) }
               if(found) {
                 token = found
                 usedReportToken = workbookInputReportTokens.get(block.tool_use_id)
@@ -294,6 +299,9 @@ async function main() {
       tablesTouched: syncMetadata?.tablesTouched ?? [],
       rowsEntered: syncMetadata?.rowsEntered ?? 0
     })
+    if(workbookCounts) {
+      recordJobSummary("morning-download", `Report built: ${ workbookCounts.items } items for ${ workbookCounts.reps } reps, ${ workbookCounts.flagged } flagged for review`)
+    }
     console.log(`[morningDownload] advanced watermark to ${ runStartedAt.toISOString() } (tables_touched=${ JSON.stringify(syncMetadata?.tablesTouched ?? []) }, rows_entered=${ syncMetadata?.rowsEntered ?? 0 })`)
   }
 

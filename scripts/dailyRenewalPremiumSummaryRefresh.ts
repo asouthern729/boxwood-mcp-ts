@@ -17,6 +17,7 @@ import "dotenv/config"
 import { existsSync } from "node:fs"
 import path from "node:path"
 import { RENEWAL_PREMIUM_SUMMARY_OUTPUT_DIR, readManifest } from "../src/utils/renewalPremiumSummaryArchive.js"
+import { nameList, recordJobSummary } from "../src/utils/jobStatus.js"
 import { refreshRenewalPremiumSummary } from "../src/utils/renewalPremiumSummaryRefresh.js"
 
 const LOG_PREFIX = "[dailyRenewalPremiumSummaryRefresh]"
@@ -40,6 +41,7 @@ async function main() {
   const notRefreshable: { filename: string; reason: string }[] = []
   const pastRenewals: string[] = []
   const failed: { filename: string; error: string }[] = []
+  const failedClients: string[] = []
 
   for(const entry of manifest) {
     const { filename } = entry
@@ -77,12 +79,20 @@ async function main() {
     } catch(error) {
       const message = error instanceof Error ? error.message : String(error)
       failed.push({ filename, error: message })
+      failedClients.push(entry.client_name)
       console.error(`${ LOG_PREFIX } FAILED ${ filename }: ${ message }`)
     }
   }
 
   console.log(`${ LOG_PREFIX } done — ${ dryRun ? "would update" : "updated" } ${ updated.length }, unchanged ${ unchanged.length }, past renewal ${ pastRenewals.length }, not refreshable ${ notRefreshable.length }, failed ${ failed.length }`)
   if(notRefreshable.length > 0) console.log(`${ LOG_PREFIX } not refreshable:`, notRefreshable)
+
+  if(!dryRun) {
+    recordJobSummary("renewal-premium-summary-refresh", [
+      `Updated ${ updated.length } of ${ updated.length + unchanged.length + failed.length } upcoming ${ updated.length + unchanged.length + failed.length === 1 ? "spreadsheet" : "spreadsheets" }`,
+      ...(failed.length > 0 ? [`${ failed.length } failed: ${ nameList(failedClients) }`] : [])
+    ].join("; "))
+  }
 
   process.exit(failed.length > 0 ? 1 : 0)
 }

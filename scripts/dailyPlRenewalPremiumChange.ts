@@ -32,6 +32,7 @@ import "dotenv/config"
 import { existsSync, mkdirSync, readFileSync, writeFileSync } from "node:fs"
 import path from "node:path"
 import { stateDir } from "../src/config/config.js"
+import { nameList, recordJobSummary } from "../src/utils/jobStatus.js"
 import { pool } from "../src/db.js"
 import { fetchPlRenewalChangeGroups } from "../src/utils/plRenewalPremiumChange.js"
 import { archivePlRenewalChange } from "../src/utils/plRenewalPremiumChangeArchive.js"
@@ -80,6 +81,9 @@ async function main() {
   console.log(`[plRenewalPremiumChange] job=${ job }: ${ groups.length } client renewal(s) with PL downloads synced after ${ syncedAfter }`)
 
   let failures = 0
+  let archivedCount = 0
+  let summaryCount = 0
+  const failedClients: string[] = []
   // A client with two renewal dates in one batch gets one account-level summary, not two.
   const summarizedCustids = new Set<string>()
 
@@ -94,6 +98,7 @@ async function main() {
 
     if(buildChange) {
       const archived = await archivePlRenewalChange(group)
+      if(archived) archivedCount++
       console.log(archived ? `  archived ${ archived.entry.filename }: ${ label }` : `  skipped (nothing comparable): ${ label }`)
     }
 
@@ -104,16 +109,25 @@ async function main() {
     // rebuild just overwrites the same archived file).
     try {
       const summary = await buildAndArchivePlRenewalSummary({ custid: group.custid })
+      if(summary.kind === "ok") summaryCount++
       console.log(summary.kind === "ok"
         ? `  renewal summary ${ summary.filename }${ summary.renewedPolnos.length ? ` (renewal term: ${ summary.renewedPolnos.join(", ") })` : "" }`
         : `  renewal summary not built for ${ group.client_name }: ${ summary.kind === "error" ? summary.error.message : "ambiguous customer match" }`)
     } catch(error) {
       failures++
+      failedClients.push(group.client_name)
       console.error(`  renewal summary FAILED for ${ group.client_name }:`, error)
     }
   }
 
   if(!dryRun && maxSyncedAt && failures === 0) writeCursor(cursorPath, maxSyncedAt)
+
+  if(!dryRun) {
+    const failedPart = failures > 0 ? [`${ failures } failed: ${ nameList(failedClients) }`] : []
+    const plural = (n: number, one: string, many: string) => `${ n } ${ n === 1 ? one : many }`
+    if(buildChange) recordJobSummary("pl-premium-change", [`Built ${ plural(archivedCount, "workbook", "workbooks") } from ${ plural(groups.length, "renewal download", "renewal downloads") }`].join("; "))
+    if(buildSummary) recordJobSummary("pl-renewal-summary", [`Built ${ plural(summaryCount, "summary", "summaries") } from ${ plural(groups.length, "renewal download", "renewal downloads") }`, ...failedPart].join("; "))
+  }
   if(failures > 0) {
     console.error(`[plRenewalPremiumChange] ${ failures } renewal summary build(s) failed — cursor not advanced, will retry next run`)
     process.exitCode = 1

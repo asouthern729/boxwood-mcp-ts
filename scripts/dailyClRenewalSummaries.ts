@@ -24,6 +24,7 @@
 
 import "dotenv/config"
 import { formatDate, resolveClPolicies } from "../src/utils/clPolicyData.js"
+import { nameList, recordJobSummary } from "../src/utils/jobStatus.js"
 import { readClRenewalSummaryManifest } from "../src/utils/clRenewalSummaryArchive.js"
 import { ClRenewalSummaryRebuildError, archivedPolids, generateClRenewalSummary, rebuildClRenewalSummary } from "../src/utils/clRenewalSummaryGenerate.js"
 import { polidsWithRenewal } from "../src/utils/clRenewalTerms.js"
@@ -102,6 +103,13 @@ async function main() {
   console.log(`[dailyClRenewalSummaries] done — ${ dryRun ? "would generate" : "generated" } ${ generated.length }, ${ dryRun ? "would rebuild" : "rebuilt" } ${ rebuilt }, already on file ${ alreadyCovered.length }, skipped ${ skipped.length }, failed ${ failed.length }`)
   if(skipped.length > 0) console.log("[dailyClRenewalSummaries] skipped:", skipped)
   if(failed.length > 0) console.log("[dailyClRenewalSummaries] failed:", failed)
+
+  if(!dryRun) {
+    recordJobSummary("cl-renewal-summaries", [
+      `Built ${ generated.length } new ${ generated.length === 1 ? "summary" : "summaries" }, rebuilt ${ rebuilt }`,
+      ...(failed.length > 0 ? [`${ failed.length } failed: ${ nameList(failed.map((f) => f.customerName ?? "unknown client")) }`] : [])
+    ].join("; "))
+  }
 
   process.exit(failed.length > 0 ? 1 : 0)
 }

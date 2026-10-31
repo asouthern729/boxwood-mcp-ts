@@ -19,6 +19,7 @@
 
 import "dotenv/config"
 import { formatDate, resolveClPolicies } from "../src/utils/clPolicyData.js"
+import { nameList, recordJobSummary } from "../src/utils/jobStatus.js"
 import { generateRiskProfile } from "../src/utils/riskProfileGenerate.js"
 import { discoverCommercialAccounts, monthArgFromArgv, resolveTargetMonthWindow } from "../src/utils/monthlyRenewalWindow.js"
 
@@ -67,6 +68,11 @@ async function main() {
   console.log(`[monthlyRiskProfiles] done — generated ${ generated.length }, skipped ${ skipped.length }, failed ${ failed.length }`)
   if(skipped.length > 0) console.log("[monthlyRiskProfiles] skipped:", skipped)
   if(failed.length > 0) console.log("[monthlyRiskProfiles] failed:", failed)
+
+  recordJobSummary("monthly-risk-profiles", [
+    `Built ${ generated.length } ${ generated.length === 1 ? "Pre-Renewal Review" : "Pre-Renewal Reviews" } for ${ new Date(`${ startDate }T12:00:00`).toLocaleString("en-US", { month: "long", year: "numeric" }) } renewals`,
+    ...(failed.length > 0 ? [`${ failed.length } failed: ${ nameList(failed.map((f) => f.customerName ?? "unknown client")) }`] : [])
+  ].join("; "))
 
   process.exit(failed.length > 0 ? 1 : 0)
 }
