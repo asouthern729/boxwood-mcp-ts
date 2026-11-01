@@ -4,8 +4,11 @@ services:
     restart: unless-stopped
     env_file:
       - .env
-    ports:
-      - "127.0.0.1:3000:3000"
+    # Host networking so localhost:5432 reaches the host's Postgres (it only listens on loopback);
+    # the app still binds 127.0.0.1:3000 for nginx.
+    network_mode: host
+    environment:
+      HOST: 127.0.0.1
     user: "node"
     read_only: true
     tmpfs:
@@ -27,6 +30,7 @@ services:
     profiles: ["jobs"]
     env_file:
       - .env
+    network_mode: host
     environment:
       HOME: /tmp
     user: "node"
