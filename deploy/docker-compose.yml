@@ -26,7 +26,7 @@ services:
   # profile keeps `docker compose up` from starting it; its own memory limit keeps a LibreOffice-heavy
   # build from starving the web server.
   jobs:
-    image: ghcr.io/asouthern729/boxwood-mcp-ts:1.0.2
+    image: ghcr.io/asouthern729/boxwood-mcp-ts:1.0.3
     profiles: ["jobs"]
     env_file:
       - .env
