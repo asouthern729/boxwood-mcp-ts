@@ -7,7 +7,6 @@ dist
 *.tsbuildinfo
 scripts/output
 scripts/state
-site
 docs
 deploy
 logs
