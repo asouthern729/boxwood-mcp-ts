@@ -1,0 +1,13 @@
+.git
+.claude
+.env*
+node_modules
+dist
+*.zip
+*.tsbuildinfo
+scripts/output
+scripts/state
+site
+docs
+deploy
+logs

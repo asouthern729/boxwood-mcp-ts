@@ -1,0 +1,10 @@
+# boxwood-mcp scheduled jobs — the lines to put in andrew's crontab (replacing the old
+# /home/andrew/apps/boxwood-mcp-ts/scripts/*.sh lines). UTC-pair + runtime TZ check because this box's
+# cron doesn't support CRON_TZ. The AMS360 sync line (07:30) is separate and unchanged.
+0 13,14 * * 1-5 [ "$(TZ=America/Chicago date +\%H:\%M)" = "08:00" ] && /opt/containers/boxwood-mcp/run-job.sh morning-download
+15 13,14 * * * [ "$(TZ=America/Chicago date +\%H:\%M)" = "08:15" ] && find /opt/containers/boxwood-mcp/data/output/download-report -maxdepth 1 -type f -name '[0-9][0-9][0-9][0-9]-[0-9][0-9]-[0-9][0-9]_download_report.xlsx' -mtime +30 -delete
+30 * 1,2 * * [ "$(TZ=America/Chicago date +\%d-\%H:\%M)" = "01-08:30" ] && /opt/containers/boxwood-mcp/run-job.sh monthly
+0 14,15 * * 1-5 [ "$(TZ=America/Chicago date +\%H:\%M)" = "09:00" ] && /opt/containers/boxwood-mcp/run-job.sh renewal-premium-summary-refresh
+30 13,14 * * 1-5 [ "$(TZ=America/Chicago date +\%H:\%M)" = "08:30" ] && /opt/containers/boxwood-mcp/run-job.sh premium-change
+0 14,15 * * 1-5 [ "$(TZ=America/Chicago date +\%H:\%M)" = "09:00" ] && /opt/containers/boxwood-mcp/run-job.sh renewal-summary
+0 14,15 * * 1-5 [ "$(TZ=America/Chicago date +\%H:\%M)" = "09:00" ] && /opt/containers/boxwood-mcp/run-job.sh cl-renewal-summaries

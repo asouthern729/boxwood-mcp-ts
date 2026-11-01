@@ -1,0 +1,45 @@
+services:
+  boxwood-mcp:
+    image: ghcr.io/asouthern729/boxwood-mcp-ts:1.0.1
+    restart: unless-stopped
+    env_file:
+      - .env
+    ports:
+      - "127.0.0.1:3000:3000"
+    user: "node"
+    read_only: true
+    tmpfs:
+      - /tmp
+    volumes:
+      - ./data/output:/var/lib/boxwood-mcp/output
+      - ./data/state:/var/lib/boxwood-mcp/state
+    cap_drop:
+      - ALL
+    security_opt:
+      - no-new-privileges:true
+    mem_limit: 512m
+
+  # One-off container per cron job (run-job.sh → `docker compose run --rm jobs ...`). The "jobs"
+  # profile keeps `docker compose up` from starting it; its own memory limit keeps a LibreOffice-heavy
+  # build from starving the web server.
+  jobs:
+    image: ghcr.io/asouthern729/boxwood-mcp-ts:1.0.1
+    profiles: ["jobs"]
+    env_file:
+      - .env
+    environment:
+      HOME: /tmp
+    user: "node"
+    read_only: true
+    tmpfs:
+      - /tmp
+    volumes:
+      - ./data/output:/var/lib/boxwood-mcp/output
+      - ./data/state:/var/lib/boxwood-mcp/state
+      # sendAlert.ts reads the job's host log to put its tail in the failure email.
+      - /var/log/boxwood-mcp:/var/log/boxwood-mcp:ro
+    cap_drop:
+      - ALL
+    security_opt:
+      - no-new-privileges:true
+    mem_limit: 1g
