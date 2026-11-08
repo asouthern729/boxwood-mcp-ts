@@ -1,6 +1,6 @@
 services:
   boxwood-mcp:
-    image: ghcr.io/asouthern729/boxwood-mcp-ts:1.0.4
+    image: ghcr.io/asouthern729/ams360-demo-mcp:1.0.0
     restart: unless-stopped
     env_file:
       - .env
@@ -9,13 +9,13 @@ services:
     network_mode: host
     environment:
       HOST: 127.0.0.1
-    user: "node"
+    user: "1000"
     read_only: true
     tmpfs:
       - /tmp
     volumes:
-      - ./data/output:/var/lib/boxwood-mcp/output
-      - ./data/state:/var/lib/boxwood-mcp/state
+      - /var/lib/ams360-demo/output:/var/lib/ams360-demo/output
+      - /var/lib/ams360-demo/state:/var/lib/ams360-demo/state
     cap_drop:
       - ALL
     security_opt:
@@ -26,22 +26,22 @@ services:
   # profile keeps `docker compose up` from starting it; its own memory limit keeps a LibreOffice-heavy
   # build from starving the web server.
   jobs:
-    image: ghcr.io/asouthern729/boxwood-mcp-ts:1.0.4
+    image: ghcr.io/asouthern729/ams360-demo-mcp:1.0.0
     profiles: ["jobs"]
     env_file:
       - .env
     network_mode: host
     environment:
       HOME: /tmp
-    user: "node"
+    user: "1000"
     read_only: true
     tmpfs:
       - /tmp
     volumes:
-      - ./data/output:/var/lib/boxwood-mcp/output
-      - ./data/state:/var/lib/boxwood-mcp/state
+      - /var/lib/ams360-demo/output:/var/lib/ams360-demo/output
+      - /var/lib/ams360-demo/state:/var/lib/ams360-demo/state
       # sendAlert.ts reads the job's host log to put its tail in the failure email.
-      - /var/log/boxwood-mcp:/var/log/boxwood-mcp:ro
+      - /var/log/ams360-demo:/var/log/ams360-demo:ro
     cap_drop:
       - ALL
     security_opt:

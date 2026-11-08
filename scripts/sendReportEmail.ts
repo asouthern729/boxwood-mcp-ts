@@ -4,8 +4,7 @@
 // also handy standalone for an ad hoc resend of a specific day's report.
 //
 // Usage: npx tsx scripts/sendReportEmail.ts [to] [filePath]
-//   to       comma-separated recipient list, defaults to andrew@tyneside.io,personal@boxwoodins.com
-//            (patrick@boxwoodins.com is always CC'd, regardless of this argument)
+//   to       comma-separated recipient list, defaults to andrew@tyneside.io
 //   filePath defaults to the most recently modified .xlsx in <OUTPUT_ROOT>/download-report/
 
 import "dotenv/config"
@@ -17,8 +16,7 @@ import { sendMailWithAttachment } from "../src/utils/mailer.js"
 const OUTPUT_DIR = outputDir("download-report")
 const XLSX_MIME_TYPE = "application/vnd.openxmlformats-officedocument.spreadsheetml.sheet"
 const DATE_PATTERN = /\d{4}-\d{2}-\d{2}/
-const DEFAULT_RECIPIENTS = ["andrew@tyneside.io", "personal@boxwoodins.com"]
-const CC_RECIPIENTS = ["patrick@boxwoodins.com"]
+const DEFAULT_RECIPIENTS = ["andrew@tyneside.io"]
 
 const [toArg, filePathArg] = process.argv.slice(2)
 const to = toArg ? toArg.split(",").map((address) => address.trim()) : DEFAULT_RECIPIENTS
@@ -41,13 +39,12 @@ async function main() {
   const filename = path.basename(filePath)
   const dateLabel = filename.match(DATE_PATTERN)?.[0] ?? filename
 
-  console.log(`[sendReportEmail] sending ${ filename } (${ buffer.length } bytes) to ${ to }, cc ${ CC_RECIPIENTS }`)
+  console.log(`[sendReportEmail] sending ${ filename } (${ buffer.length } bytes) to ${ to }`)
 
   await sendMailWithAttachment({
     to,
-    cc: CC_RECIPIENTS,
-    subject: `Boxwood Morning Download Action List — ${ dateLabel }`,
-    text: "Attached is this morning's Boxwood download report — one Summary tab plus one tab per representative, each as a filterable/sortable Excel table.",
+    subject: `Tyneside Morning Download Action List — ${ dateLabel }`,
+    text: "Attached is this morning's Tyneside download report — one Summary tab plus one tab per representative, each as a filterable/sortable Excel table.",
     attachment: { filename, content: buffer, contentType: XLSX_MIME_TYPE }
   })
 

@@ -1,8 +1,8 @@
 #!/bin/bash
 # Host-side cron wrapper for the containerised scheduled jobs: replaces the scripts/*.sh wrappers,
 # which ran from the app checkout. Each step runs in a one-off `jobs` container (docker-compose.yml)
-# that shares the web server's data/ volumes; logging stays on the host under /var/log/boxwood-mcp/<job>/
-# (rotated by /etc/logrotate.d/boxwood-mcp). Same contract as scripts/cronJob.sh: every run is
+# that shares the web server's /var/lib/ams360-demo volumes; logging stays on the host under
+# /var/log/ams360-demo/<job>/ (mounted into the jobs container at the same path for sendAlert.ts). Same contract as scripts/cronJob.sh: every run is
 # recorded for its tool page (recordJobRun.ts) and a non-zero exit emails the log tail (sendAlert.ts).
 #
 #   run-job.sh morning-download | premium-change | renewal-summary | cl-renewal-summaries |
@@ -10,7 +10,7 @@
 set -uo pipefail
 cd "$(dirname "$0")"
 
-LOG_ROOT=/var/log/boxwood-mcp
+LOG_ROOT=/var/log/ams360-demo
 
 tsx() {
   docker compose run --rm -T jobs node --import tsx "$@"
