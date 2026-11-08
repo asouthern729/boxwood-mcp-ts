@@ -15,13 +15,6 @@ import { registerRiskProfileTool } from "./tools/policies/riskProfile.js"
 import { registerClRenewalSummaryTool } from "./tools/policies/clRenewalSummary.js"
 import { registerPlRenewalSummaryTool } from "./tools/policies/plRenewalSummary.js"
 import { registerRenewalPremiumSummaryTool } from "./tools/policies/renewalPremiumSummary.js"
-import { registerBoardSummaryTool } from "./tools/board/boardSummary.js"
-import { registerBoardUpdateItemTool } from "./tools/board/boardUpdateItem.js"
-import { registerBoardCommentTool } from "./tools/board/boardComment.js"
-import { registerBoardCreateItemTool } from "./tools/board/boardCreateItem.js"
-import { registerBoardDeleteItemTool } from "./tools/board/boardDeleteItem.js"
-import { registerBoardDeleteCommentTool } from "./tools/board/boardDeleteComment.js"
-import { registerBoardEditCommentTool } from "./tools/board/boardEditComment.js"
 
 export function createServer() {
   const server = new McpServer({
@@ -45,13 +38,6 @@ export function createServer() {
   registerClRenewalSummaryTool(server)
   registerPlRenewalSummaryTool(server)
   registerRenewalPremiumSummaryTool(server)
-  registerBoardSummaryTool(server)
-  registerBoardUpdateItemTool(server)
-  registerBoardCommentTool(server)
-  registerBoardCreateItemTool(server)
-  registerBoardDeleteItemTool(server)
-  registerBoardDeleteCommentTool(server)
-  registerBoardEditCommentTool(server)
 
   return server
 }

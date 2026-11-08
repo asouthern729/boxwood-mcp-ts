@@ -3,7 +3,7 @@ import type { McpServer } from "@modelcontextprotocol/sdk/server/mcp.js"
 import { createServer } from "../mcpServer.js"
 import { logger } from "./logger.js"
 
-// Same reasoning as boardChat.ts/scripts/morningDownload.ts: force API-key auth (never an ambient
+// Same reasoning as scripts/morningDownload.ts: force API-key auth (never an ambient
 // OAuth session) and fail fast if it's missing, since this is what actually authenticates every call.
 const ANTHROPIC_API_KEY = process.env.ANTHROPIC_API_KEY
 
@@ -41,7 +41,7 @@ export async function runScopedChatTurn(
       tools: toolNames,
       allowedTools: toolNames,
       // Isolates this from the project's own accumulated .claude/settings.json permissions (see
-      // boardChat.ts's comment on the same option) — only `tools`/`allowedTools` above govern what
+      // morningDownload.ts's comment on the same option) — only `tools`/`allowedTools` above govern what
       // this run can touch.
       settingSources: [],
       permissionMode: "default",

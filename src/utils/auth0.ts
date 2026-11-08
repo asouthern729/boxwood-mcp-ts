@@ -56,7 +56,7 @@ export async function exchangeCodeForToken(code: string) {
 // claims (name/email) even though "profile email" is requested — that's normal Auth0 behavior
 // for a custom-API-audience token. /userinfo is the standard OIDC way to resolve the logged-in
 // person's display info from that same access token, used once at login so the client never has
-// to prompt the user for their own name (see src/routes/board.ts's comment feature).
+// to prompt the user for their own name.
 export async function fetchUserInfo(accessToken: string) {
   const response = await fetch(`https://${ AUTH0_TENANT_DOMAIN }/userinfo`, {
     headers: { Authorization: `Bearer ${ accessToken }` }
@@ -72,8 +72,7 @@ export async function fetchUserInfo(accessToken: string) {
 
   return {
     label: body.name || body.nickname || body.email || null,
-    // Kept separate from `label` (a display name) since it's used to reliably tell Andrew's
-    // comments apart from the client's for bubble coloring in the roadmap UI — see roadmap.html.
+    // Kept separate from `label` (a display name), which isn't a reliable identifier.
     email: body.email || null
   }
 }

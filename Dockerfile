@@ -25,8 +25,6 @@ COPY assets ./assets
 COPY tsconfig.json ./
 COPY src ./src
 COPY scripts ./scripts
-# Static info pages (/mcp-tools/, /roadmap/, /ams360-sync/), served by src/routes/site.ts.
-COPY site ./site
 USER node
 EXPOSE 3000
 CMD ["node", "dist/app.js"]
