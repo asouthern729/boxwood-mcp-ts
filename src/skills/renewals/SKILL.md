@@ -171,7 +171,7 @@ AMS360 has no A.M. Best ratings, enhancement lists or exclusions, so those appea
 
 ### Archiving
 
-Same manifest shape and keying rules as `risk_profile`, under `<OUTPUT_ROOT>/cl-renewal-summary/`, backing `GET /api/v1/boxwood-mcp/cl-renewal-summary/manifest`, `GET`/`DELETE .../cl-renewal-summary/files/:filename`, and `POST .../cl-renewal-summary/chat` (`src/routes/clRenewalSummary.ts`, mirroring the risk-profile routes). The client's requirement is that these be filed to SharePoint (Commercial Lines/Client Renewal Info/<client>/<year>/), not emailed — the local archive is the interim until that Graph access exists.
+Same manifest shape and keying rules as `risk_profile`, under `<OUTPUT_ROOT>/cl-renewal-summary/`, backing `GET /api/v1/ams360-mcp/cl-renewal-summary/manifest`, `GET`/`DELETE .../cl-renewal-summary/files/:filename`, and `POST .../cl-renewal-summary/chat` (`src/routes/clRenewalSummary.ts`, mirroring the risk-profile routes). The client's requirement is that these be filed to SharePoint (Commercial Lines/Client Renewal Info/<client>/<year>/), not emailed — the local archive is the interim until that Graph access exists.
 
 ### Common questions → calls
 
@@ -206,7 +206,7 @@ With several carriers (or the same line on two policies), each section shows its
 
 ### Archiving
 
-Same manifest shape and keying as `cl_renewal_summary`, under `<OUTPUT_ROOT>/pl-renewal-summary/`, backing `GET /api/v1/boxwood-mcp/pl-renewal-summary/manifest`, `GET`/`DELETE .../pl-renewal-summary/files/:filename`, and `POST .../pl-renewal-summary/chat` (`src/routes/plRenewalSummary.ts`), consumed by the employee dashboard's /personal/renewal-summary page. `GET .../pl-renewal-summary/files/:filename/pdf` returns a PDF of the same .docx: headless LibreOffice, cached beside the .docx and removed with it, 503 `converter_unavailable` if LibreOffice isn't installed. An account-level summary is archived as one file per client per soonest upcoming renewal date (`<Client>_<YYYY-MM-DD>_Personal_Insurance_Summary.docx`); a single-policy request, per polid.
+Same manifest shape and keying as `cl_renewal_summary`, under `<OUTPUT_ROOT>/pl-renewal-summary/`, backing `GET /api/v1/ams360-mcp/pl-renewal-summary/manifest`, `GET`/`DELETE .../pl-renewal-summary/files/:filename`, and `POST .../pl-renewal-summary/chat` (`src/routes/plRenewalSummary.ts`), consumed by the employee dashboard's /personal/renewal-summary page. `GET .../pl-renewal-summary/files/:filename/pdf` returns a PDF of the same .docx: headless LibreOffice, cached beside the .docx and removed with it, 503 `converter_unavailable` if LibreOffice isn't installed. An account-level summary is archived as one file per client per soonest upcoming renewal date (`<Client>_<YYYY-MM-DD>_Personal_Insurance_Summary.docx`); a single-policy request, per polid.
 
 **Built automatically** each weekday at 9am CT by `scripts/dailyPlRenewalPremiumChange.ts --job=renewal-summary` (run from `dailyPlRenewalJob.sh`). Every client with a new PL renewal download gets their account-level summary rebuilt. The Renewal Calculator workbooks are a separate 8:30am run of the same script (`--job=premium-change`). Nothing is emailed; OneDrive filing is pending Entra access.
 

@@ -25,7 +25,7 @@ import { PERSON_NAME } from "../tools/proposalBuilder.js"
 // the file routes otherwise mirror routes/clRenewalSummary.ts.
 export const router = Router()
 
-const BASE = "/api/v1/boxwood-mcp/proposal-builder" as const
+const BASE = "/api/v1/ams360-mcp/proposal-builder" as const
 const DOCX_MIME_TYPE = "application/vnd.openxmlformats-officedocument.wordprocessingml.document"
 const MAX_CHAT_MESSAGE_LENGTH = 2000
 // Same cap as the Renewal Summary's quote uploads: the Messages API takes 32 MB including base64

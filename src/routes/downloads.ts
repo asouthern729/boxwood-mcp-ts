@@ -24,6 +24,6 @@ router.get("/downloads/:token", (req, res) => {
 
 // All-time download count per tool page, keyed by the same tool ids the records use:
 // { counts: { "risk-profile": 3, "cl-renewal-summary": 0, ... } }
-router.get("/api/v1/boxwood-mcp/downloads/stats", auth0, (_req, res) => {
+router.get("/api/v1/ams360-mcp/downloads/stats", auth0, (_req, res) => {
   res.json({ counts: downloadCounts() })
 })

@@ -19,7 +19,7 @@ import { groupByCsr } from "./riskProfile.js"
 // the manifest, embedded chat). See routes/riskProfile.ts for the reasoning behind each route.
 export const router = Router()
 
-const BASE = "/api/v1/boxwood-mcp" as const
+const BASE = "/api/v1/ams360-mcp" as const
 const DOCX_MIME_TYPE = "application/vnd.openxmlformats-officedocument.wordprocessingml.document"
 const MAX_CHAT_MESSAGE_LENGTH = 2000
 

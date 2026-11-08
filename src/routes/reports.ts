@@ -12,7 +12,7 @@ export const router = Router()
 // Same directory scripts/morningDownload.ts writes to and scripts/sendReportEmail.ts reads
 // from — this route only reads it, never writes.
 const OUTPUT_DIR = outputDir("download-report")
-const BASE = "/api/v1/boxwood-mcp" as const
+const BASE = "/api/v1/ams360-mcp" as const
 const REPORT_FILENAME_PATTERN = /^\d{4}-\d{2}-\d{2}_download_report\.xlsx$/
 const XLSX_MIME_TYPE = "application/vnd.openxmlformats-officedocument.spreadsheetml.sheet"
 

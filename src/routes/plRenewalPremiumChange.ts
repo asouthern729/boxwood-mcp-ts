@@ -18,7 +18,7 @@ import { groupByCsr } from "./riskProfile.js"
 // extra totals and the paste-ready note so index rows don't have to open the workbook.
 export const router = Router()
 
-const BASE = "/api/v1/boxwood-mcp" as const
+const BASE = "/api/v1/ams360-mcp" as const
 const XLSX_MIME_TYPE = "application/vnd.openxmlformats-officedocument.spreadsheetml.sheet"
 const MAX_CHAT_MESSAGE_LENGTH = 2000
 const NOT_FOUND = { error: "not_found", error_description: "This renewal premium change workbook doesn't exist." }

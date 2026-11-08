@@ -12,7 +12,7 @@ import { runRiskProfileChatTurn } from "../utils/riskProfileChat.js"
 
 export const router = Router()
 
-const BASE = "/api/v1/boxwood-mcp" as const
+const BASE = "/api/v1/ams360-mcp" as const
 const DOCX_MIME_TYPE = "application/vnd.openxmlformats-officedocument.wordprocessingml.document"
 const MAX_CHAT_MESSAGE_LENGTH = 2000
 
