@@ -103,7 +103,7 @@ const PROMPT = `Run Boxwood's morning download review end to end.
    flagged count) — no other commentary.`
 
 // Both download_report (the JSON report link) and download_report_workbook (the finished .xlsx)
-// return a plain https://mcp.boxwoodins.com/downloads/<uuid> link (see src/routes/downloads.ts)
+// return a plain https://<server host>/downloads/<uuid> link (see src/routes/downloads.ts)
 // rather than embedding their payload — but that URL points at the *deployed* pm2 server. This
 // script's createServer() below is a separate in-process McpServer in this script's own Node
 // process, with its own separate downloadStore module state, so fetching that public URL would hit

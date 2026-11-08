@@ -371,7 +371,7 @@ buffer-in/buffer-out function with no MCP dependency. The weekday 8am automation
 (`scripts/morningDownload.ts`, then `sendReportEmail.ts`) runs `download_report` → verdicts →
 `download_report_workbook` end to end through the Claude Agent SDK and emails the finished `.xlsx`.
 
-Returns a plain download link (`https://mcp.boxwoodins.com/downloads/<token>`, valid 24 hours)
+Returns a plain download link (`https://<server host>/downloads/<token>`, valid 24 hours)
 rather than embedding the file in the tool result — pass it back to the user as-is.
 
 ## Common questions → calls

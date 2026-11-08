@@ -1,7 +1,10 @@
 import path from "node:path"
 
+// The public hostname the app is served on: PUBLIC_HOST in .env (e.g. demo.tyneside.io), else
+// demo.tyneside.io. Only used in production; development always runs on 127.0.0.1. It sets both the
+// Host header the app accepts and the base of every link it hands out (downloads, OAuth metadata).
 export const allowedHosts = process.env.NODE_ENV === "production" ?
-  ["mcp.boxwoodins.com"] :
+  [process.env.PUBLIC_HOST || "demo.tyneside.io"] :
   ["127.0.0.1"]
 
 export const publicBaseUrl = `https://${ allowedHosts[0] }`
