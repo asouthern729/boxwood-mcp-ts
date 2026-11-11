@@ -31,8 +31,8 @@ services:
     tmpfs:
       - /tmp
     volumes:
-      - ./data/output:/var/lib/boxwood-mcp/output
-      - ./data/state:/var/lib/boxwood-mcp/state
+      - /opt/containers/boxwood-mcp/data/output:/var/lib/boxwood-mcp/output
+      - /opt/containers/boxwood-mcp/data/state:/var/lib/boxwood-mcp/state
     cap_drop:
       - ALL
     security_opt:
@@ -72,8 +72,8 @@ services:
     tmpfs:
       - /tmp
     volumes:
-      - ./data/output:/var/lib/boxwood-mcp/output
-      - ./data/state:/var/lib/boxwood-mcp/state
+      - /opt/containers/boxwood-mcp/data/output:/var/lib/boxwood-mcp/output
+      - /opt/containers/boxwood-mcp/data/state:/var/lib/boxwood-mcp/state
       - /var/log/boxwood-mcp:/var/log/boxwood-mcp
     cap_drop:
       - ALL
