@@ -1,0 +1,14 @@
+# boxwood-mcp scheduled jobs, run by supercronic inside the `jobs` service (deploy/docker-compose.yml).
+# Times are Central; supercronic handles DST via CRON_TZ. The AMS360 sync (07:30) runs on the host,
+# not here.
+CRON_TZ=America/Chicago
+
+0 8 * * 1-5   /app/cron/run-job.sh morning-download
+30 8 * * 1-5  /app/cron/run-job.sh premium-change
+0 9 * * 1-5   /app/cron/run-job.sh renewal-summary
+0 9 * * 1-5   /app/cron/run-job.sh cl-renewal-summaries
+0 9 * * 1-5   /app/cron/run-job.sh renewal-premium-summary-refresh
+30 8 1 * *    /app/cron/run-job.sh monthly
+
+# Keep 30 days of dated download reports.
+15 8 * * *    find /var/lib/boxwood-mcp/output/download-report -maxdepth 1 -type f -name '[0-9][0-9][0-9][0-9]-[0-9][0-9]-[0-9][0-9]_download_report.xlsx' -mtime +30 -delete

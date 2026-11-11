@@ -1,14 +1,31 @@
 services:
   boxwood-mcp:
-    image: ghcr.io/asouthern729/boxwood-mcp-ts:1.0.4
+    image: ghcr.io/asouthern729/boxwood-mcp-ts:1.0.5
     restart: unless-stopped
-    env_file:
-      - .env
-    # Host networking so localhost:5432 reaches the host's Postgres (it only listens on loopback);
-    # the app still binds 127.0.0.1:3000 for nginx.
     network_mode: host
     environment:
       HOST: 127.0.0.1
+      HOME: /tmp
+      PGHOST: ${PGHOST}
+      PGPORT: ${PGPORT}
+      PGUSER: ${PGUSER}
+      PGPASSWORD: ${PGPASSWORD}
+      PGDATABASE: ${PGDATABASE}
+      PORT: ${PORT}
+
+      AUTH0_TENANT_DOMAIN: ${AUTH0_TENANT_DOMAIN}
+      AUTH0_CLIENT_ID: ${AUTH0_CLIENT_ID}
+      AUTH0_CLIENT_SECRET: ${AUTH0_CLIENT_SECRET}
+      AUTH0_API_URI: ${AUTH0_API_URI}
+
+      RESEND_API_KEY: ${RESEND_API_KEY}
+      MAIL_FROM: ${MAIL_FROM}
+      ALERT_TO: ${ALERT_TO}
+
+      ANTHROPIC_API_KEY: ${ANTHROPIC_API_KEY}
+
+      OUTPUT_ROOT: /var/lib/boxwood-mcp/output
+      STATE_ROOT: /var/lib/boxwood-mcp/state
     user: "node"
     read_only: true
     tmpfs:
@@ -21,18 +38,35 @@ services:
     security_opt:
       - no-new-privileges:true
     mem_limit: 512m
-
-  # One-off container per cron job (run-job.sh → `docker compose run --rm jobs ...`). The "jobs"
-  # profile keeps `docker compose up` from starting it; its own memory limit keeps a LibreOffice-heavy
-  # build from starving the web server.
+  # Scheduler: supercronic runs cron/crontab (baked into the image) and each job writes its log to
+  # the host's /var/log/boxwood-mcp. Own memory limit so a LibreOffice-heavy build can't starve the
+  # web server; the three 09:00 jobs run at the same time, hence 2g.
   jobs:
-    image: ghcr.io/asouthern729/boxwood-mcp-ts:1.0.4
-    profiles: ["jobs"]
-    env_file:
-      - .env
+    image: ghcr.io/asouthern729/boxwood-mcp-ts:1.0.5
+    restart: unless-stopped
+    command: ["supercronic", "/app/cron/crontab"]
     network_mode: host
     environment:
       HOME: /tmp
+      PGHOST: ${PGHOST}
+      PGPORT: ${PGPORT}
+      PGUSER: ${PGUSER}
+      PGPASSWORD: ${PGPASSWORD}
+      PGDATABASE: ${PGDATABASE}
+
+      AUTH0_TENANT_DOMAIN: ${AUTH0_TENANT_DOMAIN}
+      AUTH0_CLIENT_ID: ${AUTH0_CLIENT_ID}
+      AUTH0_CLIENT_SECRET: ${AUTH0_CLIENT_SECRET}
+      AUTH0_API_URI: ${AUTH0_API_URI}
+
+      RESEND_API_KEY: ${RESEND_API_KEY}
+      MAIL_FROM: ${MAIL_FROM}
+      ALERT_TO: ${ALERT_TO}
+
+      ANTHROPIC_API_KEY: ${ANTHROPIC_API_KEY}
+
+      OUTPUT_ROOT: /var/lib/boxwood-mcp/output
+      STATE_ROOT: /var/lib/boxwood-mcp/state
     user: "node"
     read_only: true
     tmpfs:
@@ -40,10 +74,9 @@ services:
     volumes:
       - ./data/output:/var/lib/boxwood-mcp/output
       - ./data/state:/var/lib/boxwood-mcp/state
-      # sendAlert.ts reads the job's host log to put its tail in the failure email.
-      - /var/log/boxwood-mcp:/var/log/boxwood-mcp:ro
+      - /var/log/boxwood-mcp:/var/log/boxwood-mcp
     cap_drop:
       - ALL
     security_opt:
       - no-new-privileges:true
-    mem_limit: 1g
+    mem_limit: 2g
