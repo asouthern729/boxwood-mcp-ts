@@ -1,5 +1,5 @@
 // Records one cron run for its tool page's "last automatic run" line (src/utils/jobStatus.ts).
-// Called by finish_job in scripts/cronJob.sh:
+// Called by deploy/run-job.sh:
 //   npx tsx scripts/recordJobRun.ts <job> <started at, ISO> <exit code>
 import "dotenv/config"
 import { isJobId, recordJobRun } from "../src/utils/jobStatus.js"

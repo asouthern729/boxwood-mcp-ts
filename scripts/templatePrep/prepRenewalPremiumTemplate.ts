@@ -1,6 +1,6 @@
 // One-time (re-runnable) prep step for the renewal_premium_spreadsheet tool's real template.
 //
-// Patrick emailed the original (assets/templates/CL_Renewal_Premium_Summary.xlsx, permission given
+// The agency supplied the original (assets/templates/CL_Renewal_Premium_Summary.xlsx, permission given
 // to reuse it directly rather than reproduce its styling by hand) built around a fixed 8-row
 // line-of-business table (rows 12-19: General Liability/Property/Auto/Umbrella/Workers Comp/EPLI/
 // Inland Marine/D&O), each with a live Percent Change formula and a pre-filled Trending range, and

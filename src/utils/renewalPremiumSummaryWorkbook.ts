@@ -1,8 +1,8 @@
 import ExcelJS from "exceljs"
 import path from "node:path"
 
-// Loads and fills in Patrick's actual template (assets/templates/commercial-renewal-template.xlsx —
-// see scripts/templatePrep/prepRenewalPremiumTemplate.py for how it was derived from his original
+// Loads and fills in the agency's actual template (assets/templates/commercial-renewal-template.xlsx —
+// see scripts/templatePrep/prepRenewalPremiumTemplate.py for how it was derived from the agency's original
 // CL_Renewal_Premium_Summary.xlsx, permission given to reuse it directly) rather than rebuilding the
 // layout from scratch — real styling, real formulas (Percent Change, TOTAL PREMIUM), not an
 // approximation of them.
@@ -26,7 +26,7 @@ const LOB_LABEL: Record<KnownLobCode, string> = {
   WORK: "Workers Comp", EPLI: "EPLI", INMRC: "Inland Marine", DO: "D&O"
 }
 
-// Column H is the template's "Trending Percent Increase" column. Patrick (9/29 "final lap"): remove
+// Column H is the template's "Trending Percent Increase" column. Agency request (9/29 "final lap"): remove
 // it. Its header and per-line ranges are cleared rather than the column deleted — column H also sits
 // inside the section banner and the Quote Notes boxes, and deleting it would mean shifting the Market
 // Options block, its formulas, the merges, and the print area (Andrew, 2026-10-01: clearing is enough).
@@ -79,7 +79,7 @@ export type BuildRenewalPremiumSummaryWorkbookResult = {
   cellMap: RenewalPremiumSummaryCellMapEntry[]
 }
 
-// Everything from this row down is internal-only (per Patrick, 2026-09-16): AMs should delete these
+// Everything from this row down is internal-only (per the agency, 2026-09-16): AMs should delete these
 // rows before forwarding the workbook to a client. Left as its own clearly-labeled block below the
 // template's own last used row (32) rather than reusing the "Additional Quote Notes" cells, since
 // those are client-facing.
@@ -212,7 +212,7 @@ export async function buildRenewalPremiumSummaryWorkbook(input: RenewalPremiumSu
 
   // Client feedback (2026-09-15): "unwanted empty rows" — the template pre-styles all
   // OTHER_POLICIES_MAX_ROWS rows with borders and light shading regardless of whether that many
-  // "other" policies actually exist, so an account with fewer than the max (Defatta: 4 of 6) shows
+  // "other" policies actually exist, so an account with fewer than the max (e.g. 4 of 6) shows
   // trailing rows that look like intended-but-blank entries. Clears border/fill on every column of
   // any row beyond the real data (not just A/D, which is all that's ever written) so it renders as a
   // plain blank row instead. Only touches rows that are ENTIRELY unused — doesn't attempt to split a
@@ -234,7 +234,7 @@ export async function buildRenewalPremiumSummaryWorkbook(input: RenewalPremiumSu
     }
   }
 
-  // Internal-only note (Patrick, 2026-09-16): each main-table policy's premium is a point-in-time
+  // Internal-only note (agency request, 2026-09-16): each main-table policy's premium is a point-in-time
   // fulltermpremium snapshot, not itself a transaction, so an AM needs to know how current it is —
   // if AMS360 has since received something newer, they know to check it and update the figure by
   // hand until there's an automated way to do that. Deliberately excludable: it's its own clearly

@@ -18,7 +18,7 @@ import { registerRenewalPremiumSummaryTool } from "./tools/policies/renewalPremi
 
 export function createServer() {
   const server = new McpServer({
-    name: "boxwood-mcp-ts",
+    name: "ams360-demo-mcp",
     version: "1.0.0"
   })
 

@@ -1,5 +1,5 @@
 // Monthly batch build of the CL "Pre-Renewal Review" (risk_profile MCP tool) — the companion to
-// scripts/monthlyRenewalPremiumSummaries.ts, on the same schedule per Patrick (2026-09-15): "Run on
+// scripts/monthlyRenewalPremiumSummaries.ts, on the same schedule per the agency (2026-09-15): "Run on
 // the 1st of the month for all policies/accounts renewing 60 days later. Oct 1 should create these
 // for all accounts renewing in December." Run on the 1st of month M, this covers every commercial
 // account with a policy expiring in month M+2, one document per account.

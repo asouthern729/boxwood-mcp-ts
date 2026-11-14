@@ -6,7 +6,7 @@ import { promisify } from "node:util"
 
 const execFileAsync = promisify(execFile)
 
-// Word → PDF for the tool pages' "Download PDF" (Patrick, 2026-09-29: "Ability to download pdf from
+// Word → PDF for the tool pages' "Download PDF" (agency request, 2026-09-29: "Ability to download pdf from
 // the tool page"), via headless LibreOffice, so the PDF is the same document as the .docx rather than
 // a second layout to keep in sync. Needs `libreoffice-writer-nogui` plus the metric-compatible font
 // packages (fonts-crosextra-carlito for Calibri, fonts-liberation2 for Arial) installed on the box —

@@ -32,7 +32,7 @@ export const ACCOUNT_POLICY_PREMIUMS_QUERY = `
   LEFT JOIN LATERAL (
     SELECT t.annualizedpremium
     FROM afw_policytransaction t
-    -- != 0, not just IS NOT NULL (boxwood-mcp-ts-0d review, 2026-09-19): a later $0 administrative
+    -- != 0, not just IS NOT NULL (code review, 2026-09-19): a later $0 administrative
     -- endorsement would otherwise win this ORDER BY over an earlier RWL/NBS transaction that
     -- actually carries the real premium.
     WHERE t.polid = p.polid AND t.annualizedpremium IS NOT NULL AND t.annualizedpremium != 0

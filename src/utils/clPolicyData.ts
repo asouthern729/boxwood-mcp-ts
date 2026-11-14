@@ -20,18 +20,18 @@ export const CUSTOMER_NAME_EXPR = "COALESCE(c.dba, NULLIF(TRIM(CONCAT_WS(' ', c.
 // typeofbus = 2 ("Commercial Lines", per afw_prcode AttrCode='TB') scopes this tool to commercial
 // policies only — personal lines renewals have no exposure schedules to build here.
 //
-// Deliberately does NOT filter on renewalrptflag='A' (client-corrected 2026-09-14, Defatta Custom
-// Homes LLC): a carrier/AMS360 can flip a term's renewalrptflag to 'R' the moment its successor term
+// Deliberately does NOT filter on renewalrptflag='A' (client-corrected 2026-09-14 on a real
+// account): a carrier/AMS360 can flip a term's renewalrptflag to 'R' the moment its successor term
 // is bound, even weeks before that successor's poleffdate arrives — so for the whole window between
 // "next year's term got written up" and "next year's term actually starts," the term that's
 // genuinely in force today carries 'R', not 'A', while the 'A'-flagged successor hasn't started yet.
-// Patrick's own words: "It should return data for the policies currently in force based on effective
+// the agency's own words: "It should return data for the policies currently in force based on effective
 // and expiration dates regardless of if they are market renewed or active." poleffdate <= now() <=
 // polexpdate alone is both necessary AND sufficient to mean "in force today" — it already excludes a
 // bound-but-not-yet-started renewal (poleffdate in the future) and an expired term not yet marked
 // status='D' (polexpdate in the past), which is all the 2026-08-27 renewalrptflag='A' requirement
 // was ever actually doing (see book_summary's CURRENT_POLICIES_CTE comment) — so dropping the flag
-// condition here loses no real protection while fixing the Defatta-shaped gap.
+// condition here loses no real protection while fixing the current-term gap.
 // The ResolvedPolicy columns and joins — shared by RESOLVE_POLICY_QUERY and
 // RESOLVE_POLIDS_QUERY so an archived document's rebuild sees exactly what its first build saw.
 const RESOLVED_POLICY_SELECT = `
@@ -66,9 +66,9 @@ export const RESOLVE_POLICY_QUERY = `
     -- their upcoming renewals" actually means. NULL (the default) keeps today's unscoped behavior.
     AND ($3::int IS NULL OR p.polexpdate <= now() + ($3::int * INTERVAL '1 day'))
     -- Name match lives HERE, behind the typeofbus filter above, rather than going through
-    -- customer_lookup first (client-reported 2026-09-22, Defatta Custom Homes LLC): AMS360 keeps a
+    -- customer_lookup first (client-reported 2026-09-22 on a real account): AMS360 keeps a
     -- commercial client's employee-benefits book as a SEPARATE customer record with a near-identical
-    -- name ("DeFatta Custom Homes", typeofbus 4 only — dental/vision/life/disability), so a name
+    -- name (typeofbus 4 only — dental/vision/life/disability), so a name
     -- search across all customers always came back ambiguous and made the CSR pick. Matching the
     -- name only among customers with a current commercial policy resolves straight to the
     -- commercial account. Checked against dba, firmnamecust, and first/last name separately since
@@ -134,7 +134,7 @@ const NAMED_INSUREDS_QUERY = `
 // Two-stage dedup — NOT a single ROW_NUMBER partitioned by locno — because AMS360 doesn't always
 // retire the old clocid when a location gets edited into a new one. Confirmed on Trace
 // Construction's own property policy: locno 00001 carries FOUR distinct clocid values across its
-// history, and two of them ("1804 Williamson Ct Ste 205", clocid 73b3c91c... and b1e5eb15...) are
+// history, and two of them ("1804 Commerce Ct Ste 205", two separate clocids) are
 // BOTH still status='A' at their own latest effdate — a real duplicate-active-record case, not the
 // usual superseded-then-marked-D pattern this file's dedup convention normally relies on.
 // Stage 1 (`active`) is the file's standard per-entity dedup, unchanged: collapse each clocid to
@@ -237,7 +237,7 @@ const PROPERTY_QUERY = `
 // AMS360 data) built from https://www.insurancexdate.com/gl.php (1,154 codes, pulled 2026-09-15) to
 // fill this gap — LEFT JOINed here and preferred over the raw free text below when a match exists,
 // falling back to it otherwise (a handful of class codes on any given policy may not appear in that
-// external list). Client-reported 2026-09-15, Defatta Custom Homes LLC.
+// external list). Client-reported 2026-09-15 on a real account.
 const GL_EXPOSURE_QUERY = `
   SELECT t.classcode, t.classification, t.prembasis, t.exposure,
     loc.locno, loc.addr1, loc.city, loc.state, loc.zip, gcc.description AS gl_description
@@ -262,7 +262,7 @@ const GL_EXPOSURE_QUERY = `
 // rather than a single own id — the PARTITION BY below must cover every part of that key or rows
 // under-dedupe (confirmed against the live schema while planning this tool).
 //
-// Client-reported 2026-09-15 (Defatta Custom Homes LLC): the Blanket Summary section was missing
+// Client-reported 2026-09-15 on a real account: the Blanket Summary section was missing
 // Covered Location, Scheduled/Unscheduled, Coverage, and Deductible — all present on the client's
 // own reference layout — because the original query only selected afw_146equipsummary's own plain
 // columns. Three more joins fill these in, confirmed against real data:
@@ -272,8 +272,8 @@ const GL_EXPOSURE_QUERY = `
 //   - imlocid links to afw_146locations (its OWN polid/lobid/imlocid/effdate-keyed row, same dedup
 //     convention as everything else in this file), which usually has null addr1/city/state/zip of
 //     its own but carries a clocid pointing back to afw_clocation for the real address — confirmed
-//     on Defatta's own blanket record (imlocid resolves to clocid 0437eb33..., locno 00001, "110
-//     Reynolds Rd").
+//     on that account's own blanket record (imlocid resolves to the locno 00001
+//     location).
 //   - cpremid links directly to afw_cprem (the same coverage-line premium/rating table
 //     PROPERTY_QUERY already uses) for Coverage (afw_cprem.coverage, e.g. "Fraud and Deceit") and
 //     Deductible (afw_cprem.deduct) — deduped the same way PROPERTY_QUERY's cprem_320 CTE does,
@@ -381,7 +381,7 @@ const WC_EXPOSURE_QUERY = `
   ORDER BY t.ratingclasscode
 `
 
-// AMS360 stores zip+4 as a single 9-digit string with no separator (e.g. "370272877") — reformatted
+// AMS360 stores zip+4 as a single 9-digit string with no separator (e.g. "385901234") — reformatted
 // to the standard 5+4 display ("37027-2877") when it's exactly 9 digits, left as-is otherwise.
 export function formatZip(zip: string | null): string {
   if(!zip) return ""
@@ -444,15 +444,15 @@ function premBasisLabel(code: string | null): string {
 
 // Some Scheduled Items rows have manufacturer/model missing from AMS360's own dedicated columns
 // even though the same information is right there in equipdesc's free text (e.g. "2024 Land Pride
-// AP-HD74LLC Bucket S/N:2257570" with manufacturer/model both null) — confirmed a real data-entry
+// AP-HD74LLC Bucket S/N:1234567" with manufacturer/model both null) — confirmed a real data-entry
 // inconsistency at the source (afw_146schedequip.manufacturer/model genuinely null, not a sync
-// issue), not something recoverable via a different column or join. Patrick's own reference
+// issue), not something recoverable via a different column or join. the agency's own reference
 // document has this same set of rows filled in — by hand, reading the description himself — which
 // this reproduces automatically but conservatively: only ever matches a manufacturer name that
 // ALREADY appears elsewhere in this SAME item list (never invents an unrecognized brand), and only
 // accepts the token right after it as a model if that token contains a digit — real model codes in
 // this data always do ("AP-HD74LLC", "Z970R", "KX057-5R3AP"), whereas a plain descriptive word that
-// isn't actually a model ("Pallet" in "Land Pride Pallet Forks") never does. Patrick's own document
+// isn't actually a model ("Pallet" in "Land Pride Pallet Forks") never does. the agency's own document
 // left that exact row's model blank too, for the same reason — this only fills in what can be
 // matched with high confidence, never guesses.
 function inferMissingEquipmentDetails(rows: EquipmentItemRow[]): EquipmentItemRow[] {
@@ -481,9 +481,9 @@ function inferMissingEquipmentDetails(rows: EquipmentItemRow[]): EquipmentItemRo
     // already-populated row in this batch) — only used when the description starts with a literal
     // 4-digit year, a strong enough structural signal on its own that what follows is
     // "year manufacturer-word(s) model ..." rather than open-ended free text. Deliberately does NOT
-    // apply without that year anchor — "Power Unit F6L914 S/N:8945208" has the same
+    // apply without that year anchor — "Power Unit F6L914 S/N:7654321" has the same
     // words-then-digit-token shape but no year prefix, and "Power Unit" isn't a real manufacturer;
-    // Patrick's own reference document left that row's manufacturer blank too.
+    // the agency's own reference document left that row's manufacturer blank too.
     const yearMatch = row.description.match(/^\d{4}\s+/)
     if(yearMatch) {
       const words = row.description.slice(yearMatch[0].length).split(/\s+/)
@@ -682,10 +682,10 @@ export async function resolveClPolicies({ polno, custid, customer_name, renewal_
   const customerNameParam = customerName ? `%${ customerName }%` : null
 
   // An account-level request (custid/customer_name, no polno) defaults to policies renewing within
-  // the next 90 days — same default and source as renewal_premium_spreadsheet (Patrick: "the next 90
+  // the next 90 days — same default and source as renewal_premium_spreadsheet (the agency: "the next 90
   // days"). Without it, "a renewal summary for [client]" combined every current commercial policy on
   // the account, including bonds and other lines not renewing until next spring (client-reported
-  // 2026-09-22: a 5/2027 surety bond on Defatta's combined document). A specific polno is taken as an
+  // 2026-09-22: a 5/2027 surety bond on one account's combined document). A specific polno is taken as an
   // explicit ask for that policy whenever it renews, so gets no default window.
   const renewalWindow = renewal_within_days ?? (polno ? undefined : book.defaultWindowDays)
   const renewalWindowParam = renewalWindow ?? null
@@ -769,17 +769,17 @@ export function combineExposures(perPolicyData: PolicyData[], clientName: string
   //
   // Locations Schedule is the one exception where that "only comes from one policy" premise
   // breaks down: every monoline policy records at least its own copy of the customer's primary
-  // address (confirmed on Trace Construction: the Property policy's full 7-location schedule
-  // PLUS a redundant standalone "1804 Williamson Ct" row from each of the other 3 combined
+  // address (confirmed on a real account: the Property policy's full 7-location schedule
+  // PLUS a redundant standalone "1804 Commerce Ct" row from each of the other 3 combined
   // policies — WC, Auto, and a 4th line).
   //
-  // Deduped by locNo, NOT by normalized address text (client-reported 2026-09-15, Defatta
+  // Deduped by locNo, NOT by normalized address text (client-reported 2026-09-15 on a real
   // Custom Homes LLC): confirmed against real data that AMS360 keeps locno consistent for the
   // same physical location across a customer's separate monoline policies (all three of
-  // Defatta's combined policies carry locno='00001' for their shared primary address), but each
-  // monoline policy's OWN copy of that location's address text can differ slightly — Defatta's
-  // Property policy has "110-112 Reynolds Rd" (zip 37064) while its other two policies both
-  // have "110 Reynolds Rd" (zip 37064-2926). Deduping on address text left two "Loc # 1" rows
+  // the account's combined policies carry locno='00001' for their shared primary address), but each
+  // monoline policy's OWN copy of that location's address text can differ slightly — that account's
+  // Property policy has "110-112 Main St" (zip 38590) while its other two policies both
+  // have "110 Main St" (zip 38590-1234). Deduping on address text left two "Loc # 1" rows
   // with different addresses in the finished document; locNo is the stable, shared identifier
   // that actually says "this is the same location." When two policies' copies of the same
   // locNo disagree on address text, the longer (more complete) one wins, since a fuller street

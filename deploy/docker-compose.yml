@@ -22,8 +22,8 @@ x-app-env: &app-env
   STATE_ROOT: ${STATE_ROOT}
 
 services:
-  boxwood-mcp:
-    image: ghcr.io/asouthern729/ams360-demo-mcp:1.0.1
+  ams360-mcp:
+    image: ghcr.io/asouthern729/ams360-demo-mcp:1.0.2
     restart: unless-stopped
     # Host networking so localhost:5432 reaches the host's Postgres (it only listens on loopback);
     # the app still binds 127.0.0.1:3000 for nginx.
@@ -48,7 +48,7 @@ services:
   # profile keeps `docker compose up` from starting it; its own memory limit keeps a LibreOffice-heavy
   # build from starving the web server.
   jobs:
-    image: ghcr.io/asouthern729/ams360-demo-mcp:1.0.1
+    image: ghcr.io/asouthern729/ams360-demo-mcp:1.0.2
     profiles: ["jobs"]
     network_mode: host
     environment:

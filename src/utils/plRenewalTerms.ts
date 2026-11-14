@@ -84,7 +84,7 @@ export async function withDownloadedRenewalTerms(policies: ResolvedPolicy[]): Pr
 // The same policy number can come back in force more than once on a personal account — never two
 // real policies (postgres peer, 2026-09-30: 22 such groups across 21 accounts). It's an agency-entered
 // placeholder shell next to the carrier's real term ($0, "Monoline", no coverage, no carrier download
-// — Kimbra Morris's 6835594207), a carrier cancel + reissue, or leftover renewal-quote terms. Showing
+// — seen on a real account), a carrier cancel + reissue, or leftover renewal-quote terms. Showing
 // both would double a section on the summary, so per polno: drop a term with no carrier download when
 // a sibling has one, a term cancelled with no later reinstatement, and a quote-only term; then keep
 // the one with the most recent carrier download (then latest effective date). Anything the rules

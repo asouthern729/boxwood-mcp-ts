@@ -4,7 +4,7 @@ import { randomUUID } from "node:crypto"
 // handed out as a short-lived link instead of embedding the bytes in the MCP tool result — clients
 // were trying to interpret/convert the embedded blob's MIME type rather than treat it as an opaque
 // attachment. Fine to keep in memory only: this server runs as a single pm2 instance
-// (ecosystem.config.cjs instances: 1), and losing unclaimed links on a restart is an acceptable
+// (one app container), and losing unclaimed links on a restart is an acceptable
 // trade for not needing disk cleanup.
 type StoredDownload = { buffer: Buffer; filename: string; mimeType: string; expiresAt: number }
 

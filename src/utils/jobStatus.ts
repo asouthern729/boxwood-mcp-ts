@@ -8,7 +8,7 @@ import { stateDir } from "../config/config.js"
 // Two files per job under <STATE_ROOT>/jobs/:
 //   <job>.summary.json — one line the job script writes about what it did (recordJobSummary)
 //   <job>.json         — the run itself, written by the cron wrapper when the run ends
-//                        (scripts/recordJobRun.ts via finish_job in scripts/cronJob.sh), which
+//                        (scripts/recordJobRun.ts via deploy/run-job.sh), which
 //                        picks up the summary only if it was written during that run.
 // The wrapper, not the job, records the run so a job that crashes before writing anything still
 // shows up as failed.

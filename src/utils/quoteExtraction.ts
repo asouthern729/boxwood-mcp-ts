@@ -3,12 +3,12 @@ import { betaZodOutputFormat } from "@anthropic-ai/sdk/helpers/beta/zod"
 import * as z from "zod"
 
 // Reads an uploaded carrier quote PDF into structured, per-line-of-business fields — the "option to
-// upload pdf for separate policies" on the CL Renewal Summary (Patrick, 2026-09-29). Deliberately
+// upload pdf for separate policies" on the CL Renewal Summary (agency request, 2026-09-29). Deliberately
 // template-agnostic: this returns what the quote says, and clQuoteMerge.ts decides where it goes in
-// whichever document layout is current (since 2026-10-08, Patrick's insurance-proposal format), so
+// whichever document layout is current (since 2026-10-08, the agency's insurance-proposal format), so
 // the extraction survives a template change untouched.
 //
-// The fields mirror the insurance-proposal skill's references/coverage-fields.md (Patrick's own spec
+// The fields mirror the insurance-proposal skill's references/coverage-fields.md (the agency's own spec
 // for what a proposal shows per line). Each line lists the PDF pages it came from so the document
 // can point a reviewer at the source — each section built from a quote gets a Word comment saying
 // so (Andrew, 2026-10-01). Per-value page numbers were dropped 2026-10-08: nothing read them, and
@@ -39,12 +39,12 @@ const QuoteLine = z.object({
     limit: z.string().describe("As printed, e.g. \"$1,000,000\", \"Statutory\", \"Included\""),
     deductible: z.string().nullable()
   })).describe("Policy-wide limits only — per-location, per-building, or per-dwelling limits go in schedules"),
-  // Added 2026-10-08 so per-location limits come out as a table (Patrick's example: "Coverage Limits
+  // Added 2026-10-08 so per-location limits come out as a table (the agency's example: "Coverage Limits
   // by Location", "Coverage Limits by Dwelling") instead of one flat row per building and coverage.
   // Extractions stored before then lack it; readers default it (clQuoteMerge.ts).
   schedules: z.array(z.object({
     // "Exposure: " titles carry what's insured (GL classes, vehicles, drivers) — added 2026-10-20 for
-    // Patrick's Landon feedback, in this field because a separate one made the grammar too large again.
+    // The agency's sample-proposal feedback, in this field because a separate one made the grammar too large again.
     title: z.string().describe("e.g. \"Coverage Limits by Location\", \"Coverage Limits by Dwelling\"; an exposure table's title starts with \"Exposure: \""),
     // Headers and cells joined with " | " rather than arrays — nested arrays (and per-table page
     // lists) made the structured-output grammar too large for the API to compile (400, 2026-10-08).
@@ -81,7 +81,7 @@ export type QuoteLineExtraction = QuoteExtraction["lines"][number]
 
 const MODEL = "claude-opus-5-5"
 
-const SYSTEM_PROMPT = `You extract coverage details from commercial insurance quote, binder, and renewal PDFs for Boxwood Insurance Group, an independent agency. What you extract is inserted into a client-facing renewal document, where account managers verify it against the PDF — so accuracy matters more than completeness.
+const SYSTEM_PROMPT = `You extract coverage details from commercial insurance quote, binder, and renewal PDFs for an independent insurance agency. What you extract is inserted into a client-facing renewal document, where account managers verify it against the PDF — so accuracy matters more than completeness.
 
 - Report only what the document states. Copy names, limits, deductibles, and dates as printed; never infer, estimate, or fill a field from general knowledge. Leave a field null (or a list empty) when the quote doesn't show it.
 - One entry in "lines" per coverage line (property, general liability, auto, workers' comp, umbrella, etc.). A package policy quoting several lines gets one entry per line. A stand-alone add-on that doesn't fit a standard line (e.g. a wind/hail deductible buy-back) is "specialty_addon".
@@ -105,7 +105,7 @@ export class QuoteExtractionError extends Error {}
 
 const PDF_HEADER = Buffer.from("%PDF-")
 
-// Some carrier portals wrap the download: American Modern's dec page (Patrick's TN Equine email,
+// Some carrier portals wrap the download: American Modern's dec page (an agency-supplied example,
 // 2026-10-07) starts with a 22-byte Java serialization header before "%PDF-". Desktop viewers skip
 // leading junk, but the API rejects the file as "not valid" — so anything before the header is cut.
 function normalizedPdf(pdf: Buffer): Buffer {
@@ -114,7 +114,7 @@ function normalizedPdf(pdf: Buffer): Buffer {
   return start === 0 ? pdf : pdf.subarray(start)
 }
 
-// Streamed with a 64K output budget: a full carrier proposal (Cincinnati's 53-page TN Equine quote)
+// Streamed with a 64K output budget: a full carrier proposal (a 53-page sample carrier quote)
 // plus high-effort thinking overran the previous 16K cap mid-JSON. Streaming is what lets max_tokens
 // go that high without an HTTP timeout. When the structured output can't be parsed, the partial
 // message's stop reason still says whether it was cut short.

@@ -12,7 +12,7 @@ import "dotenv/config"
 import { existsSync, readFileSync } from "node:fs"
 import { JOBS, nameList, writeBackfilledRun, type JobId } from "../src/utils/jobStatus.js"
 
-const LOG_ROOT = process.env.LOG_ROOT || "/var/log/boxwood-mcp"
+const LOG_ROOT = process.env.LOG_ROOT || "/var/log/ams360-demo"
 
 type Outcome = { ok: boolean; summary: string | null }
 type Section = { startedAt: Date; text: string }

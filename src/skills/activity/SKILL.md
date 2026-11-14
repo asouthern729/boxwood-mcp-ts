@@ -1,9 +1,9 @@
 ---
 name: activity
-description: Domain knowledge for the activity_feed MCP tool in boxwood-mcp-ts — Boxwood Insurance's AMS360 audit trail ("what's changed lately"), unioning policy transactions, policy term changes, claims, invoices, and staff activity notes by changeddate/changedby. Use when answering questions about recent activity, an audit trail, or "what happened" across a time window, a customer, or a policy.
+description: Domain knowledge for the activity_feed MCP tool in ams360-demo-mcp — the agency's AMS360 audit trail ("what's changed lately"), unioning policy transactions, policy term changes, claims, invoices, and staff activity notes by changeddate/changedby. Use when answering questions about recent activity, an audit trail, or "what happened" across a time window, a customer, or a policy.
 ---
 
-# Boxwood activity feed
+# Activity feed
 
 `activity_feed` is the "what's changed" tool — it does not read a raw AMS360 download-processing log (that's an internal message-level report, not available via the synced data), it queries the `changeddate`/`changedby` columns already present on five domain tables and unions them into one timeline. It's additive to `customer_lookup`/`policy_query`/`invoice_lookup`, not a replacement — use those for full record detail, use this for "what happened since X."
 
@@ -64,4 +64,4 @@ The `lastname` list is a maintained set of AMS360's known built-in/vendor accoun
 - "Break down last week's activity by type" → `since: "7d"`, `group_by: "domain"`
 - "What has staff (not the download) touched recently?" → `changed_by_type: "staff"`
 - "Show me claim activity in the last quarter" → `since: "90d"`, `domains: ["claim"]`
-- "What recent activity impacts Kimbra's customers?" → `since: "7d"` (or whatever window), `csr_code: "<Kimbra's empcode>"` (look it up via `employee_lookup` if you only have her name)
+- "What recent activity impacts Jordan's customers?" → `since: "7d"` (or whatever window), `csr_code: "<Jordan's empcode>"` (look it up via `employee_lookup` if you only have her name)

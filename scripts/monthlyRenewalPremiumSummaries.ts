@@ -1,4 +1,4 @@
-// Monthly batch build of Patrick's "Commercial Renewal Premium Summary" workbook
+// Monthly batch build of the agency's "Commercial Renewal Premium Summary" workbook
 // (renewal_premium_spreadsheet MCP tool) for every commercial account with a policy expiring two
 // calendar months out — run on the 1st of month M, this covers everything expiring in month M+2,
 // so the workbook is already archived by the time an account manager starts renewal prep.
@@ -21,7 +21,7 @@ import { generateRenewalPremiumSummary, NoCommercialPoliciesError } from "../src
 import { nameList, recordJobSummary } from "../src/utils/jobStatus.js"
 import { discoverCommercialAccounts, monthArgFromArgv, resolveTargetMonthWindow } from "../src/utils/monthlyRenewalWindow.js"
 
-// Target month + account discovery are shared with scripts/monthlyRiskProfiles.ts (Patrick's
+// Target month + account discovery are shared with scripts/monthlyRiskProfiles.ts (the agency's
 // companion job, same schedule) — see src/utils/monthlyRenewalWindow.ts.
 async function main() {
   const targetWindow = resolveTargetMonthWindow(monthArgFromArgv(process.argv.slice(2)))

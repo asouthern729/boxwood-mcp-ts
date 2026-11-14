@@ -10,7 +10,7 @@
 // if it were a real business relationship.
 //
 // Checked for false positives before adding this: real company names containing "sample"/"test"/
-// "demo"/etc. as substrings do exist in this data (e.g. "Demo Plus Group, Inc.", "Melton
+// "demo"/etc. as substrings do exist in this data (e.g. "Demo Plus Group, Inc.", "Sample
 // Structural Testing LLC") — a broad ILIKE '%sample%' filter would have wrongly excluded real
 // customers' certificates. The normalized-prefix match only catches the 4 known junk variants.
 export function realCertHolderCondition(holderAlias: string): string {

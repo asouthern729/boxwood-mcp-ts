@@ -53,7 +53,7 @@ router.get(`${ BASE }/pl-renewal-summary/files/:filename`, auth0, (req: Request<
   recordDownload(req, "pl-renewal-summary", filename)
 })
 
-// PDF of the same archived .docx (Patrick, 2026-09-29: "Ability to download pdf from the tool page"),
+// PDF of the same archived .docx (agency request, 2026-09-29: "Ability to download pdf from the tool page"),
 // converted with headless LibreOffice on first request and cached beside the .docx.
 router.get(`${ BASE }/pl-renewal-summary/files/:filename/pdf`, auth0, asyncHandler(async(req: Request<{ filename: string }>, res: Response) => {
   const { filename } = req.params

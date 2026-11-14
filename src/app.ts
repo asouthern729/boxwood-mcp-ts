@@ -46,7 +46,7 @@ const PORT = Number(process.env.PORT) || 3000
 const HOST = process.env.HOST
 
 app.listen(PORT, HOST as any, () => {
-  logger.info(`boxwood-mcp-ts listening on http://${ HOST ?? "0.0.0.0" }:${ PORT }/mcp`)
+  logger.info(`ams360-demo-mcp listening on http://${ HOST ?? "0.0.0.0" }:${ PORT }/mcp`)
 })
 
 process.on("SIGINT", () => {

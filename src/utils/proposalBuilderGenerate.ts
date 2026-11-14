@@ -2,7 +2,7 @@ import { randomBytes } from "node:crypto"
 import type { AmsLineExtraction, AmsProposalExtraction } from "./amsProposalExtraction.js"
 import { buildClProposalDoc, type ProposalPremiumSummary, type ServiceTeamMember } from "./clProposalDoc.js"
 import { carrierKey, completeUmbrellas, overviewFor, periodLabel, SLOT_TITLES, type LinePremium, type LineTable, type SlotLine } from "./clProposalLines.js"
-import { whyBoxwood } from "./clProposalText.js"
+import { whyAgency } from "./clProposalText.js"
 import { extractedTable, mergeQuotesIntoProposal, pageLabel, slotFor, type QuoteSource } from "./clQuoteMerge.js"
 import { orderLines } from "./clRenewalSummaryGenerate.js"
 import { sanitizeForFilename } from "./docArchive.js"
@@ -19,7 +19,7 @@ import type { LocationRow } from "./riskProfileDoc.js"
 // from quotes alone, every section comes from the quotes, GL class, vehicle and driver schedules
 // included.
 //
-// Patrick's Landon feedback (2026-10-18), against his insurance-proposal skill's version of the same
+// The agency's sample-proposal feedback (2026-10-18), against the insurance-proposal skill's version of the same
 // proposal: a Premium Summary (premiums were left out until then, Andrew 2026-10-10), schedules of
 // exposures, vehicles and drivers, and a more condensed document — no Executive Summary page, excess
 // layers in one section side by side, no administrative key facts.
@@ -89,7 +89,7 @@ function amsLine(line: AmsLineExtraction, filename: string, premiums: AmsProposa
 
 // ---------- Condensing ----------
 
-// Key facts a client doesn't need (Patrick's Landon example leaves them all out). Minimum premium and
+// Key facts a client doesn't need (the agency's sample proposal leaves them all out). Minimum premium and
 // audit terms are left to Bind Conditions & Notes, where the quotes already state them.
 const ADMIN_FACT = /carrier status|^premises\b|payment (options?|plans?)|syndicate|^umr$|number of employees|premium discount|description of risk|billing|minimum (earned )?premium|audit/i
 
@@ -98,7 +98,7 @@ function dropAdminFacts(lines: SlotLine[]): void {
 }
 
 // Each quote is read on its own, so the same condition arrives once per quote ("Quote expires
-// 11/08/2026" three times for Landon). A condition is dropped when another says the same thing or
+// 11/08/2026" three times for one sample account). A condition is dropped when another says the same thing or
 // more; quote validity is already on the cover.
 const QUOTE_VALIDITY = /^quotes? (expires?|valid)[^;.]*\.?$/i
 
@@ -132,7 +132,7 @@ function layerLabel(line: SlotLine, index: number): string {
   return `Excess Liability – Layer ${ index + 1 }${ occurrence ? ` (${ occurrence })` : "" }`
 }
 
-// Two or more excess layers become one section with the layers side by side (Patrick's Landon
+// Two or more excess layers become one section with the layers side by side (the agency's sample-proposal
 // example). Runs before completeUmbrellas, which then adds the primary underlying lines.
 function combineExcessLayers(lines: SlotLine[]): { lines: SlotLine[]; layerBelow?: { label: string; carrier: string; limit: string } } {
   const layers = excessLayers(lines)
@@ -323,7 +323,7 @@ export async function buildProposal(input: BuildProposalInput): Promise<{ buffer
   const kept = orderLines(merged.lines).filter((l) => !omittedKeys.has(sectionKey(l.title)))
   dropAdminFacts(kept)
 
-  // An omitted line's own bind conditions go with it (Landon's cyber application), unless a kept
+  // An omitted line's own bind conditions go with it (e.g. a cyber application), unless a kept
   // line states the same condition.
   const quoteLines = quotes.flatMap((q) => q.extraction.lines)
   const lineTitles = (l: typeof quoteLines[number]) => [l.title, l.line_of_business === "specialty_addon" ? l.title : SLOT_TITLES[slotFor(l)]].map(sectionKey)
@@ -397,7 +397,7 @@ export async function buildProposal(input: BuildProposalInput): Promise<{ buffer
     },
     premiumSummary: premiums,
     specialtyAddOns: merged.specialtyAddOns.filter((a) => !omittedKeys.has(sectionKey(a.title))),
-    whyBoxwood: whyBoxwood(narrativeFacts),
+    whyAgency: whyAgency(narrativeFacts),
     serviceTeam
   })
 

@@ -4,7 +4,7 @@
 // and/or bottom edge (inconsistently — some rows double-top/thin-bottom, some double-top/none-
 // bottom, B12/B13 double on both), stacking with the adjacent row's own border to render as an
 // uneven, unusually thick line at some row boundaries but not others. This is a pre-existing
-// artifact in the template Patrick supplied (or from however the original CL_Renewal_Premium_Summary
+// artifact in the template the agency supplied (or from however the original CL_Renewal_Premium_Summary
 // spare rows were built), not something introduced by this project's own code.
 //
 // Fix: normalize every data row (12-22, columns B-H) to a plain thin box border on all four sides,

@@ -1,9 +1,9 @@
 ---
 name: downloads
-description: Domain knowledge for the download_report / download_report_workbook MCP tools in boxwood-mcp-ts — Boxwood's daily overnight-carrier-download review, rebuilt from synced AMS360 data instead of AMS360's own exported "Download Detail" report. Use when answering questions about the morning download review, "what came down overnight," or building a rep-facing action list/workbook from carrier downloads.
+description: Domain knowledge for the download_report / download_report_workbook MCP tools in ams360-demo-mcp — the agency's daily overnight-carrier-download review, rebuilt from synced AMS360 data instead of AMS360's own exported "Download Detail" report. Use when answering questions about the morning download review, "what came down overnight," or building a rep-facing action list/workbook from carrier downloads.
 ---
 
-# Boxwood download report
+# Download report
 
 `download_report` is stage 1 of a two-stage process. It synthesizes and normalizes overnight
 carrier-download data (policy transactions + claims) into per-rep action items — dedup,
@@ -52,7 +52,7 @@ description says so explicitly rather than silently dropping them:
   staff-classified, scoped to that `polid`). A note is included when its activity date (`trandate`,
   the date staff set in AMS360, falling back to `entereddate`) falls within `lookback_days` (default
   **30**) before the download's `entereddate`, and it was entered no later than the download was.
-  Patrick said on 2026-09-29 that older activity shouldn't be tied to today's download. The tool
+  The agency said on 2026-09-29 that older activity shouldn't be tied to today's download. The tool
   does **not** judge whether the notes match. That judgment (✓ matches / ✗ no match / ⚠ verify,
   in the original hand-built report) requires reading free text and reasoning about it; it's a
   separate step performed on this tool's output, not something computed here.
@@ -61,7 +61,7 @@ description says so explicitly rather than silently dropping them:
 - **Groups by `afw_customer.csrcode`** (the customer's header CSR — the account owner), not
   `afw_basicpolinfo.csrcode` (a per-policy field that can diverge from who actually owns the
   relationship) — same precedent as the `book_summary` fix.
-- **Policy Changes column (`change_detail`) — 2026-09-30 expansion.** Patrick asked for more
+- **Policy Changes column (`change_detail`) — 2026-09-30 expansion.** The agency asked for more
   utility: on 30 days of downloads, 66% of policy changes were blank and 16% said "too many to
   list". It now joins these, in order, with "; " between them:
   1. **Premium impact** on endorsement-type downloads (PCH/XLC/REI/PAB only — never renewals, new
@@ -73,7 +73,7 @@ description says so explicitly rather than silently dropping them:
      the transaction, *as known when the download was entered*. Row status can't be trusted:
      carriers re-send unchanged vehicles, re-mint vehicle ids, re-slot a new VIN onto an existing
      vehicle id as a 'C' row (Hake's "Repl.26 Rogue W/ 26 Rogue" — the old status-based logic named
-     the wrong VIN), and reverse an earlier swap with a backdated download (Johnson's Telluride).
+     the wrong VIN), and reverse an earlier swap with a backdated download (one customer's SUV).
      Per-vehicle coverages are folded into the line ("(and its 8 coverages)"). A first image lists
      "Vehicle on policy: …" on new business/rewrite/reissue only, and nothing on a policy change.
   3. **Drivers** (`afw_driver` PL, `afw_127driver` CA): added/removed by driver id (stable across
@@ -166,21 +166,21 @@ description says so explicitly rather than silently dropping them:
   just this run's own `txns`): if some other real transaction on the policy sits at or after the
   row's own effdate and strictly before the candidate's, a genuine closer owner exists somewhere (in
   or out of this run's window) and the candidate shouldn't claim the row. Verified against the same
-  real Tiffany Fallon Rooney example the cross-term-echo fix uses: both her false "31 coverage
+  real anchor example the cross-term-echo fix uses: both her false "31 coverage
   changes" (A01) and a false "Excess UM/Personal Umbrella limit: none → $2,000,000" (U01, confirmed
   via real data neither limit was ever actually null anywhere in that coverage line's visible
-  history) are now correctly suppressed, while a same-window case (John Lynch's real same-day
+  history) are now correctly suppressed, while a same-window case (another real same-day
   4-policy rewrite) is unaffected.
 
   **A third, related bug, same investigation, also fixed (2026-09-11)**: the coverage diff's `LEFT
   JOIN LATERAL` "previous state" lookup was scoped to `c2.polid = a.polid` — but `coverageid` was
   confirmed to stay stable for the same real coverage line across a policy's renewal terms even
   though `polid` changes every term (AMS360 mints a new `polid` per term; confirmed for both
-  A01/U01 1162431's whole visible history, same coverageid present under both the old-term and
+  the anchor policy's whole visible history, same coverageid present under both the old-term and
   new-term `polid` with the same value). So a renewal's own *first* coverage snapshot under its new
   `polid` could never find a same-`polid` prior row, even when a real, meaningful prior value
   existed under the *previous* term's `polid` — every renewal read every limit as "none → current,"
-  not just the ones affected by the cross-window misattribution bug above (confirmed real: Rooney's
+  not just the ones affected by the cross-window misattribution bug above (confirmed real: the anchor example's
   U01 "Excess Uninsured Motorist"/"Personal Umbrella" limits had genuinely been $2,000,000 for the
   entire visible history, never null, yet the report showed "none → $2,000,000"). Fixed by scoping
   the LATERAL lookup to `(custid, polno, coverageid)` instead — joined through `afw_basicpolinfo` to
@@ -259,9 +259,9 @@ description says so explicitly rather than silently dropping them:
   every renewal term for the same `polno`, so AMS360's sync materializes both as real, genuinely
   distinct `afw_policytransaction` rows (distinct `(polid, effdate)` primary keys, not literal
   duplicates) carrying identical `description` text, entered within the same overnight sync batch,
-  weeks apart on `effdate`. Confirmed real via `afw_transaction`: the anchor example (Tiffany Fallon
-  Rooney, policies A01/U01 1162431) has exactly one staff note per policy ("Added Tiffany's daughter
-  Raquel Blue Rooney. Sent dec page. Follow up for DNLD."), filed once against the *new* term's
+  weeks apart on `effdate`. Confirmed real via `afw_transaction`: the anchor example (a personal
+  auto + umbrella account) has exactly one staff note per policy ("Added insured's daughter
+  as driver. Sent dec page. Follow up for DNLD."), filed once against the *new* term's
   `polid` — Cincinnati echoed it as two separate carrier messages, seconds apart, with distinct
   carrier reference numbers (a "PCH" against the closing term, an "RWL"-bundled "PCH" against the
   new term). Confirmed systemic book-wide via direct query: 611 same-sync-batch pairs (`entereddate`
@@ -296,7 +296,7 @@ description says so explicitly rather than silently dropping them:
 
 - `since`/`until` — agency-local timestamp (`"2026-08-28T08:00"`) or relative shorthand
   (`"24h"`/`"7d"`). Omit both for the default firm "8am agency-local yesterday through 8am
-  agency-local today" window (the Boxwood ETL sync pulls overnight AMS360 carrier activity starting
+  agency-local today" window (the AMS360 ETL sync pulls overnight AMS360 carrier activity starting
   7:30am agency-local and typically finishes within minutes, and the report script itself doesn't
   run until 8am — the window's upper bound anchors to that fixed cutoff, not to "now," so the same
   "today" question returns the same window regardless of what time of day it's asked). On a Monday
@@ -320,7 +320,7 @@ description says so explicitly rather than silently dropping them:
   `entereddate`/`changeddate` are essentially always identical — no real drift there either way, but
   switched for consistency).
 - `csr_code` — scope to one representative.
-- `lookback_days` (default 30, was 60 until 2026-09-30 per Patrick) — how far back, from when the
+- `lookback_days` (default 30, was 60 until 2026-09-30 per the agency) — how far back, from when the
   download was entered, to search for candidate staff notes on flagged items (by the note's
   `trandate`). A legitimate request documented further back won't surface as a candidate.
 - `synced_since` — automation only, a true UTC instant (`"2026-09-17T13:01:00.000Z"`, not
@@ -378,8 +378,8 @@ rather than embedding the file in the tool result — pass it back to the user a
 
 - "What came down overnight?" → `download_report` with no args (defaults to the firm 8am-to-8am
   sync window — yesterday 8am through today 8am agency-local).
-- "What does Kimbra need to review this morning?" → `download_report` with
-  `csr_code: "<Kimbra's empcode>"`.
+- "What does Jordan need to review this morning?" → `download_report` with
+  `csr_code: "<Jordan's empcode>"`.
 - "Build me the morning worksheet" → call `download_report`, judge each item in every rep's
   `flagged_items` into a `{ item_id, accuracy }` verdict, then call `download_report_workbook` with
   `report_token` + that `verdicts` array to get the actual `.xlsx`.

@@ -1,7 +1,7 @@
 import * as z from "zod"
 import { LINES_OF_BUSINESS, readPdfStructured } from "./quoteExtraction.js"
 
-// Reads an AMS360-generated proposal (Patrick's sample, "franksandfranks out of ams.docx",
+// Reads an AMS360-generated proposal (the agency's sample AMS360 proposal,
 // 2026-10-09) for the Proposal Builder: service team, named insureds, locations, one entry per
 // coverage section (GL limits and classes, Umbrella and its underlying schedule, Business Auto
 // coverages/symbols/vehicles/drivers, Property premises and subjects of insurance, Inland Marine
@@ -37,7 +37,7 @@ const AmsRawSchema = z.object({
   named_insured: z.string(),
   additional_named_insureds: z.array(z.string()).describe("Every other distinct named insured, each once"),
   mailing_address: z.string().describe("Only if printed"),
-  service_team: z.array(z.string()).describe("\"role | name | email | phone\", e.g. \"Account Manager | Jill Holzen | jill@boxwoodins.com | (615)245-5851\""),
+  service_team: z.array(z.string()).describe("\"role | name | email | phone\", e.g. \"Account Manager | Jordan Ellery | jellery@tyneside.example | (615)555-0111\""),
   locations: z.array(z.string()).describe("Each distinct address once (repeated per policy in the proposal; \"Rd\"/\"Road\" at the same number are one place): \"loc# | address | city | state | zip\""),
   lines: z.array(RawLine).describe("One entry per coverage section, in printed order"),
   expiring_premiums: z.array(z.string()).describe("Premium Summary rows: \"line of business | expiring premium | company\" — stored, never printed"),
@@ -104,7 +104,7 @@ function parseAms(raw: z.infer<typeof AmsRawSchema>): AmsProposalExtraction {
   }
 }
 
-const SYSTEM_PROMPT = `You extract an AMS360-generated commercial insurance proposal for Boxwood Insurance Group, an independent agency. What you extract is rebuilt into a branded client proposal, where account managers verify it against the original — accuracy matters more than completeness.
+const SYSTEM_PROMPT = `You extract an AMS360-generated commercial insurance proposal for an independent insurance agency. What you extract is rebuilt into a branded client proposal, where account managers verify it against the original — accuracy matters more than completeness.
 
 - Report only what the document states; copy names, limits, deductibles, dates and identifiers as printed. Leave a field null (or a list empty) when the proposal doesn't show it. Never infer.
 - One entry in "lines" per coverage section (General Liability, Umbrella, Business Auto, Commercial Property, Inland Marine, Flood, Watercraft, ...). Use the Policy Information table to fill each section's policy_number and writing_company.

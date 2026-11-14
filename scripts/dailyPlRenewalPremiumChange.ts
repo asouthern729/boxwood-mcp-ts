@@ -1,5 +1,5 @@
 // Daily PL Renewal Premium Change run (the "auto-triggered from the download report" half of
-// Patrick's 2026-09-29 spec). It covers every personal-lines renewal (RWL) a carrier downloaded
+// the agency's 2026-09-29 spec). It covers every personal-lines renewal (RWL) a carrier downloaded
 // since the last successful run. For each one it builds or rebuilds that client's Renewal Calculator
 // workbook for the renewal date and archives it to <OUTPUT_ROOT>/pl-renewal-premium-change/, where
 // the dashboard's PL Premium Change page lists it. The group is re-read in full, so a client whose
@@ -7,7 +7,7 @@
 // Nothing is emailed (Andrew, 2026-09-30: written to the server only). OneDrive filing hooks into
 // archivePlRenewalChange once Graph access exists.
 //
-// The same trigger also builds that client's PL Renewal Summary (Patrick, 2026-09-29: "Renewal
+// The same trigger also builds that client's PL Renewal Summary (agency request, 2026-09-29: "Renewal
 // Summary Tool — auto triggered when on download report & user initiated"): the account-level
 // Personal Insurance Portfolio Summary, with every in-force personal policy and any downloaded
 // renewal shown on its renewal term, archived for the dashboard's PL Renewal Summary page.

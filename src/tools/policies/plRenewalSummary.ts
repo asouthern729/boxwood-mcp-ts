@@ -10,7 +10,7 @@ const DOCX_MIME_TYPE = "application/vnd.openxmlformats-officedocument.wordproces
 
 // PL Renewal Summary: the personal-lines counterpart to cl_renewal_summary. It builds the "Personal
 // Insurance Portfolio Summary" in the layout of the client-supplied sample
-// (Patrick_Baggett_Personal_Insurance_Summary, 2026-09-28). Policy resolution is cl_renewal_summary's
+// (the agency's PL sample, 2026-09-28). Policy resolution is cl_renewal_summary's
 // (utils/clPolicyData.ts) against the personal book; coverages come from utils/plCoverageData.ts.
 // Andrew's decisions (2026-09-28): every in-force personal policy by default (no 90-day window);
 // dedicated Auto/Home/Personal Articles/Umbrella sections, with DFIRE reusing Home's and any other

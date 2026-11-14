@@ -3,7 +3,7 @@ import path from "node:path"
 import { editSheet } from "./xlsxCellPatch.js"
 import type { CellEdit, SheetEditor } from "./xlsxCellPatch.js"
 
-// Fills in the PL team's own "Renewal Calculator.xlsx" (Patrick, 2026-09-29 — reused as-is, see
+// Fills in the PL team's own "Renewal Calculator.xlsx" (agency request, 2026-09-29 — reused as-is, see
 // assets/templates/pl-renewal-calculator.xlsx) for one client's renewal. Patched at the XML level
 // (xlsxCellPatch.editSheet), not through ExcelJS, so the template's two Excel tables, styles and
 // SharePoint customXml survive untouched.

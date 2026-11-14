@@ -8,7 +8,7 @@ import { dedupeSamePolicyNumber, withDownloadedRenewalTerms } from "./plRenewalT
 
 // Build + archive one PL Renewal Summary. Shared by the pl_renewal_summary MCP tool (chat / on
 // demand) and scripts/dailyPlRenewalPremiumChange.ts (built automatically for each client with a new
-// PL renewal download — Patrick, 2026-09-29: "auto triggered when on download report & user
+// PL renewal download — agency request, 2026-09-29: "auto triggered when on download report & user
 // initiated"), so both produce the same document under the same archive filename.
 
 export type PlRenewalSummaryBuild =

@@ -15,17 +15,17 @@ import type { LineOfBusiness, QuoteExtraction, QuoteLineExtraction } from "./quo
 //     renewal; AMS360 may still hold only the expiring term). AMS360's schedules of what's insured —
 //     locations, classes, vehicles, drivers, payroll, the umbrella's underlying schedule — stay.
 //   - A quoted line with no such AMS360 section is added in the skill's line order, under the quote's
-//     own title when the line already has a section from another carrier (Patrick's TN Equine
+//     own title when the line already has a section from another carrier (an agency-supplied example
 //     example: American Modern dwelling fire beside Cincinnati property); a stand-alone add-on
 //     (specialty_addon) becomes its own Section 5 add-on.
-//   - The CL Renewal Summary never shows premiums — its Premium Summary page is dropped (Patrick,
+//   - The CL Renewal Summary never shows premiums — its Premium Summary page is dropped (agency request,
 //     2026-10-07). Each quoted line still carries its premium (SlotLine.premium) for the Proposal
-//     Builder's Premium Summary (Patrick, 2026-10-18).
+//     Builder's Premium Summary (agency request, 2026-10-18).
 //   - With withExposures (the Proposal Builder), a quoted line with no AMS360 schedules gets the
 //     quote's own GL class, vehicle and driver tables — built from quotes alone, nothing else
-//     supplies them (Patrick's Landon proposal, 2026-10-18).
+//     supplies them (the agency's sample proposal, 2026-10-18).
 //   - Bind conditions from every quote are gathered into one "Bind Conditions & Notes" section, and
-//     each quote's number/expiry into the cover's validity note — Patrick's example does both.
+//     each quote's number/expiry into the cover's validity note — the agency's example does both.
 //   - When two uploads quote the same line, the later upload wins.
 //   - Every section built from a quote carries a Word comment naming the file and pages, so the
 //     account manager verifies it before the document goes to the client (Andrew, 2026-10-01).
@@ -47,7 +47,7 @@ const SLOT_BY_LINE: Record<Exclude<LineOfBusiness, "specialty_addon">, LineSlot>
 }
 
 // The extraction schema has no crime line, so a quoted crime/fidelity line arrives as "other" —
-// matched to the Crime section by its title (Cincinnati's TN Equine quote, 2026-10-08).
+// matched to the Crime section by its title (a sample carrier quote, 2026-10-08).
 const CRIME_TITLE = /crime|fidelity|employee (theft|dishonesty)/i
 
 export function slotFor(line: Pick<QuoteLineExtraction, "line_of_business" | "title">): LineSlot {
@@ -156,7 +156,7 @@ export function extractedTable(kind: LineTable["kind"], t: { title: string; head
 // Quotes extracted before the exposure tables (2026-10-20) list classes, vehicles and drivers as key facts:
 //   "Classification 91583 (Loc 1)": "Contractors - subcontracted work - …; Premium Base O, 20000000"
 //   "Vehicle 1": "2019 FORD F350, VIN 1FD8W3HT1KEF51492; Stated Amount $70,000 (…)"
-//   "Rated Drivers": "Jimmie Johnson (9 points); Yohana Asgedom (0 points)"
+//   "Rated Drivers": "Sam Driver (9 points); Alex Driver (0 points)"
 const EXPOSURE_TITLE = /^exposure:\s*/i
 const CLASS_FACT = /^Classification (\d{4,6})\b/i
 const VEHICLE_FACT = /^Vehicle (\d+)$/i
@@ -320,7 +320,7 @@ export function mergeQuotesIntoProposal(lines: SlotLine[], quotes: QuoteSource[]
 
   // Later uploads win per line of business and carrier: keep only the last quote's entry for each.
   // Two carriers quoting the same line are different policies (Cincinnati property and American
-  // Modern dwelling fire, TN Equine), so both are kept.
+  // Modern dwelling fire on one sample account), so both are kept.
   const latestByLine = new Map<string, { line: QuoteLineExtraction; filename: string }>()
   for(const { filename, extraction } of quotes) {
     for(const line of extraction.lines) {

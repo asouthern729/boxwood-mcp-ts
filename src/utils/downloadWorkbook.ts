@@ -1,5 +1,6 @@
 import ExcelJS from "exceljs"
 import type { ReportItem } from "../tools/downloads/downloadReport.js"
+import { AGENCY } from "./proposalStyle.js"
 
 export type AccuracyVerdict = {
   status: "matches" | "no_match" | "rejected" | "verify"
@@ -180,7 +181,7 @@ function buildRepSheet(workbook: ExcelJS.Workbook, sheetName: string, tableName:
   addTitleBlock(
     sheet,
     "J",
-    "Boxwood Insurance Group — Morning Download Action List",
+    `${ AGENCY.shortName } — Morning Download Action List`,
     `${ repName }  •  Overnight download for ${ dateLabel }  •  ${ items.length } item(s), ${ flaggedCount } flagged for review`
   )
 

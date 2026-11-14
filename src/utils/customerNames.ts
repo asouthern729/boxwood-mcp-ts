@@ -2,7 +2,7 @@
 // staff-facing list — the download report and the PL tool pages (Andrew, 2026-09-30: "customers should
 // always be listed as last name, first name in the UI. and ordering should use the last name").
 //
-// "Last, First" for a person (Patrick, 2026-09-29: "Switch to customer last name, First name in first
+// "Last, First" for a person (agency request, 2026-09-29: "Switch to customer last name, First name in first
 // column"), otherwise the business name. Keyed on which name fields are filled rather than
 // afw_customer.typename, which isn't reliable (~72 typename='I' customers are really LLCs/trusts/
 // HOAs with only firmnamecust set). Checked against every customer with a carrier download in the

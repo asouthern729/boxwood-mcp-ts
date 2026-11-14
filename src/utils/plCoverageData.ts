@@ -13,7 +13,7 @@ import type { ResolvedPolicy } from "./clPolicyData.js"
 // "Multi policy credit", "Number of Autos"). Only rows that carry a limit or a deductible are
 // coverages worth showing, so everything below filters on that rather than on iscoverage.
 //
-// Layout follows the client-supplied sample (Patrick_Baggett_Personal_Insurance_Summary, 2026-09-28):
+// Layout follows the client-supplied sample (the agency's PL sample, 2026-09-28):
 // Auto coverage highlights + scheduled vehicles, a Homeowners Coverage A–F table per property, the
 // Personal Articles total scheduled limit, and Umbrella limits. Andrew's decisions (2026-09-28): DFIRE
 // reuses the Homeowners table; any other personal line (boat, flood, ...) gets a generic
@@ -89,7 +89,7 @@ const SPP_SUMMARY_QUERY = `
 `
 
 // Every active scheduled item (jewelry, fine arts, guns, ...) with its class, for the full schedule
-// Patrick asked for under Personal Articles (2026-09-29, with a screenshot of AMS360's Inland Marine
+// The agency asked for under Personal Articles (2026-09-29, with a screenshot of AMS360's Inland Marine
 // schedule). Latest entered version of each item and of each class summary — an item is dropped if
 // its latest version is a delete, and so is every item of a deleted class. Item numbers are
 // zero-padded strings ("0001"), hence the numeric-aware sort. Validated by the postgres peer
@@ -619,7 +619,7 @@ export async function fetchPlPolicyCoverage(policy: ResolvedPolicy): Promise<PlP
       const locationIds = [...new Set(lobRows.filter((r) => r.attachtype === 86).map((r) => r.attachid))]
       const groups = locationIds.length > 0 ? locationIds : [null]
 
-      // Scheduled property priced inside the homeowners policy (Reiss Wilburn's guns and jewelry)
+      // Scheduled property priced inside the homeowners policy (e.g. guns and jewelry)
       // is listed under the policy's first property table.
       const homeSchedule = buildSchedule(sppItems.filter((i) => i.lobid === lobid))
       let scheduleAttached = false

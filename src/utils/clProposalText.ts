@@ -1,10 +1,11 @@
 import { carrierKey, joinList } from "./clProposalLines.js"
 import type { SlotLine } from "./clProposalLines.js"
+import { AGENCY } from "./proposalStyle.js"
 
 // The proposal's narrative paragraphs — fixed wording filled from data (Andrew, 2026-10-08: no LLM
-// pass for now; revisit once Patrick has seen real output). The Executive Summary follows the
-// skill's references/default-intro-letter.md; "Why Boxwood" adapts the closing of Patrick's
-// TN Equine example, with the client-specific details limited to what AMS360 actually knows.
+// pass for now; revisit once the agency has seen real output). The Executive Summary follows the
+// skill's references/default-intro-letter.md; "Why <agency>" adapts the closing of the agency's
+// sample proposal, with the client-specific details limited to what AMS360 actually knows.
 
 const STATE_NAMES: Record<string, string> = {
   AL: "Alabama", AK: "Alaska", AZ: "Arizona", AR: "Arkansas", CA: "California", CO: "Colorado", CT: "Connecticut",
@@ -82,7 +83,7 @@ export function executiveSummary(facts: NarrativeFacts): string[] {
   ]
 }
 
-export function whyBoxwood(facts: NarrativeFacts): string[] {
+export function whyAgency(facts: NarrativeFacts): string[] {
   const scope = [
     facts.locationCount > 1 ? plural(facts.locationCount, "location") : "",
     facts.namedInsuredCount > 1 ? plural(facts.namedInsuredCount, "named insured") : "",
@@ -94,8 +95,8 @@ export function whyBoxwood(facts: NarrativeFacts): string[] {
     ? `A program with ${ joinList(scope) } does not fit an off-the-shelf package.`
     : `A commercial program like ${ facts.clientName }'s does not fit an off-the-shelf package.`
   const placement = carrierNames.length > 0
-    ? ` Boxwood is an independent agency, so we build each program around how the business actually operates and place it with the carriers best suited to it — here, ${ joinList(carrierNames) }.`
-    : " Boxwood is an independent agency, so we build each program around how the business actually operates and place it with the carriers best suited to it."
+    ? ` ${ AGENCY.shortName } is an independent agency, so we build each program around how the business actually operates and place it with the carriers best suited to it — here, ${ joinList(carrierNames) }.`
+    : ` ${ AGENCY.shortName } is an independent agency, so we build each program around how the business actually operates and place it with the carriers best suited to it.`
 
   return [
     opening + placement,

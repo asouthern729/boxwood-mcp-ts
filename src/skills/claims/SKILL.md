@@ -1,9 +1,9 @@
 ---
 name: claims
-description: Domain knowledge for the claim_lookup MCP tool in boxwood-mcp-ts — Boxwood Insurance's AMS360 claim data (cause of loss, loss location, report chain, status, catastrophe code, payment/reserve line items, contacts, injured parties, property damage, adjuster remarks, risk info). Use when answering questions about a specific claim or browsing/searching claims for a customer or policy, including how much has actually been paid out.
+description: Domain knowledge for the claim_lookup MCP tool in ams360-demo-mcp — the agency's AMS360 claim data (cause of loss, loss location, report chain, status, catastrophe code, payment/reserve line items, contacts, injured parties, property damage, adjuster remarks, risk info). Use when answering questions about a specific claim or browsing/searching claims for a customer or policy, including how much has actually been paid out.
 ---
 
-# Boxwood claims
+# Claims
 
 `claim_lookup` is the anchor tool for full claim detail (AMS360's `afw_claim` — one row per claim). It fills the gap `customer_lookup`'s `loss_history` include leaves: that include only returns the summary row from `afw_custlosshist` (carrier, policy #, dates, amount paid); this tool returns the claim itself (cause, loss location, report chain, description). A claim belongs to exactly one policy (`polid`); `afw_claim` has no `custid` column of its own — customer scoping goes through `afw_basicpolinfo`.
 

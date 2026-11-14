@@ -4,11 +4,12 @@ import {
   ShadingType, Table, TableCell, TableLayoutType, TableRow, TextRun, VerticalAlign, WidthType
 } from "docx"
 import { GREEN, LIGHTGREEN, LOGO_PATH, NEARBLACK } from "./riskProfileDoc.js"
+import { AGENCY } from "./proposalStyle.js"
 import type { LabeledValue, PlScheduleClass, PlSection } from "./plCoverageData.js"
 
 // The "Personal Insurance Portfolio Summary" document for pl_renewal_summary. Unlike the CL documents
 // (riskProfileDoc.ts: a cover page, then page-fit sections), this reproduces the client-supplied
-// sample (Patrick_Baggett_Personal_Insurance_Summary, 2026-09-28): a compact, letter-style page with
+// sample (the agency's PL sample, 2026-09-28): a compact, letter-style page with
 // a letterhead, a disclaimer, and short sections. Its fonts, sizes, margins and colours are taken
 // from that sample's XML: Calibri throughout, a light-green table header with thin borders, no row
 // striping, and 0.35"/0.625" margins. Same brand colours as the CL documents.
@@ -114,7 +115,7 @@ function sourceLine(section: PlSection): Paragraph {
   })
 }
 
-// The full scheduled property list, one table per class (Patrick, 2026-09-29).
+// The full scheduled property list, one table per class (agency request, 2026-09-29).
 function scheduleBlocks(schedule: PlScheduleClass[]): (Paragraph | Table)[] {
   const blocks: (Paragraph | Table)[] = [subheading("Scheduled Items:")]
   for(const cls of schedule) {
@@ -179,7 +180,7 @@ function sectionBlocks(section: PlSection, showSource: boolean): (Paragraph | Ta
 }
 
 function letterhead(producerEmail: string | null): Paragraph[] {
-  const contact = ["(615) 245-5851", producerEmail].filter(Boolean).join(" | ")
+  const contact = [AGENCY.phoneDisplay, producerEmail].filter(Boolean).join(" | ")
 
   return [
     new Paragraph({
@@ -188,16 +189,16 @@ function letterhead(producerEmail: string | null): Paragraph[] {
       // Sample's logo size: 2476500 x 676275 EMU.
       children: [new ImageRun({ type: "png", data: readFileSync(LOGO_PATH), transformation: { width: 2476500 / 9525, height: 676275 / 9525 } })]
     }),
-    new Paragraph({ spacing: { after: 0 }, children: [run("Boxwood Insurance Group", { bold: true, size: 21 })] }),
-    new Paragraph({ spacing: { after: 0 }, children: [run("Trusted Insurance Advisors", { size: 19 })] }),
-    new Paragraph({ spacing: { after: 0 }, children: [run("Franklin, TN", { size: 19 })] }),
+    new Paragraph({ spacing: { after: 0 }, children: [run(AGENCY.shortName, { bold: true, size: 21 })] }),
+    new Paragraph({ spacing: { after: 0 }, children: [run(AGENCY.tagline, { size: 19 })] }),
+    new Paragraph({ spacing: { after: 0 }, children: [run(AGENCY.city, { size: 19 })] }),
     new Paragraph({
       spacing: { after: 140 },
       children: [
         run(`${ contact } | `, { size: 19 }),
         new ExternalHyperlink({
-          link: "https://www.boxwoodins.com",
-          children: [new TextRun({ text: "www.boxwoodins.com", font: FONT, size: 19, color: "1155CC", underline: {} })]
+          link: `https://${ AGENCY.website }`,
+          children: [new TextRun({ text: AGENCY.website, font: FONT, size: 19, color: "1155CC", underline: {} })]
         })
       ]
     })
@@ -211,12 +212,12 @@ function footer(): Footer {
         alignment: AlignmentType.CENTER,
         spacing: { before: 80, after: 0 },
         border: { top: { style: BorderStyle.SINGLE, size: 6, color: GREEN, space: 4 } },
-        children: [run("Boxwood Insurance Group, LLC", { bold: true, size: 19 })]
+        children: [run(AGENCY.name, { bold: true, size: 19 })]
       }),
       new Paragraph({
         alignment: AlignmentType.CENTER,
         spacing: { before: 60 },
-        children: [run("3020 Stansberry Lane, Suite 202, Franklin, TN 37069 | 615-245-5851", { size: 17 })]
+        children: [run(`${ AGENCY.address } | ${ AGENCY.phone }`, { size: 17 })]
       })
     ]
   })

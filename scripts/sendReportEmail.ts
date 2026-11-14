@@ -1,6 +1,6 @@
 // Emails an already-built download report workbook (from <OUTPUT_ROOT>/download-report/, produced by
 // scripts/morningDownload.ts) as an attachment, without re-running the whole Claude Agent SDK flow.
-// This is the production sender the daily cron job (see scripts/dailyMorningDownload.sh) calls —
+// This is the production sender the daily cron job (see deploy/run-job.sh) calls —
 // also handy standalone for an ad hoc resend of a specific day's report.
 //
 // Usage: npx tsx scripts/sendReportEmail.ts [to] [filePath]

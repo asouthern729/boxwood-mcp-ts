@@ -9,8 +9,9 @@ import {
 import { LINE_SLOTS, fetchPolicyCoverageData } from "./clCoverageData.js"
 import { buildClProposalDoc, type ServiceTeamMember } from "./clProposalDoc.js"
 import { completeUmbrellas, longDate, policyLines, type SlotLine } from "./clProposalLines.js"
-import { executiveSummary, whyBoxwood } from "./clProposalText.js"
+import { executiveSummary, whyAgency } from "./clProposalText.js"
 import { withClRenewalTerms } from "./clRenewalTerms.js"
+import { AGENCY } from "./proposalStyle.js"
 
 export type GeneratedClRenewalSummary = {
   buffer: Buffer
@@ -26,7 +27,7 @@ export type GeneratedClRenewalSummary = {
   renewalPendingPolnos: string[]
 }
 
-const AGENCY_PHONE = "615-245-5851"
+const AGENCY_PHONE = AGENCY.phone
 
 // Same keying as risk_profile's archive (see riskProfileGenerate.ts): polid for a single policy
 // term, the full polno set for a combined document. Uploaded quotes are stored under this name too
@@ -169,7 +170,7 @@ export async function buildClRenewalSummary(
   const serviceTeam: ServiceTeamMember[] = [
     ...(contacts?.producer_name ? [{ role: "Producer", name: contacts.producer_name, phone: formatPhone(contacts.producer_phone), email: contacts.producer_email ?? "" }] : []),
     ...(contacts?.csr_name ? [{ role: "Account Manager", name: contacts.csr_name, phone: formatPhone(contacts.csr_phone), email: contacts.csr_email ?? "" }] : []),
-    { role: "Agency", name: "Boxwood Insurance Group, LLC", phone: AGENCY_PHONE, email: "www.boxwoodins.com" }
+    { role: "Agency", name: AGENCY.name, phone: AGENCY_PHONE, email: AGENCY.website }
   ]
 
   const { buffer, includedSections } = await buildClProposalDoc({
@@ -191,7 +192,7 @@ export async function buildClRenewalSummary(
     lines,
     bindConditions: merged.bindConditions,
     specialtyAddOns: merged.specialtyAddOns,
-    whyBoxwood: whyBoxwood(narrativeFacts),
+    whyAgency: whyAgency(narrativeFacts),
     serviceTeam
   })
 

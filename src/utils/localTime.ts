@@ -111,7 +111,7 @@ export function mostRecentAgencyHour(hour: number): Date {
   return candidate
 }
 
-// The Boxwood ETL sync (~/scripts/ams360-etl) pulls fresh AMS360 data starting at 7:30am
+// The AMS360 ETL sync (~/scripts/ams360-etl) pulls fresh AMS360 data starting at 7:30am
 // agency-local and typically finishes within minutes — the download report script itself doesn't
 // fire until 8am, so 8am is the earliest point each day the sync is reliably guaranteed complete.
 // "today's download activity" has to mean the full 8am-to-8am span, not a rolling "since 8am

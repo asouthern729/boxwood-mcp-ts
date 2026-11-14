@@ -6,11 +6,11 @@ import {
 } from "./proposalStyle.js"
 import type { LocationRow } from "./riskProfileDoc.js"
 
-// The CL Renewal Summary document, in the layout of Patrick's insurance-proposal skill (org-shared
-// Claude skill, SKILL.md "Global brand spec") — the format he asked cl_renewal_summary to produce
-// (email "FW: TN Equine", 2026-10-07, with TEH_Land_Tennessee_Equine_Hospital_Proposal.docx as the
+// The CL Renewal Summary document, in the layout of the agency's insurance-proposal skill (org-shared
+// Claude skill, SKILL.md "Global brand spec") — the format the agency asked cl_renewal_summary to produce
+// (agency email, 2026-10-07, with a sample client proposal as the
 // example), minus the Premium Summary page: "we will use the renewal premium tool for that". The
-// Proposal Builder passes premiumSummary and gets that page back (Patrick, 2026-10-18). The
+// Proposal Builder passes premiumSummary and gets that page back (agency request, 2026-10-18). The
 // skill's palette, banners and data tables live in proposalStyle.ts, shared with the Pre-Renewal
 // Review (riskProfileDoc.ts).
 //
@@ -73,7 +73,7 @@ export type ClProposalInput = {
   quoteNote?: string
   preparedBy: { name: string; email: string; phone: string } | null
   proposalDate: string
-  // null leaves the Executive Summary page out (the Proposal Builder, Patrick 2026-10-18: straight from
+  // null leaves the Executive Summary page out (the Proposal Builder, agency request 2026-10-18: straight from
   // the cover into the coverages); named insureds and locations then print only when there's more
   // than one of either.
   executiveSummary: string[] | null
@@ -83,7 +83,7 @@ export type ClProposalInput = {
   bindConditions: { items: string[]; comment?: string }
   premiumSummary?: ProposalPremiumSummary
   specialtyAddOns: ProposalSpecialtyAddOn[]
-  whyBoxwood: string[]
+  whyAgency: string[]
   serviceTeam: ServiceTeamMember[]
 }
 
@@ -198,7 +198,7 @@ function register(comments: DocComment[], text: string | undefined): DocComment 
 }
 
 // Skill Section 4 puts "Bind Conditions & Notes" under the Premium Summary, on a page of its own.
-// The CL Renewal Summary drops the premium table (Patrick, 2026-10-07), so its notes keep that page
+// The CL Renewal Summary drops the premium table (agency request, 2026-10-07), so its notes keep that page
 // by themselves.
 function bindConditions(input: ClProposalInput, comments: DocComment[]): Block[] {
   const premium = input.premiumSummary
@@ -226,12 +226,12 @@ function specialtyAddOn(addOn: ProposalSpecialtyAddOn, comments: DocComment[]): 
   ]
 }
 
-// Patrick (2026-10-08): Why Boxwood always closes the document on a page by itself. It gets its own
+// The "Why <agency>" page always closes the document on a page by itself. It gets its own
 // section (so it starts a new page) and that section alone carries footerStrip as its page footer.
-function whyBoxwood(input: ClProposalInput): Block[] {
+function whyAgency(input: ClProposalInput): Block[] {
   return [
-    ...banner("Why Boxwood Insurance Group", { withLogo: true }),
-    ...input.whyBoxwood.map(plain),
+    ...banner(`Why ${ AGENCY.shortName }`, { withLogo: true }),
+    ...input.whyAgency.map(plain),
     ...tableBlocks({
       title: "Your Service Team",
       headers: ["Role", "Name", "Phone", "Email"],
@@ -293,7 +293,7 @@ export async function buildClProposalDoc(input: ClProposalInput): Promise<{ buff
     }, {
       properties: { type: SectionType.NEXT_PAGE, page: pageProperties },
       footers: { default: new Footer({ children: footerStrip() }) },
-      children: whyBoxwood(input)
+      children: whyAgency(input)
     }]
   })
 
@@ -303,7 +303,7 @@ export async function buildClProposalDoc(input: ClProposalInput): Promise<{ buff
     ...(input.premiumSummary ? ["Premium Summary"] : []),
     ...(input.bindConditions.items.length > 0 ? ["Bind Conditions & Notes"] : []),
     ...input.specialtyAddOns.map((a) => a.title),
-    "Why Boxwood Insurance Group"
+    `Why ${ AGENCY.shortName }`
   ]
 
   return { buffer: Buffer.from(await Packer.toBuffer(doc) as unknown as Uint8Array), includedSections }

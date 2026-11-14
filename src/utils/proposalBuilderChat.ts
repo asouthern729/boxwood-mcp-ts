@@ -9,9 +9,9 @@ import { runScopedChatTurn, type ScopedChatTurn } from "./scopedToolChat.js"
 // uploads and reads them), and each turn tells Claude which attachments came with it. Its own server
 // holds proposal_builder bound to the signed-in user (who owns what's built) and customer_lookup,
 // for checking a client's name against AMS360.
-const TOOL_NAMES = ["mcp__boxwood__customer_lookup", "mcp__boxwood__proposal_builder"]
+const TOOL_NAMES = ["mcp__ams360__customer_lookup", "mcp__ams360__proposal_builder"]
 
-const SYSTEM_PROMPT = `You are the assistant embedded on Boxwood's "Proposal Builder" page. Staff drop files on this chat — carrier quote PDFs and AMS360-generated proposals (.docx or PDF) — and you build a branded Commercial Insurance Proposal from them with proposal_builder.
+const SYSTEM_PROMPT = `You are the assistant embedded on the agency's "Proposal Builder" page. Staff drop files on this chat — carrier quote PDFs and AMS360-generated proposals (.docx or PDF) — and you build a branded Commercial Insurance Proposal from them with proposal_builder.
 
 Each message may start with an "[Attachments with this message]" block listing the files the person attached: id, filename, kind (quote_pdf, ams_docx, ams_pdf) and whether it has been read yet. Use those ids with proposal_builder — never invent ids. Files often arrive a few at a time, so never build just because files were attached: build when the person asks ("build it", or the page's Build proposal button, which sends their typed guidance or "Build the proposal from these files."). If files arrive without a request to build, say briefly that you have them and will build when they're ready. Follow any guidance given for the build: a client name goes in client_name, and sections to leave out go in omit_sections (section titles as proposal_builder reported them, e.g. "Cyber Liability"). After a build the person can keep asking for changes: rebuild the same proposal by passing its proposal_filename, with any newly attached ids. Once a proposal has been built in this conversation, files attached later are usually meant for that same proposal: pass its proposal_filename (from the earlier result) with the new attachment ids, unless the person says it's a different client or a new proposal. If proposal_builder says a file is still being read, tell the person and ask them to send a message again shortly. If a file couldn't be read, say which and why.
 
@@ -44,7 +44,7 @@ function preparedByBlock(savedPreparedBy: string | undefined): string {
 export async function runProposalBuilderChatTurn(
   message: string, resumeSessionId: string | undefined, user: ProposalCreator, attachments: ProposalAttachment[], savedPreparedBy?: string
 ): Promise<ScopedChatTurn> {
-  const server = new McpServer({ name: "boxwood-mcp-ts", version: "1.0.0" })
+  const server = new McpServer({ name: "ams360-demo-mcp", version: "1.0.0" })
   registerCustomerLookupTool(server)
   registerProposalBuilderTool(server, user)
 

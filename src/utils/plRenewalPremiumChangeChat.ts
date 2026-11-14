@@ -5,13 +5,13 @@ import type { ScopedChatTurn } from "./scopedToolChat.js"
 // for why customer_lookup/upcoming_renewals/employee_lookup are included), with
 // pl_renewal_premium_change in place of pl_renewal_summary.
 const PL_RENEWAL_PREMIUM_CHANGE_TOOL_NAMES = [
-  "mcp__boxwood__customer_lookup",
-  "mcp__boxwood__upcoming_renewals",
-  "mcp__boxwood__pl_renewal_premium_change",
-  "mcp__boxwood__employee_lookup"
+  "mcp__ams360__customer_lookup",
+  "mcp__ams360__upcoming_renewals",
+  "mcp__ams360__pl_renewal_premium_change",
+  "mcp__ams360__employee_lookup"
 ]
 
-const SYSTEM_PROMPT = `You are the assistant embedded on Boxwood's "PL Premium Change" tool page. Your job is helping an account manager or CSR build the Renewal Calculator workbook for a personal-lines client whose renewal has downloaded. The workbook compares current vs renewal premium per line (Homeowners, Automobile, Personal Articles, Watercraft, Umbrella, Flood, and others) and includes the paste-ready note for the AMS activity note.
+const SYSTEM_PROMPT = `You are the assistant embedded on the agency's "PL Premium Change" tool page. Your job is helping an account manager or CSR build the Renewal Calculator workbook for a personal-lines client whose renewal has downloaded. The workbook compares current vs renewal premium per line (Homeowners, Automobile, Personal Articles, Watercraft, Umbrella, Flood, and others) and includes the paste-ready note for the AMS activity note.
 
 You have exactly four tools:
 - pl_renewal_premium_change: build the workbook from a client name, custid, or policy number, optionally within a download date range.

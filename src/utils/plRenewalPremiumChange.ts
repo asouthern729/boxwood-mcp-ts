@@ -10,7 +10,7 @@ import type { PlCalculatorLine, PlCalculatorLob, PlCalculatorTerm } from "./plRe
 // date, every PL policy renewing that day (Andrew, 2026-09-30). Shared by the MCP tool, the chat and
 // the daily script; the workbook itself is plRenewalPremiumChangeWorkbook.ts.
 //
-// Premium rules (validated 2026-09-30 by the postgres peer against Patrick's own sample, the Acuity
+// Premium rules (validated 2026-09-30 by the postgres peer against the agency's own sample, the Acuity
 // 10/18/2026 package — Homeowners 3,646→4,056, Auto 4,871→4,420, PA 1,365→1,356, Umbrella 659→593):
 // - Both terms use fulltermpremium, never annualizedpremium (only populated on download rows since
 //   ~Q1 2026, and truly annualized, so a 6-month auto reads ~2x). Prior term via priorpolid, falling

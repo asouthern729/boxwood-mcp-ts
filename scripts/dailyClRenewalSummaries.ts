@@ -1,4 +1,4 @@
-// Weekday build of the CL Renewal Summary (cl_renewal_summary MCP tool) — Patrick's 9/29 "final
+// Weekday build of the CL Renewal Summary (cl_renewal_summary MCP tool) — the agency's 9/29 "final
 // lap": "Auto created 30 days"; Andrew, 2026-09-30: runs M–F like the PL tools, on a rolling 30-day
 // window. Each run picks up every commercial policy term expiring within the next 30 days that
 // doesn't already have a Renewal Summary archived — whether built by an earlier run or on demand
@@ -34,7 +34,7 @@ import { discoverCommercialAccounts } from "../src/utils/monthlyRenewalWindow.js
 
 const WINDOW_DAYS = 30
 
-// Calendar date in Boxwood's timezone — the window is "expiring within 30 days of today" as staff
+// Calendar date in the agency's timezone — the window is "expiring within 30 days of today" as staff
 // read it, not of today in UTC.
 function chicagoDate(offsetDays: number): string {
   const date = new Date(Date.now() + offsetDays * 24 * 60 * 60 * 1000)

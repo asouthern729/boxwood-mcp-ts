@@ -1,7 +1,7 @@
 import { runReadOnlyQuery } from "../db.js"
 
 // Shared by the monthly CL batch scripts (scripts/monthlyRenewalPremiumSummaries.ts,
-// scripts/monthlyRiskProfiles.ts) — Patrick, 2026-09-15: both run on the 1st of the month for every
+// scripts/monthlyRiskProfiles.ts) — agency request, 2026-09-15: both run on the 1st of the month for every
 // account renewing two calendar months out ("Oct 1 should create these for all accounts renewing in
 // December"), so both must agree on the target month and on which accounts it covers.
 

@@ -1,9 +1,9 @@
 ---
 name: customers
-description: Domain knowledge for the customer_lookup MCP tool in boxwood-mcp-ts — Boxwood Insurance's AMS360 customer data (profiles, contacts, dependents, loss history, relationships, cross-references, expiring outside business, service team, certificates of insurance, current policies). Use when answering questions about a customer/prospect or browsing/searching the customer book of business.
+description: Domain knowledge for the customer_lookup MCP tool in ams360-demo-mcp — the agency's AMS360 customer data (profiles, contacts, dependents, loss history, relationships, cross-references, expiring outside business, service team, certificates of insurance, current policies). Use when answering questions about a customer/prospect or browsing/searching the customer book of business.
 ---
 
-# Boxwood customers
+# Customers
 
 `customer_lookup` is the anchor tool for everything about a customer, prospect, or suspect (AMS360's `afw_customer` table — one row per entity, commercial or personal). Every other domain (policies, invoices) hangs off `custid`.
 
@@ -65,5 +65,5 @@ Pass an array of any of these to attach related record sets to each customer:
 - "What's this commercial account's claims history?" → `include: ["loss_history"]`
 - "Which prospects have outside business expiring soon we could quote?" → browse with `active: "N"` (or no filter) + `include: ["expiring_business"]`, inspect `expdate`/`interestlevel`
 - "Who's on the service team for this account besides the CSR?" → `include: ["service_team"]`
-- "Show me all active commercial customers in Franklin sorted by name" → `city: "Franklin"`, `active: "Y"`, default `sort`
+- "Show me all active commercial customers in Gateshead sorted by name" → `city: "Gateshead"`, `active: "Y"`, default `sort`
 - "What does this customer's current book look like — policies and premium?" → `include: ["policies"]`; for coverage-line pricing detail on one of those policies, follow up with `policy_query(polid=..., include: ["premiums"])`

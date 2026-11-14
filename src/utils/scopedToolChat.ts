@@ -35,7 +35,7 @@ export async function runScopedChatTurn(
       // adds latency for no quality benefit. 'low' cuts real wall-clock time per turn, which matters
       // a lot for a broad request that legitimately needs several sequential tool calls.
       effort: "low",
-      mcpServers: { boxwood: { type: "sdk", name: "boxwood", instance: server } },
+      mcpServers: { ams360: { type: "sdk", name: "ams360", instance: server } },
       // `tools` actually restricts the toolset (unlike `allowedTools`, which only pre-approves
       // without narrowing it) — both together mean the chat only ever has the tools passed in.
       tools: toolNames,

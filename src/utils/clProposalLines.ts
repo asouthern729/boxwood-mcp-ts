@@ -140,7 +140,7 @@ function propertyLine(term: PolicyTermData): SlotLine | null {
   const line = baseLine(term, "property")
   const main = subjects.filter((s) => !s.isAdditional)
 
-  // One row per location/building, Building / BPP / BI side by side (Patrick's example layout).
+  // One row per location/building, Building / BPP / BI side by side (the agency's example layout).
   type Place = { locBldg: string; address: string; building: string[]; bpp: string[]; bi: string[] }
   const places = new Map<string, Place>()
   const additional: string[][] = []

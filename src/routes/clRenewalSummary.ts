@@ -102,7 +102,7 @@ router.delete(`${ BASE }/cl-renewal-summary/files/:filename`, auth0, (req: Reque
   res.status(200).json({ filename })
 })
 
-// ---------- Uploaded quote PDFs (Patrick, 2026-09-29: "option to upload pdf for separate policies") ----------
+// ---------- Uploaded quote PDFs (agency request, 2026-09-29: "option to upload pdf for separate policies") ----------
 // Upload → the PDF is read by Claude (quoteExtraction.ts) → the document is rebuilt in place with
 // the quoted lines merged in, each flagged with a Word comment for review (clQuoteMerge.ts).
 // Reading a quote takes a minute or more, longer than a request should hang, so the upload returns

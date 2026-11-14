@@ -15,14 +15,14 @@ export type VehicleCoverageRow = { vehNo: string; description: string; values: R
 export type HiredNonOwnedRow = { exposure: string; coverage: string; limit: string; deductible: string }
 
 // Coverage limits/deductibles for cl_renewal_summary — everything the Pre-Renewal Risk Profile
-// deliberately leaves out. Patrick (9/11/2026): "CL Renewal Summary- incl all that plus coverage
+// deliberately leaves out. Agency request (9/11/2026): "CL Renewal Summary- incl all that plus coverage
 // limits for liability etc. data pulled from MCP." No premiums (confirmed with Andrew 2026-09-22 —
 // those live in the Renewal Premium Summary .xlsx).
 //
 // Everything here comes from afw_cprem (AMS360's per-coverage-line rating table), deduped the same
 // way the rest of clPolicyData.ts's queries are — partition by (polid, lobid, cpremid), latest
 // effdate, then drop 'D'. Where each line of business keeps its limits, confirmed against the live
-// tenant (current commercial terms) and Trace Construction's own policies while building this:
+// tenant (current commercial terms) and a contractor account's own policies while building this:
 //   - GL (CGL/BOPGL): the policy-level rows (attachtype 85 / covlevel 'A') — Each Occurrence,
 //     General Aggregate, Products/Completed Ops Aggregate, etc. The rated 'R' rows attached to each
 //     hazard (attachtype 330, "Premises/Operations") carry premium only, never a limit (20 of 1,721).
@@ -64,7 +64,7 @@ const COVERAGE_QUERY = `
 
 // Same chain and dedup as clPolicyData.ts's PROPERTY_QUERY, but every subject of insurance (not just
 // Building/BPP) and with valuation — this document's Property section is one row per subject of
-// insurance, matching the AMS360 proposal-builder layout Sarah Schultz produced for Defatta
+// insurance, matching the AMS360 proposal-builder layout an account manager produced for a real account
 // (9/14/2026): Address / Subject of Insurance / Limit / Valuation / Cause of Loss / Deductible.
 const PROPERTY_SUBJECT_QUERY = `
   WITH cprem_320 AS (

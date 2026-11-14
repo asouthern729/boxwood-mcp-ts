@@ -7,7 +7,7 @@ import type { PlCalculatorTerm } from "./plRenewalPremiumChangeWorkbook.js"
 // <OUTPUT_ROOT>/pl-renewal-premium-change/ — same manifest conventions as the PL Renewal Summary
 // archive (docArchive.ts), plus the figures the dashboard's index rows show without opening the file.
 // This is the interim filing location (Andrew, 2026-09-30: written to the server only, nothing
-// emailed); Patrick's target is OneDrive Personal Lines/PL Client Renewals/<client>/<year>/ ("Ren
+// emailed); the agency's target is OneDrive Personal Lines/PL Client Renewals/<client>/<year>/ ("Ren
 // Change SS"), and `archivePlRenewalChange` below is the one place to add that upload once Graph
 // access exists.
 export type PlRenewalChangeManifestEntry = DocArchiveEntry & {

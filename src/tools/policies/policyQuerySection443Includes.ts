@@ -1,6 +1,6 @@
 // AMS360 Database Design Guide §4.4.3 per-LOB policy-detail tables (the ~191-table batch built
 // 2026-08-29 -- see project memory project_ams360_etl_sync_gaps for the full build history).
-// Wired in as policy_query includes, generated 2026-09-01 against the live boxwood_ams360 schema
+// Wired in as policy_query includes, generated 2026-09-01 against the live AMS360 schema
 // (columns, primary keys, claude-role grants) rather than hand-written one at a time, given the
 // scale -- reviewed and column-tested against the 4 already-established hand-written includes
 // (vehicles/workers_comp/forms/applicant in policyQuery.ts) for pattern consistency.

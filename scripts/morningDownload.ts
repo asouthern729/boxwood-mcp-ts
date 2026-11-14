@@ -14,7 +14,7 @@
 //   watermark logic below entirely (an explicit override shouldn't perturb the automation's own
 //   state).
 //
-//   With no CLI args (the normal cron path — see dailyMorningDownload.sh), this script instead
+//   With no CLI args (the normal cron path — see deploy/run-job.sh), this script instead
 //   reads a persisted watermark (src/utils/downloadReportWatermark.ts) and drives download_report's
 //   `synced_since` bound from it — see the 2026-09-16/17 vendor-download-gap incident for why a
 //   plain entereddate-windowed default isn't enough: a row entered in AMS360 just before one
@@ -35,7 +35,7 @@ import { getDownload } from "../src/utils/downloadStore.js"
 
 const OUTPUT_DIR = outputDir("download-report")
 
-// This script runs unattended via cron (see scripts/dailyMorningDownload.sh), so it must not
+// This script runs unattended via cron (see deploy/run-job.sh), so it must not
 // depend on whatever `claude login` session happens to be active on the box — that's a personal,
 // interactive credential that can expire or get logged out from under a scheduled job with nobody
 // there to re-auth. Requiring ANTHROPIC_API_KEY here, and passing it explicitly below, forces the
@@ -81,7 +81,7 @@ const windowInstruction = since || until || syncedSince
   ? `Use since=${ JSON.stringify(since ?? "(omit)") }, until=${ JSON.stringify(until ?? "(omit)") }, and synced_since=${ JSON.stringify(syncedSince ?? "(omit)") } when calling download_report (omit any argument marked "(omit)" entirely rather than passing that literal string).`
   : "Call download_report with no since/until/synced_since args, so it uses its own default overnight window."
 
-const PROMPT = `Run Boxwood's morning download review end to end.
+const PROMPT = `Run the agency's morning download review end to end.
 
 1. Call download_report. ${ windowInstruction }
 2. For every item in each rep's flagged_items, read its candidate_prior_activity (the staff
@@ -141,7 +141,7 @@ async function main() {
     prompt: PROMPT,
     options: {
       model: "claude-sonnet-5",
-      mcpServers: { boxwood: { type: "sdk", name: "boxwood", instance: server } },
+      mcpServers: { ams360: { type: "sdk", name: "ams360", instance: server } },
       // `tools` restricts the actual toolset (unlike `allowedTools`, which only pre-approves
       // without removing anything else) — without this the agent still has its full normal Claude
       // Code toolset (Bash, Write, ...) and, when a tool result is too large to fit in context,
@@ -149,12 +149,12 @@ async function main() {
       // `allowedTools` is still required alongside it — `tools` alone restricts availability but
       // doesn't pre-approve, so under permissionMode "default" it stops to ask for permission on
       // the only tools it has, with nobody there to answer.
-      tools: ["mcp__boxwood__download_report", "mcp__boxwood__download_report_workbook"],
-      allowedTools: ["mcp__boxwood__download_report", "mcp__boxwood__download_report_workbook"],
+      tools: ["mcp__ams360__download_report", "mcp__ams360__download_report_workbook"],
+      allowedTools: ["mcp__ams360__download_report", "mcp__ams360__download_report_workbook"],
       // Without this, query() still loads this project's .claude/settings.json (and user/local
       // settings) the way the interactive CLI does — and this project's settings.json has
       // accumulated permissions.allow entries from past interactive sessions (mcp__postgres-mcp__*,
-      // including run_write_query; a couple of mcp__claude_ai_Boxwood_MCP__* tools) that silently
+      // including run_write_query; a couple of mcp__claude_ai_* tools) that silently
       // pre-approve those tools here too, regardless of `tools`/`allowedTools` above. Confirmed live:
       // a run that hit an oversized download_report result queried Postgres directly via
       // mcp__postgres-mcp__run_query to route around it — completely bypassing the MCP layer this

@@ -1,9 +1,9 @@
 ---
 name: invoices
-description: Domain knowledge for the invoice_lookup MCP tool in boxwood-mcp-ts — Boxwood Insurance's AMS360 billing/AR data (invoices, void/correction chains, installment billing, related policy activity log). Use when answering questions about invoice history for a customer or policy. Does NOT cover outstanding balances/dollar amounts — afw_invoice has no such column.
+description: Domain knowledge for the invoice_lookup MCP tool in ams360-demo-mcp — the agency's AMS360 billing/AR data (invoices, void/correction chains, installment billing, related policy activity log). Use when answering questions about invoice history for a customer or policy. Does NOT cover outstanding balances/dollar amounts — afw_invoice has no such column.
 ---
 
-# Boxwood invoices
+# Invoices
 
 `invoice_lookup` is the anchor tool for billing (AMS360's `afw_invoice` — one row per invoice header). An invoice can be policy-specific or customer-level (`polrelation`), so `custid` and `polid` are both nullable on the underlying table even though most seed/real invoices carry both.
 

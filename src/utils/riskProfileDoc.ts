@@ -19,7 +19,7 @@ import {
 export const GREEN = "459361"
 export const NEARBLACK = "231F20"
 export const LIGHTGREEN = "E3F0E7"
-export const LOGO_PATH = path.join(import.meta.dirname, "..", "..", "assets", "boxwood-logo.png")
+export const LOGO_PATH = path.join(import.meta.dirname, "..", "..", "assets", "agency-logo.png")
 
 export function money(v: number | string | null | undefined): string {
   if(v === null || v === undefined || v === "") return ""
@@ -119,7 +119,7 @@ export type EquipmentBlanket = { coveredLocation: string; category: string; sche
 export type EquipmentItemRow = { itemNo: string; manufacturer: string; model: string; description: string; serialNo: string; value: string }
 export type VehicleRow = { vehNo: string; year: string; make: string; model: string; vin: string }
 export type DriverRow = { driverNo: string; name: string; licenseState: string }
-// No location here per Patrick's feedback (9/13): "Don't have to have addresses for workers comp
+// No location here per the agency's feedback (9/13): "Don't have to have addresses for workers comp
 // payroll. Just class codes and exposure."
 export type WcExposureRow = { classCode: string; classification: string; payroll: string }
 
@@ -213,7 +213,7 @@ function driversSection(rows: DriverRow[]): DocSection | null {
   return tableSection("Driver Information Schedule", ["Driver #", "Name", "License State"], rows.map((d) => [d.driverNo, d.name, d.licenseState]))
 }
 
-// No Location column per Patrick (9/13): "Just class codes and exposure." Renewal Payroll is left
+// No Location column per the agency (9/13): "Just class codes and exposure." Renewal Payroll is left
 // blank for the renewal meeting.
 function wcSection(rows: WcExposureRow[]): DocSection | null {
   return tableSection(

@@ -26,7 +26,7 @@ async function main() {
 
   await sendMail({
     to: process.env.ALERT_TO || DEFAULT_RECIPIENT,
-    subject: `boxwood-mcp ${ job } FAILED (exit ${ exitCode })`,
+    subject: `ams360-demo ${ job } FAILED (exit ${ exitCode })`,
     text: `${ job } exited with code ${ exitCode } on ${ new Date().toISOString() }.\nLog: ${ logPath }\n\n${ latestRun(logPath) }`
   })
   console.log(`[sendAlert] sent failure alert for ${ job }`)

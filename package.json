@@ -1,7 +1,7 @@
 {
-  "name": "boxwood-mcp-ts",
+  "name": "ams360-demo-mcp",
   "version": "1.0.0",
-  "description": "MCP server exposing customer/policy/invoice lookup tools over the boxwood-ams360 Postgres database",
+  "description": "MCP server exposing customer/policy/invoice lookup tools over the AMS360 demo Postgres database",
   "type": "module",
   "main": "dist/app.js",
   "scripts": {

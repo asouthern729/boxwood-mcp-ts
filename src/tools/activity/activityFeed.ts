@@ -8,7 +8,8 @@ import { errorResult, textResult } from "../../utils/mcpHelpers.js"
 
 const DOMAIN_OPTIONS = ["policy_transaction", "policy", "claim", "invoice", "activity"] as const
 
-const CUSTOMER_NAME_EXPR = "COALESCE(c.dba, NULLIF(TRIM(CONCAT_WS(' ', c.firstname, c.lastname)), ''))"
+// firmnamecust last: commercial accounts often carry their business name only there.
+const CUSTOMER_NAME_EXPR = "COALESCE(c.dba, NULLIF(TRIM(CONCAT_WS(' ', c.firstname, c.lastname)), ''), c.firmnamecust)"
 
 function changedByTypeExpr(changedByColumn: string): string {
   return `

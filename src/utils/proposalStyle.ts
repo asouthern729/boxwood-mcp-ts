@@ -5,7 +5,7 @@ import {
   ShadingType, Table, TableCell, TableLayoutType, TableRow, TextRun, VerticalAlign, WidthType
 } from "docx"
 
-// The visual language of Patrick's insurance-proposal skill (SKILL.md "Global brand spec") — palette,
+// The visual language of the agency's insurance-proposal skill (SKILL.md "Global brand spec") — palette,
 // page width, banners, sub-headers and data tables — shared by the CL Renewal Summary
 // (clProposalDoc.ts) and the Pre-Renewal Review (riskProfileDoc.ts, restyled to match 2026-10-10).
 // Every size, colour, margin and spacing below is the skill's own figure.
@@ -26,14 +26,20 @@ export const MARGIN = 900
 // tables ~0.75" short of the right margin and narrower than the sub-header rules above them.
 export const TABLE_WIDTH = PAGE_WIDTH - 2 * MARGIN // 10440 DXA
 
+// The demo's fictional agency. Every generated document (CL/PL renewal summaries, risk profiles,
+// proposals, the morning download workbook) and every AI prompt reads its branding from here.
 export const AGENCY = {
-  name: "Boxwood Insurance Group, LLC",
-  address: "3020 Stansberry Lane, Suite 202, Franklin, TN 37069",
-  phone: "615-245-5851",
-  website: "www.boxwoodins.com"
+  name: "Tyneside Insurance Group, LLC",
+  shortName: "Tyneside Insurance Group",
+  tagline: "Independent Insurance Agency",
+  city: "Tyneside, TN",
+  address: "100 Quayside Drive, Suite 200, Tyneside, TN 38590",
+  phone: "615-555-0100",
+  phoneDisplay: "(615) 555-0100",
+  website: "www.tyneside.example"
 }
 
-export const PROPOSAL_LOGO_PATH = path.join(import.meta.dirname, "..", "..", "assets", "boxwood-proposal-logo.png")
+export const PROPOSAL_LOGO_PATH = path.join(import.meta.dirname, "..", "..", "assets", "agency-proposal-logo.png")
 
 
 export type Block = Paragraph | Table
@@ -151,8 +157,8 @@ function fitToTable(widths: number[]): number[] {
   return widths
 }
 
-// Money columns (and their counts/percentages) read right-aligned, as in Patrick's example; IDs —
-// location, vehicle and driver numbers, VIN digits — stay left like his schedules.
+// Money columns (and their counts/percentages) read right-aligned, as in the agency's example; IDs —
+// location, vehicle and driver numbers, VIN digits — stay left like the agency's schedules.
 const NUMERIC_CELL = /^(\$[\d,.]+\*?( \/ \$[\d,.]+)*|[\d,.]+%?|—)$/
 
 function numericColumns(rows: string[][], columnCount: number): boolean[] {

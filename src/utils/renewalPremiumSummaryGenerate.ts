@@ -16,10 +16,10 @@ const CUSTOMER_NAME_EXPR = "COALESCE(c.dba, NULLIF(TRIM(CONCAT_WS(' ', c.firstna
 // all standardize on. Unlike risk_profile, this always pulls EVERY current commercial
 // policy on the account (not just ones matching a polno) — the whole point of this tool is splitting
 // that set into "renewing soon" (main table) vs. "everything else" (the account's other current
-// policies), per Patrick's own spec (see renewalPremiumSummary.ts's tool description).
+// policies), per the agency's own spec (see renewalPremiumSummary.ts's tool description).
 //
-// Deliberately does NOT filter on renewalrptflag='A' (client-corrected 2026-09-14, Defatta Custom
-// Homes LLC — see riskProfile.ts's RESOLVE_POLICY_QUERY comment for the full story):
+// Deliberately does NOT filter on renewalrptflag='A' (client-corrected 2026-09-14 on a real
+// account — see riskProfile.ts's RESOLVE_POLICY_QUERY comment for the full story):
 // AMS360 can flip a term's flag to 'R' the moment its successor is bound, weeks before that successor
 // actually starts, so the flag alone can miss the term that's genuinely in force today. The
 // poleffdate/polexpdate bounds below already do all the real work of defining "in force."

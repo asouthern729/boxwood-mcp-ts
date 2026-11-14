@@ -3,7 +3,7 @@
 // until it times out (confirmed live). Same provider as the ams360-etl project's send_alert.py.
 //
 // Needs RESEND_API_KEY and MAIL_FROM (an address on a domain verified in Resend, e.g.
-// "Boxwood MCP <noreply@mail.tyneside.io>"). Both are read when a message is sent, not at module
+// "AMS360 Demo <noreply@mail.tyneside.io>"). Both are read when a message is sent, not at module
 // load, so scripts that never send mail don't need them set.
 
 const RESEND_URL = "https://api.resend.com/emails"
