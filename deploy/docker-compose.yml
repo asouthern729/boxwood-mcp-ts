@@ -1,13 +1,35 @@
+# Every variable the app and jobs read from process.env. Values come from the Portainer stack's
+# environment (or a .env beside this file when run with the docker compose CLI); nothing is baked
+# into the image (.dockerignore excludes .env*).
+x-app-env: &app-env
+  PGHOST: ${PGHOST}
+  PGPORT: ${PGPORT}
+  PGDATABASE: ${PGDATABASE}
+  PGUSER: ${PGUSER}
+  PGPASSWORD: ${PGPASSWORD}
+  PORT: ${PORT}
+  PUBLIC_HOST: ${PUBLIC_HOST}
+  LOG_LEVEL: ${LOG_LEVEL:-info}
+  AUTH0_TENANT_DOMAIN: ${AUTH0_TENANT_DOMAIN}
+  AUTH0_CLIENT_ID: ${AUTH0_CLIENT_ID}
+  AUTH0_CLIENT_SECRET: ${AUTH0_CLIENT_SECRET}
+  AUTH0_API_URI: ${AUTH0_API_URI}
+  ANTHROPIC_API_KEY: ${ANTHROPIC_API_KEY}
+  RESEND_API_KEY: ${RESEND_API_KEY}
+  MAIL_FROM: ${MAIL_FROM}
+  ALERT_TO: ${ALERT_TO}
+  OUTPUT_ROOT: ${OUTPUT_ROOT}
+  STATE_ROOT: ${STATE_ROOT}
+
 services:
   boxwood-mcp:
-    image: ghcr.io/asouthern729/ams360-demo-mcp:1.0.0
+    image: ghcr.io/asouthern729/ams360-demo-mcp:1.0.1
     restart: unless-stopped
-    env_file:
-      - .env
     # Host networking so localhost:5432 reaches the host's Postgres (it only listens on loopback);
     # the app still binds 127.0.0.1:3000 for nginx.
     network_mode: host
     environment:
+      <<: *app-env
       HOST: 127.0.0.1
     user: "1000"
     read_only: true
@@ -26,12 +48,11 @@ services:
   # profile keeps `docker compose up` from starting it; its own memory limit keeps a LibreOffice-heavy
   # build from starving the web server.
   jobs:
-    image: ghcr.io/asouthern729/ams360-demo-mcp:1.0.0
+    image: ghcr.io/asouthern729/ams360-demo-mcp:1.0.1
     profiles: ["jobs"]
-    env_file:
-      - .env
     network_mode: host
     environment:
+      <<: *app-env
       HOME: /tmp
     user: "1000"
     read_only: true
