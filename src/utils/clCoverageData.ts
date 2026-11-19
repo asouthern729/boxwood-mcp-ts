@@ -334,6 +334,10 @@ const LOB_SLOTS: Record<string, LineSlot> = {
   CRIM: "crime", FIDFG: "crime"
 }
 
+export function slotForLob(code: string): LineSlot {
+  return LOB_SLOTS[code.trim()] ?? "other"
+}
+
 // `description` is AMS360's own name for the line (afw_lobsetup), used as the section title for
 // lines without a standard one.
 export type KeyedCoverageSection = CoverageSection & { key: LineSlot; lob: string; description: string }

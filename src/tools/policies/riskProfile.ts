@@ -1,6 +1,7 @@
 import { McpServer } from "@modelcontextprotocol/sdk/server/mcp.js"
 import * as z from "zod"
 import { publicBaseUrl } from "../../config/config.js"
+import { describeGaps } from "../../utils/coverageGaps.js"
 import { storeDownload } from "../../utils/downloadStore.js"
 import { errorResult, textResult } from "../../utils/mcpHelpers.js"
 import { logger } from "../../utils/logger.js"
@@ -33,7 +34,7 @@ export function registerRiskProfileTool(server: McpServer) {
         if(resolution.kind === "ambiguous") return textResult(resolution.payload)
 
         const { matches, primaryPolicy, clientName } = resolution
-        const { buffer, filename, includedSections, combining, polnoLabel } = await generateRiskProfile(matches, clientName)
+        const { buffer, filename, includedSections, combining, polnoLabel, coverageGaps } = await generateRiskProfile(matches, clientName)
         const token = storeDownload(buffer, filename, DOCX_MIME_TYPE)
         const downloadUrl = `${ publicBaseUrl }/downloads/${ token }`
 
@@ -42,7 +43,9 @@ export function registerRiskProfileTool(server: McpServer) {
             ? `Built the combined Pre-Renewal Review for ${ clientName } (${ matches.length } policies: ${ polnoLabel }) — ${ includedSections.length } section(s) included: ${ includedSections.join(", ") }.`
             : `Built the Pre-Renewal Review for ${ clientName } (policy ${ primaryPolicy.polno }) — ${ includedSections.length } section(s) included: ${ includedSections.join(", ") }.`,
           download_url: downloadUrl,
-          included_sections: includedSections
+          included_sections: includedSections,
+          // For the CSR, never the client: tell the user plainly which lines didn't make it in.
+          ...(coverageGaps.length > 0 ? { coverage_gaps: coverageGaps, coverage_gaps_note: `Check before sending: ${ describeGaps(coverageGaps) }. These lines are on the policy in AMS360 but have no exposure section in the document.` } : {})
         })
       } catch(error) {
         logger.error({ err: error, polno, custid, customer_name }, "risk_profile failed")

@@ -4,6 +4,8 @@ import {
   buildCoverPolicies, combineExposures, fetchPolicyData, formatDate, renewalDateFields, type ResolvedPolicy
 } from "./clPolicyData.js"
 import { buildRiskProfileDoc } from "./riskProfileDoc.js"
+import { riskProfileGaps, type CoverageGap } from "./coverageGaps.js"
+import { fetchPolicyLobInfo } from "./policyLineOfBusiness.js"
 
 export type GeneratedRiskProfile = {
   buffer: Buffer
@@ -12,6 +14,8 @@ export type GeneratedRiskProfile = {
   includedSections: string[]
   combining: boolean
   polnoLabel: string
+  // Lines of business with no exposure section in the document — for the CSR only (coverageGaps.ts).
+  coverageGaps: CoverageGap[]
 }
 
 // Builds and archives the Pre-Renewal Review for already-resolved policies of one customer — shared
@@ -29,7 +33,11 @@ export async function buildRiskProfile(matches: ResolvedPolicy[], clientName: st
   const primaryPolicy = matches[0]
   const combining = matches.length > 1
 
-  const perPolicyData = await Promise.all(matches.map((policy) => fetchPolicyData(policy)))
+  const [perPolicyData, perPolicyLobs] = await Promise.all([
+    Promise.all(matches.map((policy) => fetchPolicyData(policy))),
+    Promise.all(matches.map((policy) => fetchPolicyLobInfo(policy.polid)))
+  ])
+  const coverageGaps = riskProfileGaps(matches.map((m, i) => ({ polno: m.polno, lob: perPolicyLobs[i], data: perPolicyData[i] })))
   const exposures = combineExposures(perPolicyData, clientName)
   const coverPolicies = await buildCoverPolicies(matches)
 
@@ -69,8 +77,9 @@ export async function buildRiskProfile(matches: ResolvedPolicy[], clientName: st
     client_name: clientName,
     polnos: polnoLabel,
     polids: matches.map((m) => m.polid),
+    coverage_gaps: coverageGaps,
     ...renewalDateFields(matches)
   }
 
-  return { buffer, filename, includedSections, combining, polnoLabel, archiveEntry }
+  return { buffer, filename, includedSections, combining, polnoLabel, coverageGaps, archiveEntry }
 }

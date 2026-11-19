@@ -11,6 +11,8 @@ import { buildClProposalDoc, type ServiceTeamMember } from "./clProposalDoc.js"
 import { completeUmbrellas, longDate, policyLines, type SlotLine } from "./clProposalLines.js"
 import { executiveSummary } from "./clProposalText.js"
 import { withClRenewalTerms } from "./clRenewalTerms.js"
+import { renewalSummaryGaps, type CoverageGap } from "./coverageGaps.js"
+import { fetchPolicyLobInfo } from "./policyLineOfBusiness.js"
 
 export type GeneratedClRenewalSummary = {
   buffer: Buffer
@@ -24,6 +26,8 @@ export type GeneratedClRenewalSummary = {
   // Current-term policy numbers whose renewal isn't in AMS360 yet, so the document shows the
   // expiring program for them (and is rebuilt once it lands — scripts/dailyClRenewalSummaries.ts).
   renewalPendingPolnos: string[]
+  // Lines of business with no section in the document — for the CSR only (coverageGaps.ts).
+  coverageGaps: CoverageGap[]
 }
 
 const AGENCY_PHONE = "615-245-5851"
@@ -113,9 +117,10 @@ export async function buildClRenewalSummary(
   const seen = new Set<string>()
   const terms = (await withClRenewalTerms(matches)).filter((t) => (seen.has(t.data.polid) ? false : (seen.add(t.data.polid), true)))
 
-  const [perPolicyData, perPolicyCoverage, contactRows] = await Promise.all([
+  const [perPolicyData, perPolicyCoverage, perPolicyLobs, contactRows] = await Promise.all([
     Promise.all(terms.map((t) => fetchPolicyData(t.data))),
     Promise.all(terms.map((t) => fetchPolicyCoverageData(t.data.polid))),
+    Promise.all(terms.map((t) => fetchPolicyLobInfo(t.data.polid))),
     runReadOnlyQuery(CONTACTS_QUERY, [primaryPolicy.polid]) as Promise<ContactsRow[]>
   ])
   const contacts = contactRows[0]
@@ -132,6 +137,7 @@ export async function buildClRenewalSummary(
   const merged = mergeQuotesIntoProposal(amsLines, quotes ?? completedQuoteExtractions(archiveFilename))
   const lines = orderLines(merged.lines)
   completeUmbrellas(lines)
+  const coverageGaps = renewalSummaryGaps(terms.map((t, i) => ({ polno: t.data.polno, lob: perPolicyLobs[i] })), lines)
 
   // The cover shows the period most of the printed program shares — a quoted line's own period, since
   // that's the term its figures describe; a line on a different term says so in its own overview
@@ -210,13 +216,15 @@ export async function buildClRenewalSummary(
     built_from: pending.length === 0 ? "renewal" : "current",
     renewal_polids: terms.filter((t) => t.isRenewal).map((t) => t.current.polid),
     sections: lines.map((l) => ({ title: l.title, polno: l.polno, renewed: !isPending(l) })),
+    coverage_gaps: coverageGaps,
     ...renewalDateFields(matches)
   }
 
   return {
     buffer, filename, archiveFilename, archiveEntry, includedSections, combining, polnoLabel,
     carrierCodes: [...new Set(perPolicyCoverage.flatMap((c) => c.carrierCodes))],
-    renewalPendingPolnos: pending.map((p) => p.polno)
+    renewalPendingPolnos: pending.map((p) => p.polno),
+    coverageGaps
   }
 }
 

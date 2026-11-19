@@ -3,6 +3,7 @@ import * as z from "zod"
 import { publicBaseUrl } from "../../config/config.js"
 import { storeDownload } from "../../utils/downloadStore.js"
 import { errorResult, textResult } from "../../utils/mcpHelpers.js"
+import { describeGaps } from "../../utils/coverageGaps.js"
 import { logger } from "../../utils/logger.js"
 import { resolveClPolicies } from "../../utils/clPolicyData.js"
 import { generateClRenewalSummary } from "../../utils/clRenewalSummaryGenerate.js"
@@ -36,7 +37,7 @@ export function registerClRenewalSummaryTool(server: McpServer) {
         if(resolution.kind === "ambiguous") return textResult(resolution.payload)
 
         const { matches, primaryPolicy, clientName } = resolution
-        const { buffer, filename, includedSections, combining, polnoLabel, carrierCodes, renewalPendingPolnos } = await generateClRenewalSummary(matches, clientName)
+        const { buffer, filename, includedSections, combining, polnoLabel, carrierCodes, renewalPendingPolnos, coverageGaps } = await generateClRenewalSummary(matches, clientName)
         const token = storeDownload(buffer, filename, DOCX_MIME_TYPE)
         const downloadUrl = `${ publicBaseUrl }/downloads/${ token }`
 
@@ -47,7 +48,9 @@ export function registerClRenewalSummaryTool(server: McpServer) {
           download_url: downloadUrl,
           included_sections: includedSections,
           ...(renewalPendingPolnos.length > 0 ? { renewal_pending_polnos: renewalPendingPolnos } : {}),
-          ...(carrierCodes.length > 0 ? { unresolved_coverage_codes: carrierCodes } : {})
+          ...(carrierCodes.length > 0 ? { unresolved_coverage_codes: carrierCodes } : {}),
+          // For the CSR, never the client: tell the user plainly which lines didn't make it in.
+          ...(coverageGaps.length > 0 ? { coverage_gaps: coverageGaps, coverage_gaps_note: `Check before sending: ${ describeGaps(coverageGaps) }. These lines are on the policy in AMS360 but have no section in the document.` } : {})
         })
       } catch(error) {
         logger.error({ err: error, polno, custid, customer_name }, "cl_renewal_summary failed")

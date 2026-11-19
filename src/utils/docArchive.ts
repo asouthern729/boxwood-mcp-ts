@@ -48,6 +48,10 @@ export type DocArchiveEntry = {
   // renewal values (AMS360 renewal term or an uploaded quote) or still the expiring term — the index
   // page lists these under the policy numbers. Absent means the entry predates this field.
   sections?: { title: string; polno: string; renewed: boolean }[]
+  // Lines of business on the policy whose section is missing from the document (coverageGaps.ts) —
+  // for the CSR only; the dashboard flags the document. Absent or empty means none were found (or the
+  // entry predates the check, 2026-11-19).
+  coverage_gaps?: { polno: string; line: string; missing: string }[]
 }
 
 // Entries only need a filename here; DocArchiveEntry is the CSR-grouped shape the CL index pages
