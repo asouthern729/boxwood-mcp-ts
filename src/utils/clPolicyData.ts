@@ -515,6 +515,15 @@ function premBasisLabel(code: string | null): string {
 // exposures read from an uploaded quote.
 const DOLLAR_PREM_BASES = new Set(["C", "S", "P"])
 
+// Workers' Comp payroll gets the same zero rule as GL exposures: AMS360 already writes "If Any" in
+// the text column for some classes, but others carry a numeric 0 (Vaden's 5606), shown as "If Any"
+// too rather than "$0".
+function formatWcPayroll(amount: number | null, text: string | null): string {
+  if(amount !== null) return Number(amount) === 0 ? "If Any" : money(amount)
+  const cleaned = (text ?? "").replace(/[$,]/g, "").trim()
+  return cleaned !== "" && Number(cleaned) === 0 ? "If Any" : numericMoney(text)
+}
+
 // A zero exposure is an "if any" class: listed so the work is covered if it happens, with nothing
 // rated (Willow Branch Partners' janitorial and carpentry classes, 2026-11-19). Shown as "If Any",
 // the same wording AMS360 uses on Workers' Comp, rather than a "$0" that reads like an error.
@@ -692,7 +701,7 @@ export async function fetchPolicyData(policy: ResolvedPolicy): Promise<PolicyDat
   }
 
   return {
-    namedInsuredNames: namedInsuredRows.map((r) => r.namedins.trim()),
+    namedInsuredNames: namedInsuredRows.map((r) => r.namedins.trim().replace(/\s+/g, " ")),
     locations: locationRows.map((l) => ({
       locNo: formatLocNo(l.locno),
       address: [l.addr1, l.addr2].filter(Boolean).join(" "),
@@ -737,13 +746,13 @@ export async function fetchPolicyData(policy: ResolvedPolicy): Promise<PolicyDat
     })),
     drivers: driverRows.map((d) => ({
       driverNo: clean(d.driverno),
-      name: clean(d.name),
+      name: clean(d.name).replace(/\s+/g, " "),
       licenseState: clean(d.licensestate)
     })),
     wcExposure: wcRows.map((w) => ({
       classCode: clean(w.ratingclasscode),
       classification: restoreDroppedHyphens(clean(w.categories), variantsByCode.get(clean(w.ratingclasscode)) ?? []),
-      payroll: w.iestannremun !== null ? money(w.iestannremun) : numericMoney(w.vestannremun)
+      payroll: formatWcPayroll(w.iestannremun, w.vestannremun)
     }))
   }
 }
@@ -848,6 +857,29 @@ export type CombinedExposures = {
   wcExposure: WcExposureRow[]
 }
 
+const STREET_SUFFIXES: Record<string, string> = {
+  street: "st", road: "rd", lane: "ln", drive: "dr", avenue: "ave", av: "ave", boulevard: "blvd", court: "ct",
+  circle: "cir", place: "pl", parkway: "pkwy", highway: "hwy", terrace: "ter", trail: "trl", way: "way", pike: "pike"
+}
+
+// "110-112 Reynolds Rd" and "110 Reynolds Road, Suite 4" -> "110|reynolds rd|37064": first house
+// number, street words with suite/unit/# tails dropped and suffixes abbreviated, then zip5 (or city).
+function locationAddressKey(loc: LocationRow): string {
+  const words = loc.address.toLowerCase().replace(/[^a-z0-9#\s-]/g, " ").split(/\s+/).filter(Boolean)
+  const houseNumber = words[0]?.match(/^\d+/)?.[0] ?? ""
+  const rest = houseNumber ? words.slice(1) : words
+  const suiteAt = rest.findIndex((w) => /^(ste|suite|unit|apt|bldg|#)/.test(w))
+  const street = (suiteAt >= 0 ? rest.slice(0, suiteAt) : rest).map((w) => STREET_SUFFIXES[w] ?? w).join(" ")
+  const zip5 = loc.zip.match(/^\d{5}/)?.[0] ?? ""
+  return `${ houseNumber }|${ street }|${ zip5 || loc.city.trim().toLowerCase() }`
+}
+
+function nextFreeLocNo(used: Set<string>): string {
+  let n = 1
+  while(used.has(String(n))) n++
+  return String(n)
+}
+
 export function combineExposures(perPolicyData: PolicyData[], clientName: string): CombinedExposures {
   // Named insureds merged and deduped (ignoring case and punctuation) across every combined policy — a
   // single policy still goes through this same path (perPolicyData has just one entry), so
@@ -888,15 +920,41 @@ export function combineExposures(perPolicyData: PolicyData[], clientName: string
   // that actually says "this is the same location." When two policies' copies of the same
   // locNo disagree on address text, the longer (more complete) one wins, since a fuller street
   // address is more useful to the reader than a shorter/older copy.
-  const locationsSeen = new Map<string, LocationRow>()
-  for(const data of perPolicyData) {
-    for(const loc of data.locations) {
-      const key = loc.locNo.trim().toLowerCase()
-      const existing = locationsSeen.get(key)
-      if(!existing || loc.address.length > existing.address.length) locationsSeen.set(key, loc)
+  //
+  // Revised 2026-11-19 (Patrick, Vaden Company LLC): locno is NOT consistent across policies after
+  // all. Vaden's package has 1 = 4454 Long Ln and 2 = 4473 Long Ln, its WC has 2 = 4454 Long Ln, and
+  // its builder's risk has 1 = 147 Governor's Way. Keyed on locNo, 147 Governor's Way took slot 1
+  // and WC's 4454 took slot 2, dropping 4473 Long Ln (the property location) entirely. So copies are
+  // now matched on the address itself, loosely enough to keep Defatta's case together: first house
+  // number + street name (suite and suffix spelling ignored) + 5-digit zip, falling back to city.
+  // The policy with the most locations sets the numbering (it's the one whose property/GL sections
+  // cite those numbers); a location from another policy whose number is already taken gets the
+  // next free number. Two locations on the SAME policy are never merged, even at one address.
+  const ranked = perPolicyData.map((d, i) => ({ d, i })).sort((a, b) => b.d.locations.length - a.d.locations.length || a.i - b.i)
+  const byAddress = new Map<string, { loc: LocationRow; policy: number }>()
+  const merged: LocationRow[] = []
+  const usedNos = new Set<string>()
+
+  for(const { d, i } of ranked) {
+    for(const loc of d.locations) {
+      const key = locationAddressKey(loc)
+      const existing = byAddress.get(key)
+
+      if(existing && existing.policy !== i) {
+        // Same place, another policy's copy: keep the fuller address text, never its number.
+        if(loc.address.length > existing.loc.address.length) Object.assign(existing.loc, { address: loc.address, city: loc.city, state: loc.state, zip: loc.zip })
+        continue
+      }
+
+      const row = { ...loc }
+      if(usedNos.has(row.locNo.trim().toLowerCase())) row.locNo = nextFreeLocNo(usedNos)
+      usedNos.add(row.locNo.trim().toLowerCase())
+      merged.push(row)
+      if(!existing) byAddress.set(key, { loc: row, policy: i })
     }
   }
-  const locations = [...locationsSeen.values()].sort((a, b) => {
+
+  const locations = merged.sort((a, b) => {
     const na = Number(a.locNo)
     const nb = Number(b.locNo)
     if(Number.isFinite(na) && Number.isFinite(nb) && na !== nb) return na - nb
