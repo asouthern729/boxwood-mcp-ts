@@ -484,11 +484,17 @@ function buildPropertySubjectRows(rows: PropertySubjectQueryRow[]): PropertySubj
         list.push(`${ formatDeductible(deductible.deduct, deductible.dedtype) } ${ perilLabel(subject) }`)
         addressPerilDeductibles.set(first.piid, list)
       } else if(first.isubamt) {
-        // No cprem limit but the subject itself carries an amount of insurance.
+        // No cprem limit but the subject itself carries an amount of insurance (Grange's commercial
+        // packages, 2026-11-19). Its peril rows still ride along — they used to be dropped here, so
+        // Grange's wind/hail deductible never printed — and the main deductible comes from a
+        // non-peril row, not whichever row happens to sort first.
+        const mainDeductible = subjectRows.find((r) => r.deduct && !perilRows.includes(r))
         pending.push({
           piid: first.piid, ...place, subject, limit: money(first.isubamt), valuation,
           causeOfLoss: subjectRows.map((r) => clean(r.coverage)).find((c) => CAUSE_OF_LOSS_PATTERN.test(c)) ?? "",
-          coinsurance, deductible: formatDeductible(first.deduct, first.dedtype), perilDeductibles: [], isAdditional: false
+          coinsurance, deductible: formatDeductible(mainDeductible?.deduct ?? null, mainDeductible?.dedtype ?? null),
+          perilDeductibles: perilRows.map((r) => `${ formatDeductible(r.deduct, r.dedtype) } ${ perilLabel(clean(r.coverage)) }`),
+          isAdditional: false
         })
       }
       continue
