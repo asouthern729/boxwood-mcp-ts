@@ -381,6 +381,74 @@ const WC_EXPOSURE_QUERY = `
   ORDER BY t.ratingclasscode
 `
 
+// Some carrier downloads drop the hyphens from afw_130rating.categories, gluing words together:
+// "Construction-Executives, ... Jobsites-Not Performi" arrives as "Constructionexecutives, ...
+// Jobsitesnot Performing" (seen on 72 of 144 WC class codes tenant-wide, 2026-11-19). The same class
+// code usually appears correctly hyphenated on other policies, so those variants (most common first)
+// are used to put the hyphens back — see restoreDroppedHyphens.
+const WC_HYPHENATED_VARIANTS_QUERY = `
+  SELECT t.ratingclasscode, t.categories
+  FROM afw_130rating t
+  WHERE t.ratingclasscode = ANY($1::text[]) AND t.categories LIKE '%-%'
+  GROUP BY t.ratingclasscode, t.categories
+  ORDER BY count(*) DESC
+`
+
+const isAlnum = (ch: string | undefined) => ch !== undefined && /[a-z0-9]/i.test(ch)
+
+// Walks `glued` alongside a hyphenated `variant` of the same description, matching letters and digits
+// case-insensitively. A hyphen goes back in only where the variant has one AND `glued` has two
+// letters touching at that spot, so correct text ("Clerical Office Employees Noc" vs a variant
+// "Clerical Office EMPLOYEES-N O C") is never changed. Keeps glued's own casing and length (variants
+// are often cut off sooner); the letter after a restored hyphen takes the variant's case. Returns
+// null when the two don't describe the same words or nothing needed restoring.
+function alignHyphens(glued: string, variant: string): string | null {
+  let out = ""
+  let i = 0
+  let j = 0
+  let matched = 0
+  let restored = 0
+  let capitalizeNext = false
+
+  while(i < glued.length && j < variant.length) {
+    const g = glued[i]
+    const v = variant[j]
+
+    if(v === "-") {
+      if(isAlnum(g) && isAlnum(out[out.length - 1])) {
+        out += "-"
+        restored++
+        capitalizeNext = true
+      }
+      j++
+    } else if(isAlnum(g) && isAlnum(v)) {
+      if(g.toLowerCase() !== v.toLowerCase()) return null
+      out += capitalizeNext ? v : g
+      capitalizeNext = false
+      matched++
+      i++
+      j++
+    } else if(!isAlnum(g)) {
+      out += g
+      if(!isAlnum(v) && v !== "-") j++
+      i++
+    } else {
+      j++
+    }
+  }
+
+  return restored > 0 && matched >= 15 ? out + glued.slice(i) : null
+}
+
+function restoreDroppedHyphens(text: string, variants: string[]): string {
+  if(text.includes("-")) return text
+  for(const variant of variants) {
+    const restored = alignHyphens(text, variant)
+    if(restored) return restored
+  }
+  return text
+}
+
 // AMS360 stores zip+4 as a single 9-digit string with no separator (e.g. "370272877") — reformatted
 // to the standard 5+4 display ("37027-2877") when it's exactly 9 digits, left as-is otherwise.
 export function formatZip(zip: string | null): string {
@@ -606,6 +674,17 @@ export async function fetchPolicyData(policy: ResolvedPolicy): Promise<PolicyDat
     runReadOnlyQuery(WC_EXPOSURE_QUERY, [policy.polid]) as Promise<{ ratingclasscode: string | null; categories: string | null; vestannremun: string | null; iestannremun: number | null }[]>
   ])
 
+  // Only class codes whose description has no hyphen at all can need repair.
+  const gluedCodes = [...new Set(wcRows.filter((w) => w.ratingclasscode && w.categories && !w.categories.includes("-")).map((w) => clean(w.ratingclasscode)))]
+  const variantRows = gluedCodes.length > 0
+    ? await runReadOnlyQuery(WC_HYPHENATED_VARIANTS_QUERY, [gluedCodes]) as { ratingclasscode: string; categories: string }[]
+    : []
+  const variantsByCode = new Map<string, string[]>()
+  for(const v of variantRows) {
+    const code = clean(v.ratingclasscode)
+    variantsByCode.set(code, [...(variantsByCode.get(code) ?? []), clean(v.categories)])
+  }
+
   return {
     namedInsuredNames: namedInsuredRows.map((r) => r.namedins.trim()),
     locations: locationRows.map((l) => ({
@@ -657,7 +736,7 @@ export async function fetchPolicyData(policy: ResolvedPolicy): Promise<PolicyDat
     })),
     wcExposure: wcRows.map((w) => ({
       classCode: clean(w.ratingclasscode),
-      classification: clean(w.categories),
+      classification: restoreDroppedHyphens(clean(w.categories), variantsByCode.get(clean(w.ratingclasscode)) ?? []),
       payroll: w.iestannremun !== null ? money(w.iestannremun) : numericMoney(w.vestannremun)
     }))
   }
@@ -764,14 +843,18 @@ export type CombinedExposures = {
 }
 
 export function combineExposures(perPolicyData: PolicyData[], clientName: string): CombinedExposures {
-  // Named insureds merged and deduped (case-insensitive) across every combined policy — a
+  // Named insureds merged and deduped (ignoring case and punctuation) across every combined policy — a
   // single policy still goes through this same path (perPolicyData has just one entry), so
   // there's only one code path to keep correct rather than two.
+  // Keyed on letters and digits only, so "Henry P Ingram Jr." and "Henry P Ingram Jr" (seen on
+  // Willow Branch Partners, 2026-11-19) or a stray comma/double space count as one name.
+  const nameKey = (name: string) => name.toLowerCase().replace(/[^a-z0-9]+/g, " ").trim()
+  const clientKey = nameKey(clientName)
   const namedInsuredsSeen = new Map<string, string>()
   for(const data of perPolicyData) {
     for(const rawName of data.namedInsuredNames) {
-      if(rawName.toLowerCase() === clientName.toLowerCase()) continue
-      const key = rawName.toLowerCase()
+      const key = nameKey(rawName)
+      if(key === clientKey) continue
       if(!namedInsuredsSeen.has(key)) namedInsuredsSeen.set(key, rawName)
     }
   }
