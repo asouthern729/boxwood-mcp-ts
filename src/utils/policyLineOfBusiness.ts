@@ -14,6 +14,25 @@ function clean(value: string | null | undefined): string {
   return value?.trim() ?? ""
 }
 
+// Bonds (Surety, Notary Bond) never carry coverage, location or exposure records in AMS360, so a
+// document built from one is an empty shell (A+ Storage's AL DOT bond, Policy Co Inc's ERISA bond,
+// 2026-11-19). Shared by the coverage-gap check and splitBondOnly.
+export const BOND_LOBS = new Set(["SURE", "NRYBD"])
+
+export function isBondOnly(lob: PolicyLobInfo): boolean {
+  return lob.lobCodes.length > 0 && lob.lobCodes.every((code) => BOND_LOBS.has(code))
+}
+
+// Separates bond-only policies from the rest before a Renewal Summary or Risk Profile is built: they
+// add nothing to a combined document, and a document of bonds alone would be blank.
+export async function splitBondOnly<T extends { polid: string }>(matches: T[]): Promise<{ kept: T[]; bonds: T[] }> {
+  const lobs = await Promise.all(matches.map((m) => fetchPolicyLobInfo(m.polid)))
+  return {
+    kept: matches.filter((_, i) => !isBondOnly(lobs[i])),
+    bonds: matches.filter((_, i) => isBondOnly(lobs[i]))
+  }
+}
+
 export type PolicyLobInfo = { lobCodes: string[]; lobDescriptions: string[]; classification: "Monoline" | "Package" | "" }
 
 // afw_basicpolinfo.polsubtype is NOT a Monoline/Package indicator, despite reading that way from its

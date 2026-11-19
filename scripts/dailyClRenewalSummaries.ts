@@ -27,6 +27,7 @@ import { formatDate, resolveClPolicies } from "../src/utils/clPolicyData.js"
 import { nameList, recordJobSummary } from "../src/utils/jobStatus.js"
 import { readClRenewalSummaryManifest } from "../src/utils/clRenewalSummaryArchive.js"
 import { ClRenewalSummaryRebuildError, archivedPolids, generateClRenewalSummary, rebuildClRenewalSummary } from "../src/utils/clRenewalSummaryGenerate.js"
+import { splitBondOnly } from "../src/utils/policyLineOfBusiness.js"
 import { polidsWithRenewal } from "../src/utils/clRenewalTerms.js"
 import { isTermArchived } from "../src/utils/docArchive.js"
 import type { DocArchiveEntry } from "../src/utils/docArchive.js"
@@ -71,7 +72,14 @@ async function main() {
         continue
       }
 
-      const uncovered = resolution.matches.filter((m) => !isTermArchived(manifest, {
+      // Bonds carry no coverage records in AMS360 — never summarized, alone or combined.
+      const { kept, bonds } = await splitBondOnly(resolution.matches)
+      if(kept.length === 0) {
+        skipped.push({ custid, customerName: customer_name, reason: `bond only (${ bonds.map((b) => b.polno.trim()).join(", ") })` })
+        continue
+      }
+
+      const uncovered = kept.filter((m) => !isTermArchived(manifest, {
         polid: m.polid, polno: m.polno, renewalDate: formatDate(m.polexpdate)
       }))
 

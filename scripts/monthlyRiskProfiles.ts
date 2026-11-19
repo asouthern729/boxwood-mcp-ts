@@ -21,6 +21,7 @@ import "dotenv/config"
 import { formatDate, resolveClPolicies } from "../src/utils/clPolicyData.js"
 import { nameList, recordJobSummary } from "../src/utils/jobStatus.js"
 import { generateRiskProfile } from "../src/utils/riskProfileGenerate.js"
+import { splitBondOnly } from "../src/utils/policyLineOfBusiness.js"
 import { discoverCommercialAccounts, monthArgFromArgv, resolveTargetMonthWindow } from "../src/utils/monthlyRenewalWindow.js"
 
 async function main() {
@@ -55,7 +56,14 @@ async function main() {
         continue
       }
 
-      const { polnoLabel, includedSections } = await generateRiskProfile(inMonth, resolution.clientName)
+      // Bonds carry no exposure records in AMS360 — never profiled, alone or combined.
+      const { kept, bonds } = await splitBondOnly(inMonth)
+      if(kept.length === 0) {
+        skipped.push({ custid, customerName: customer_name, reason: `bond only (${ bonds.map((b) => b.polno.trim()).join(", ") })` })
+        continue
+      }
+
+      const { polnoLabel, includedSections } = await generateRiskProfile(kept, resolution.clientName)
       generated.push({ custid, clientName: resolution.clientName, polnos: polnoLabel })
       console.log(`[monthlyRiskProfiles] generated ${ resolution.clientName } (${ polnoLabel }) — ${ includedSections.length } section(s)`)
     } catch(error) {

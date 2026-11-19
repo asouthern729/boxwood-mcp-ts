@@ -1,6 +1,6 @@
 import { slotForLob, type LineSlot } from "./clCoverageData.js"
 import type { PolicyData } from "./clPolicyData.js"
-import type { PolicyLobInfo } from "./policyLineOfBusiness.js"
+import { BOND_LOBS, type PolicyLobInfo } from "./policyLineOfBusiness.js"
 
 // Patrick (2026-11-18, Kreager Community Property Trust): "Sometimes not all lines pull." A line of
 // business on the policy whose section never made it into the document is reported back for the CSR
@@ -48,8 +48,6 @@ export function riskProfileGaps(policies: (PolicyLines & { data: PolicyData })[]
 
 // Bonds never carry coverage records in AMS360 (Surety, Notary Bond: 20 of 32 flags in a 132-policy
 // sample, 2026-11-19), so flagging them would be noise the CSR learns to ignore.
-const NO_COVERAGE_RECORD_LOBS = new Set(["SURE", "NRYBD"])
-
 // The Renewal Summary gives every line of business its own section, so any other line on a printed
 // term without one is a gap.
 export function renewalSummaryGaps(policies: PolicyLines[], printed: { polno: string; slot: LineSlot }[]): CoverageGap[] {
@@ -58,7 +56,7 @@ export function renewalSummaryGaps(policies: PolicyLines[], printed: { polno: st
 
   for(const { polno, lob } of policies) {
     lob.lobCodes.forEach((code, i) => {
-      if(NO_COVERAGE_RECORD_LOBS.has(code)) return
+      if(BOND_LOBS.has(code)) return
       const slot = slotForLob(code)
       if(!have.has(`${ polno.trim() }|${ slot }`)) gaps.push({ polno, line: lob.lobDescriptions[i] ?? code, missing: `${ lob.lobDescriptions[i] ?? code } section` })
     })

@@ -4,6 +4,7 @@ import { publicBaseUrl } from "../../config/config.js"
 import { storeDownload } from "../../utils/downloadStore.js"
 import { errorResult, textResult } from "../../utils/mcpHelpers.js"
 import { describeGaps } from "../../utils/coverageGaps.js"
+import { splitBondOnly } from "../../utils/policyLineOfBusiness.js"
 import { logger } from "../../utils/logger.js"
 import { resolveClPolicies } from "../../utils/clPolicyData.js"
 import { generateClRenewalSummary } from "../../utils/clRenewalSummaryGenerate.js"
@@ -36,7 +37,17 @@ export function registerClRenewalSummaryTool(server: McpServer) {
         if(resolution.kind === "error") return errorResult(resolution.error)
         if(resolution.kind === "ambiguous") return textResult(resolution.payload)
 
-        const { matches, primaryPolicy, clientName } = resolution
+        const { clientName } = resolution
+        // Bonds have no coverage records in AMS360: left out, and never a document on their own.
+        const { kept: matches, bonds } = await splitBondOnly(resolution.matches)
+        const bondPolnos = bonds.map((b) => b.polno.trim())
+        if(matches.length === 0) {
+          return textResult({
+            message: `No Renewal Summary built for ${ clientName }: ${ bondPolnos.length === 1 ? `the only policy in range (${ bondPolnos[0] }) is a bond` : `every policy in range (${ bondPolnos.join(", ") }) is a bond` }, and AMS360 holds no coverage details for bonds to summarize. To include later renewals, pass a larger renewal_within_days or a specific polno.`,
+            bond_only_polnos: bondPolnos
+          })
+        }
+        const primaryPolicy = matches[0]
         const { buffer, filename, includedSections, combining, polnoLabel, carrierCodes, renewalPendingPolnos, coverageGaps } = await generateClRenewalSummary(matches, clientName)
         const token = storeDownload(buffer, filename, DOCX_MIME_TYPE)
         const downloadUrl = `${ publicBaseUrl }/downloads/${ token }`
@@ -47,6 +58,7 @@ export function registerClRenewalSummaryTool(server: McpServer) {
             : `Built the Renewal Summary for ${ clientName } (policy ${ primaryPolicy.polno }) — ${ includedSections.length } section(s) included: ${ includedSections.join(", ") }.`,
           download_url: downloadUrl,
           included_sections: includedSections,
+          ...(bondPolnos.length > 0 ? { skipped_bond_polnos: bondPolnos } : {}),
           ...(renewalPendingPolnos.length > 0 ? { renewal_pending_polnos: renewalPendingPolnos } : {}),
           ...(carrierCodes.length > 0 ? { unresolved_coverage_codes: carrierCodes } : {}),
           // For the CSR, never the client: tell the user plainly which lines didn't make it in.

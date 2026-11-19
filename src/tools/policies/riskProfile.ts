@@ -2,6 +2,7 @@ import { McpServer } from "@modelcontextprotocol/sdk/server/mcp.js"
 import * as z from "zod"
 import { publicBaseUrl } from "../../config/config.js"
 import { describeGaps } from "../../utils/coverageGaps.js"
+import { splitBondOnly } from "../../utils/policyLineOfBusiness.js"
 import { storeDownload } from "../../utils/downloadStore.js"
 import { errorResult, textResult } from "../../utils/mcpHelpers.js"
 import { logger } from "../../utils/logger.js"
@@ -33,7 +34,17 @@ export function registerRiskProfileTool(server: McpServer) {
         if(resolution.kind === "error") return errorResult(resolution.error)
         if(resolution.kind === "ambiguous") return textResult(resolution.payload)
 
-        const { matches, primaryPolicy, clientName } = resolution
+        const { clientName } = resolution
+        // Bonds have no coverage records in AMS360: left out, and never a document on their own.
+        const { kept: matches, bonds } = await splitBondOnly(resolution.matches)
+        const bondPolnos = bonds.map((b) => b.polno.trim())
+        if(matches.length === 0) {
+          return textResult({
+            message: `No Pre-Renewal Review built for ${ clientName }: ${ bondPolnos.length === 1 ? `the only policy in range (${ bondPolnos[0] }) is a bond` : `every policy in range (${ bondPolnos.join(", ") }) is a bond` }, and AMS360 holds no coverage details for bonds to summarize. To include later renewals, pass a larger renewal_within_days or a specific polno.`,
+            bond_only_polnos: bondPolnos
+          })
+        }
+        const primaryPolicy = matches[0]
         const { buffer, filename, includedSections, combining, polnoLabel, coverageGaps } = await generateRiskProfile(matches, clientName)
         const token = storeDownload(buffer, filename, DOCX_MIME_TYPE)
         const downloadUrl = `${ publicBaseUrl }/downloads/${ token }`
@@ -44,6 +55,7 @@ export function registerRiskProfileTool(server: McpServer) {
             : `Built the Pre-Renewal Review for ${ clientName } (policy ${ primaryPolicy.polno }) — ${ includedSections.length } section(s) included: ${ includedSections.join(", ") }.`,
           download_url: downloadUrl,
           included_sections: includedSections,
+          ...(bondPolnos.length > 0 ? { skipped_bond_polnos: bondPolnos } : {}),
           // For the CSR, never the client: tell the user plainly which lines didn't make it in.
           ...(coverageGaps.length > 0 ? { coverage_gaps: coverageGaps, coverage_gaps_note: `Check before sending: ${ describeGaps(coverageGaps) }. These lines are on the policy in AMS360 but have no exposure section in the document.` } : {})
         })
