@@ -217,7 +217,7 @@ const PROPERTY_QUERY = `
     ) x WHERE rn = 1 AND status != 'D'
   )
   SELECT pi.piid, loc.addr1, loc.city, loc.state, loc.zip,
-    soi.subofins, cprem_320.coverage, cprem_320.ilimit1, cprem_320.deduct
+    soi.subofins, cprem_320.coverage, cprem_320.ilimit1, cprem_320.deduct, cprem_320.dedtype
   FROM cprem_320
   JOIN soi ON soi.polid = cprem_320.polid AND soi.soiid = cprem_320.attachid
   JOIN pi ON pi.polid = soi.polid AND pi.piid = soi.piid
@@ -490,6 +490,26 @@ export function numericMoney(raw: string | number | null | undefined): string {
   return cleaned !== "" && Number.isFinite(num) ? money(num) : raw.trim()
 }
 
+// afw_cprem.dedtype is free text (15 distinct values tenant-wide, 2026-09-22) and mostly says
+// nothing beyond "dollars" (Flat / Dollars / Per accident / Per claim / null). The ones that change
+// the unit: 'Percent' with a small number is a percentage deductible (e.g. 2% wind/hail). 'Percent'
+// above 100 is a fixed-point percentage with five decimals: Frankenmuth (65 in-force rows) and Grange
+// (6) store a 1% wind/hail deductible as 100000, and no other carrier or value appears above 100
+// (2026-11-19). Patrick confirmed Vaden's is 1%; it was previously printed as "$100,000", following
+// the Defatta reference document, itself a Frankenmuth policy (6757416) with the same mistake.
+// 'Hours'/'Number of Hours' is a time-element waiting period (business income, civil authority —
+// "24"), and 'Number Of Days' likewise in days. Hours values above a week are dollar amounts
+// mislabeled (seen up to 5000).
+export function formatDeductible(deduct: number | null, dedtype: string | null): string {
+  if(deduct === null || deduct === 0) return ""
+
+  const type = clean(dedtype).toLowerCase()
+  if(type === "percent") return deduct <= 100 ? `${ deduct }%` : `${ Number((deduct / 100000).toFixed(3)) }%`
+  if((type === "hours" || type === "number of hours") && deduct <= 168) return `${ deduct } hours`
+  if(type === "number of days" && deduct <= 365) return `${ deduct } days`
+  return money(deduct)
+}
+
 // afw_126shazard.classification (and a couple of similar fixed-width AMS360 text columns) come back
 // padded with trailing spaces in real data — trimmed for display.
 export function clean(value: string | null | undefined): string {
@@ -605,7 +625,7 @@ function inferMissingEquipmentDetails(rows: EquipmentItemRow[]): EquipmentItemRo
 
 type PropertyQueryRow = {
   piid: string; addr1: string | null; city: string | null; state: string | null; zip: string | null
-  subofins: string; coverage: string | null; ilimit1: number | null; deduct: number | null
+  subofins: string; coverage: string | null; ilimit1: number | null; deduct: number | null; dedtype: string | null
 }
 
 // Groups PROPERTY_QUERY's per-coverage-line rows into one row per premise/address. Building and BPP
@@ -634,17 +654,18 @@ function buildPropertyRows(rows: PropertyQueryRow[]): PropertyRow[] {
     // Distinct coverage forms across BOTH Building and BPP rows for this address, in first-seen
     // order — Causes of Loss Form/Deductible are shared columns, not split by subofins.
     const formOrder: string[] = []
-    const deductByForm = new Map<string, number>()
+    const deductByForm = new Map<string, string>()
     for(const r of groupRows) {
       const form = clean(r.coverage)
       if(!form) continue
       if(!formOrder.includes(form)) formOrder.push(form)
-      if(r.deduct !== null && !deductByForm.has(form)) deductByForm.set(form, r.deduct)
+      const formatted = formatDeductible(r.deduct, r.dedtype)
+      if(formatted && !deductByForm.has(form)) deductByForm.set(form, formatted)
     }
 
     const deductible = formOrder.length <= 1
-      ? (formOrder.length === 1 && deductByForm.has(formOrder[0]) ? money(deductByForm.get(formOrder[0])!) : "")
-      : formOrder.filter((f) => deductByForm.has(f)).map((f) => `${ money(deductByForm.get(f)!) } (${ f })`).join("; ")
+      ? (formOrder.length === 1 && deductByForm.has(formOrder[0]) ? deductByForm.get(formOrder[0])! : "")
+      : formOrder.filter((f) => deductByForm.has(f)).map((f) => `${ deductByForm.get(f)! } (${ f })`).join("; ")
 
     return {
       address,

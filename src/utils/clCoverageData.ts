@@ -1,5 +1,5 @@
 import { runReadOnlyQuery } from "../db.js"
-import { clean, formatAddress, formatLocNo, numericMoney } from "./clPolicyData.js"
+import { clean, formatAddress, formatDeductible, formatLocNo, numericMoney } from "./clPolicyData.js"
 import { money } from "./riskProfileDoc.js"
 
 export type CoverageLimitRow = { coverage: string; limit: string; deductible: string }
@@ -205,22 +205,6 @@ function joinedLimit(r: LimitColumns): string {
   return limitParts(r).filter(Boolean).join(" / ")
 }
 
-// afw_cprem.dedtype is free text (15 distinct values tenant-wide, 2026-09-22) and mostly says
-// nothing beyond "dollars" (Flat / Dollars / Per accident / Per claim / null). The ones that change
-// the unit: 'Percent' with a small number is a percentage deductible (e.g. 2% wind/hail), while a
-// large number under 'Percent' is a data-entry quirk seen on real Wind/Hail rows (100000 'Percent')
-// that the client's own reference document shows as a flat dollar amount; 'Hours'/'Number of Hours'
-// is a time-element waiting period (business income, civil authority — "24"), and 'Number Of Days'
-// likewise in days. Hours values above a week are dollar amounts mislabeled (seen up to 5000).
-function formatDeductible(deduct: number | null, dedtype: string | null): string {
-  if(deduct === null || deduct === 0) return ""
-
-  const type = clean(dedtype).toLowerCase()
-  if(type === "percent" && deduct <= 100) return `${ deduct }%`
-  if((type === "hours" || type === "number of hours") && deduct <= 168) return `${ deduct } hours`
-  if(type === "number of days" && deduct <= 365) return `${ deduct } days`
-  return money(deduct)
-}
 
 // Carrier-specific coverage codes (e.g. "WTRBN", "DPPRM", "IM001") show up in afw_cprem.coverage.
 // Their description is usually on the same row in afw_cprem.misc (14,563 of 16,987 limit-bearing
