@@ -177,6 +177,10 @@ const LOCATIONS_QUERY = `
 // 6,085/6,088 (99.95%) — the tiny remainder is a small number of policies where the same piid
 // resolves to more than one clocid across a lobid quirk (not a dedup bug); not worth engineering
 // around at that scale, per the same tolerance this file already applies elsewhere.
+// Revised 2026-11-19 (Patrick, Kreager Community Property Trust): BOP policies name their BPP subject
+// "Personal Property" (197 subjects on 116 in-force policies), which the exact-name filter dropped, so
+// the Risk Profile showed no property at all. It's read as Business Personal Property. A subject with
+// no limit on any of its cprem rows (Grange's packages) falls back to its own isubamt.
 // afw_140subofins was previously on the ETL's NOT_AVAILABLE_VIA_API blocklist because the vendor API
 // 500s when its `100percentval` column is requested — fixed and backfilled in ~/scripts/ams360-etl
 // (a separate repo) once this link was discovered; 32,716 rows now synced.
@@ -198,7 +202,7 @@ const PROPERTY_QUERY = `
         ROW_NUMBER() OVER (PARTITION BY polid, lobid, soiid ORDER BY effdate DESC) AS rn
       FROM afw_140subofins s
       WHERE polid = $1
-    ) x WHERE rn = 1 AND status != 'D' AND subofins IN ('Building', 'Business Personal Property')
+    ) x WHERE rn = 1 AND status != 'D' AND TRIM(subofins) IN ('Building', 'Business Personal Property', 'Personal Property')
   ),
   pi AS (
     SELECT * FROM (
@@ -216,8 +220,9 @@ const PROPERTY_QUERY = `
       WHERE polid = $1
     ) x WHERE rn = 1 AND status != 'D'
   )
-  SELECT pi.piid, loc.addr1, loc.city, loc.state, loc.zip,
-    soi.subofins, cprem_320.coverage, cprem_320.ilimit1, cprem_320.deduct, cprem_320.dedtype
+  SELECT pi.piid, loc.addr1, loc.city, loc.state, loc.zip, soi.soiid, soi.isubamt,
+    CASE WHEN TRIM(soi.subofins) = 'Personal Property' THEN 'Business Personal Property' ELSE TRIM(soi.subofins) END AS subofins,
+    cprem_320.coverage, cprem_320.ilimit1, cprem_320.deduct, cprem_320.dedtype
   FROM cprem_320
   JOIN soi ON soi.polid = cprem_320.polid AND soi.soiid = cprem_320.attachid
   JOIN pi ON pi.polid = soi.polid AND pi.piid = soi.piid
@@ -625,6 +630,7 @@ function inferMissingEquipmentDetails(rows: EquipmentItemRow[]): EquipmentItemRo
 
 type PropertyQueryRow = {
   piid: string; addr1: string | null; city: string | null; state: string | null; zip: string | null
+  soiid: string; isubamt: string | number | null
   subofins: string; coverage: string | null; ilimit1: number | null; deduct: number | null; dedtype: string | null
 }
 
@@ -647,8 +653,15 @@ function buildPropertyRows(rows: PropertyQueryRow[]): PropertyRow[] {
     const address = formatAddress(first.addr1, first.city, first.state, first.zip)
 
     const sumLimit = (subofins: string) => {
-      const matching = groupRows.filter((r) => r.subofins === subofins && r.ilimit1 !== null)
-      return matching.length === 0 ? "N/A" : money(matching.reduce((sum, r) => sum + (r.ilimit1 ?? 0), 0))
+      const subjectRows = groupRows.filter((r) => r.subofins === subofins)
+      const withLimit = subjectRows.filter((r) => r.ilimit1 !== null)
+      // Subjects whose cprem rows carry no limit at all use the subject's own amount of insurance.
+      const limitless = new Map<string, number>()
+      for(const r of subjectRows) {
+        if(!withLimit.some((w) => w.soiid === r.soiid) && r.isubamt !== null && Number(r.isubamt) > 0) limitless.set(r.soiid, Number(r.isubamt))
+      }
+      if(withLimit.length === 0 && limitless.size === 0) return "N/A"
+      return money(withLimit.reduce((sum, r) => sum + (r.ilimit1 ?? 0), 0) + [...limitless.values()].reduce((a, b) => a + b, 0))
     }
 
     // Distinct coverage forms across BOTH Building and BPP rows for this address, in first-seen
