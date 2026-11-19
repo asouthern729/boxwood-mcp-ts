@@ -1,10 +1,20 @@
 import path from "node:path"
 
-export const allowedHosts = process.env.NODE_ENV === "production" ?
-  ["mcp.boxwoodins.com"] :
-  ["127.0.0.1"]
+// Hostnames this deployment answers to (Host-header check in createMcpExpressApp, and the only
+// origins /logout will send a browser back to). ALLOWED_HOSTS in .env, comma-separated, so one image
+// can run at mcp.boxwoodins.com or build.tyneside.io; unset keeps the old per-NODE_ENV default.
+const DEFAULT_HOSTS = process.env.NODE_ENV === "production" ? ["mcp.boxwoodins.com"] : ["127.0.0.1"]
 
-export const publicBaseUrl = `https://${ allowedHosts[0] }`
+const configuredHosts = (process.env.ALLOWED_HOSTS ?? "")
+  .split(",")
+  .map((h) => h.trim().toLowerCase())
+  .filter(Boolean)
+
+export const allowedHosts = configuredHosts.length > 0 ? configuredHosts : DEFAULT_HOSTS
+
+// Public origin used for the OAuth callback, OAuth metadata and download links. PUBLIC_BASE_URL in
+// .env overrides it; otherwise the first allowed host over https, as before.
+export const publicBaseUrl = (process.env.PUBLIC_BASE_URL || `https://${ allowedHosts[0] }`).replace(/\/+$/, "")
 
 // Where generated documents, their manifests and uploaded files live: OUTPUT_ROOT in .env
 // (production: /var/lib/boxwood-mcp/output, outside the checkout so a re-clone or git clean can't

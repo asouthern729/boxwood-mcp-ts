@@ -31,6 +31,17 @@ export function buildAuth0AuthorizeUrl(state: string) {
   return url.toString()
 }
 
+// Ends the Auth0 session so the next /authorize asks for credentials again instead of signing the
+// user straight back in. returnTo must also be listed under the Auth0 app's Allowed Logout URLs.
+export function buildAuth0LogoutUrl(returnTo: string) {
+  const url = new URL(`https://${ AUTH0_TENANT_DOMAIN }/v2/logout`)
+
+  url.searchParams.set("client_id", AUTH0_CLIENT_ID)
+  url.searchParams.set("returnTo", returnTo)
+
+  return url.toString()
+}
+
 export async function exchangeCodeForToken(code: string) {
   const response = await fetch(`https://${ AUTH0_TENANT_DOMAIN }/oauth/token`, {
     method: "POST",

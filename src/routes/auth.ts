@@ -1,6 +1,8 @@
 import express, { Router } from "express"
+import { allowedHosts } from "../config/config.js"
 import {
   buildAuth0AuthorizeUrl,
+  buildAuth0LogoutUrl,
   exchangeCodeForToken,
   fetchUserInfo,
   verifyCodeChallenge
@@ -105,6 +107,35 @@ router.get("/callback", async (req, res) => {
     logger.error({ err: error }, "Auth0 code exchange failed")
     res.status(502).json({ error: "server_error", error_description: "Failed to exchange code with Auth0" })
   }
+})
+
+// Only send the browser back to one of this deployment's own hosts, so /logout can't be used as an
+// open redirect. Matched on origin, not the registered redirect URIs: the tools app clears its
+// client_id before calling this, and it returns users to its Home page rather than /login.
+function isAllowedReturnTo(raw: string): boolean {
+  let url: URL
+
+  try {
+    url = new URL(raw)
+  } catch {
+    return false
+  }
+
+  const secure = url.protocol === "https:" || (url.protocol === "http:" && process.env.NODE_ENV !== "production")
+
+  return secure && allowedHosts.includes(url.hostname.toLowerCase())
+}
+
+router.get("/logout", (req, res) => {
+  const returnTo = String(req.query.return_to ?? "")
+
+  if(!isAllowedReturnTo(returnTo)) {
+    logger.warn({ returnTo }, "GET /logout: return_to not on an allowed host")
+    res.status(400).json({ error: "invalid_request", error_description: "return_to must be a URL on this site" })
+    return
+  }
+
+  res.redirect(buildAuth0LogoutUrl(returnTo))
 })
 
 router.post("/token", express.urlencoded({ extended: false }), (req, res) => {
