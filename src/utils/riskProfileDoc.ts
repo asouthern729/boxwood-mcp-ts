@@ -23,7 +23,9 @@ export const LOGO_PATH = path.join(import.meta.dirname, "..", "..", "assets", "b
 
 export function money(v: number | string | null | undefined): string {
   if(v === null || v === undefined || v === "") return ""
-  if(typeof v === "string") return v
+  // node-postgres returns bigint/numeric columns as strings: a bare amount ("500000") still gets
+  // "$" and commas, while text labels ("Included", "Statutory", "$1,000") pass through unchanged.
+  if(typeof v === "string") return /^-?\d+(\.\d+)?$/.test(v.trim()) ? `$${ Number(v).toLocaleString("en-US") }` : v
 
   return `$${ Number(v).toLocaleString("en-US") }`
 }

@@ -442,6 +442,21 @@ function premBasisLabel(code: string | null): string {
   return PREM_BASIS_LABELS[trimmed] ?? trimmed
 }
 
+// Patrick (2026-11-18): only sales, cost and payroll exposures are dollar amounts; area, units,
+// admissions and "other" are counts and must not carry a "$". Same split clQuoteMerge.ts applies to
+// exposures read from an uploaded quote.
+const DOLLAR_PREM_BASES = new Set(["C", "S", "P"])
+
+function formatExposure(raw: string | null, prembasis: string | null): string {
+  if(DOLLAR_PREM_BASES.has(clean(prembasis))) return numericMoney(raw)
+  if(raw === null || raw.trim() === "") return ""
+
+  const cleaned = raw.replace(/[$,]/g, "").trim()
+  const num = Number(cleaned)
+
+  return cleaned !== "" && Number.isFinite(num) ? num.toLocaleString("en-US") : raw.trim()
+}
+
 // Some Scheduled Items rows have manufacturer/model missing from AMS360's own dedicated columns
 // even though the same information is right there in equipdesc's free text (e.g. "2024 Land Pride
 // AP-HD74LLC Bucket S/N:2257570" with manufacturer/model both null) — confirmed a real data-entry
@@ -607,7 +622,7 @@ export async function fetchPolicyData(policy: ResolvedPolicy): Promise<PolicyDat
       classCode: clean(g.classcode),
       classification: clean(g.gl_description) || clean(g.classification),
       basis: premBasisLabel(g.prembasis),
-      exposure: numericMoney(g.exposure)
+      exposure: formatExposure(g.exposure, g.prembasis)
     })),
     equipmentBlanket: equipmentBlanketRows.length > 0
       ? {

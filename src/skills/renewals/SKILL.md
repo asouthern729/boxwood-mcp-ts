@@ -153,7 +153,7 @@ Identical inputs and policy resolution to `risk_profile` (`customer_name`, `poln
 
 ### Layout
 
-Cover page (client, mailing address, policy period, Prepared By = the producer) → Executive Summary (template wording, Named Insureds, Location Schedule) → one section per line of business, each on its own page with carrier, key facts and tables → Bind Conditions & Notes (only from an uploaded quote) → stand-alone add-ons (only from a quote) → Why Boxwood Insurance Group → Your Service Team (producer, account manager, agency) → footer. Each policy's line gets its own section naming that policy's carrier; the same line on two policies is told apart by policy number.
+Cover page (client, mailing address, policy period, Prepared By = the producer) → Executive Summary (template wording, Named Insureds, Location Schedule) → one section per line of business, each on its own page with carrier, key facts and tables → Bind Conditions & Notes (only from an uploaded quote) → stand-alone add-ons (only from a quote) → Your Service Team (producer, account manager, agency) → footer. Each policy's line gets its own section naming that policy's carrier; the same line on two policies is told apart by policy number.
 
 - **Property** — Covered Causes of Loss, Coinsurance, Valuation, Deductible and peril (wind/hail) deductibles as key facts; "Coverage Limits by Location" one row per location/building (Building / Business Personal Property / Business Income); other subjects and policy-level coverages in "Additional Property Coverages".
 - **General Liability** — standard limits as key facts; other GL-line coverages (Employee Benefits, cyber or EPLI endorsements, ...) in "Additional Liability Coverages"; the classification & exposure schedule.

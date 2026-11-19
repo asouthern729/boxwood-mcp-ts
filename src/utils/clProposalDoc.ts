@@ -83,7 +83,9 @@ export type ClProposalInput = {
   bindConditions: { items: string[]; comment?: string }
   premiumSummary?: ProposalPremiumSummary
   specialtyAddOns: ProposalSpecialtyAddOn[]
-  whyBoxwood: string[]
+  // Proposal Builder only. The Renewal Summary omits it (Patrick, 2026-11-18) and closes on the
+  // service team alone.
+  whyBoxwood?: string[]
   serviceTeam: ServiceTeamMember[]
 }
 
@@ -226,18 +228,27 @@ function specialtyAddOn(addOn: ProposalSpecialtyAddOn, comments: DocComment[]): 
   ]
 }
 
-// Patrick (2026-10-08): Why Boxwood always closes the document on a page by itself. It gets its own
-// section (so it starts a new page) and that section alone carries footerStrip as its page footer.
-function whyBoxwood(input: ClProposalInput): Block[] {
+// Patrick (2026-10-08): the closing page sits on a page by itself. It gets its own section (so it
+// starts a new page) and that section alone carries footerStrip as its page footer. With Why Boxwood
+// text (Proposal Builder) it leads with that; without it (Renewal Summary, Patrick 2026-11-18: remove
+// the Why Boxwood page) the page is just the service team under its own banner.
+const SERVICE_TEAM_HEADERS = ["Role", "Name", "Phone", "Email"]
+const SERVICE_TEAM_FRACTIONS = [0.24, 0.26, 0.18, 0.32]
+
+function closingPage(input: ClProposalInput): Block[] {
+  const teamRows = input.serviceTeam.map((m) => [m.role, m.name, m.phone, m.email])
+
+  if(input.whyBoxwood && input.whyBoxwood.length > 0) {
+    return [
+      ...banner("Why Boxwood Insurance Group", { withLogo: true }),
+      ...input.whyBoxwood.map(plain),
+      ...tableBlocks({ title: "Your Service Team", headers: SERVICE_TEAM_HEADERS, rows: teamRows, fractions: SERVICE_TEAM_FRACTIONS })
+    ]
+  }
+
   return [
-    ...banner("Why Boxwood Insurance Group", { withLogo: true }),
-    ...input.whyBoxwood.map(plain),
-    ...tableBlocks({
-      title: "Your Service Team",
-      headers: ["Role", "Name", "Phone", "Email"],
-      rows: input.serviceTeam.map((m) => [m.role, m.name, m.phone, m.email]),
-      fractions: [0.24, 0.26, 0.18, 0.32]
-    })
+    ...banner("Your Service Team", { withLogo: true }),
+    ...(teamRows.length > 0 ? [dataTable(SERVICE_TEAM_HEADERS, teamRows, SERVICE_TEAM_FRACTIONS)] : [])
   ]
 }
 
@@ -293,7 +304,7 @@ export async function buildClProposalDoc(input: ClProposalInput): Promise<{ buff
     }, {
       properties: { type: SectionType.NEXT_PAGE, page: pageProperties },
       footers: { default: new Footer({ children: footerStrip() }) },
-      children: whyBoxwood(input)
+      children: closingPage(input)
     }]
   })
 
@@ -303,7 +314,7 @@ export async function buildClProposalDoc(input: ClProposalInput): Promise<{ buff
     ...(input.premiumSummary ? ["Premium Summary"] : []),
     ...(input.bindConditions.items.length > 0 ? ["Bind Conditions & Notes"] : []),
     ...input.specialtyAddOns.map((a) => a.title),
-    "Why Boxwood Insurance Group"
+    input.whyBoxwood && input.whyBoxwood.length > 0 ? "Why Boxwood Insurance Group" : "Your Service Team"
   ]
 
   return { buffer: Buffer.from(await Packer.toBuffer(doc) as unknown as Uint8Array), includedSections }

@@ -215,13 +215,30 @@ function quoteExposures(line: QuoteLineExtraction): { tables: LineTable[]; table
   return { tables: [...extracted, ...fromFacts.tables.filter((t) => !extracted.some((e) => e.title === t.title))], tabled: fromFacts.tabled }
 }
 
+// Quotes often print per-location limits as bare numbers ("500,000"), and extraction copies them as
+// printed. Patrick (2026-11-18): building and BPP values must carry "$" like the AMS360-built table.
+// Only bare amounts in limit columns are touched; identifier/address/percentage columns and any
+// cell that is already formatted or is a label ("Included", "—") are left alone.
+const NON_LIMIT_HEADER = /loc|bldg|building\s*(no|#)|address|zip|year|no\.|number|#|%|percent|occupancy|construction/i
+const BARE_AMOUNT = /^\d{1,3}(,\d{3})+(\.\d+)?$|^\d{4,}(\.\d+)?$/
+
+function dollarizeLimitCells(headers: string[], rows: string[][]): string[][] {
+  const limitColumn = headers.map((h) => !NON_LIMIT_HEADER.test(h))
+  return rows.map((row) => row.map((cell, i) =>
+    limitColumn[i] && BARE_AMOUNT.test(cell) ? `$${ Number(cell.replace(/,/g, "")).toLocaleString("en-US") }` : cell
+  ))
+}
+
 // Per-location tables first (they carry most of a property quote), then the policy-wide limits.
 // Exposure tables are left to quoteExposures.
 function quoteLimitsTable(line: QuoteLineExtraction): LineTable[] {
   const cells = (text: string) => text.split("|").map((cell) => cell.trim())
   const schedules: LineTable[] = (line.schedules ?? [])
     .filter((s) => s.headers.trim() !== "" && s.rows.length > 0 && !EXPOSURE_TITLE.test(s.title))
-    .map((s) => ({ kind: "limits", title: s.title, headers: cells(s.headers), rows: s.rows.map(cells) }))
+    .map((s) => {
+      const headers = cells(s.headers)
+      return { kind: "limits", title: s.title, headers, rows: dollarizeLimitCells(headers, s.rows.map(cells)) }
+    })
   if(line.limits.length === 0) return schedules
   const withDeductible = line.limits.some((l) => l.deductible)
   return [...schedules, {

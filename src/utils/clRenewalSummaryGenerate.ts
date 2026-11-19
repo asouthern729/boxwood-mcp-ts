@@ -9,7 +9,7 @@ import {
 import { LINE_SLOTS, fetchPolicyCoverageData } from "./clCoverageData.js"
 import { buildClProposalDoc, type ServiceTeamMember } from "./clProposalDoc.js"
 import { completeUmbrellas, longDate, policyLines, type SlotLine } from "./clProposalLines.js"
-import { executiveSummary, whyBoxwood } from "./clProposalText.js"
+import { executiveSummary } from "./clProposalText.js"
 import { withClRenewalTerms } from "./clRenewalTerms.js"
 
 export type GeneratedClRenewalSummary = {
@@ -191,7 +191,6 @@ export async function buildClRenewalSummary(
     lines,
     bindConditions: merged.bindConditions,
     specialtyAddOns: merged.specialtyAddOns,
-    whyBoxwood: whyBoxwood(narrativeFacts),
     serviceTeam
   })
 
