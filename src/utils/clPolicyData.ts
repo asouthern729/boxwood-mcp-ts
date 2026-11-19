@@ -515,14 +515,20 @@ function premBasisLabel(code: string | null): string {
 // exposures read from an uploaded quote.
 const DOLLAR_PREM_BASES = new Set(["C", "S", "P"])
 
+// A zero exposure is an "if any" class: listed so the work is covered if it happens, with nothing
+// rated (Willow Branch Partners' janitorial and carpentry classes, 2026-11-19). Shown as "If Any",
+// the same wording AMS360 uses on Workers' Comp, rather than a "$0" that reads like an error.
 function formatExposure(raw: string | null, prembasis: string | null): string {
-  if(DOLLAR_PREM_BASES.has(clean(prembasis))) return numericMoney(raw)
   if(raw === null || raw.trim() === "") return ""
 
   const cleaned = raw.replace(/[$,]/g, "").trim()
   const num = Number(cleaned)
+  const numeric = cleaned !== "" && Number.isFinite(num)
 
-  return cleaned !== "" && Number.isFinite(num) ? num.toLocaleString("en-US") : raw.trim()
+  if(numeric && num === 0) return "If Any"
+  if(DOLLAR_PREM_BASES.has(clean(prembasis))) return numericMoney(raw)
+
+  return numeric ? num.toLocaleString("en-US") : raw.trim()
 }
 
 // Some Scheduled Items rows have manufacturer/model missing from AMS360's own dedicated columns

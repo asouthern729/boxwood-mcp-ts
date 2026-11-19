@@ -44,7 +44,7 @@ export type HiredNonOwnedRow = { exposure: string; coverage: string; limit: stri
 const COVERAGE_QUERY = `
   SELECT lob.lineofbus, lob.descriptionlobs, cp.attachtype, cp.covlevel, cp.coverage,
     cp.vlimit1, cp.ilimit1, cp.vlimit2, cp.ilimit2, cp.vlimit3, cp.ilimit3, cp.vlimit4, cp.ilimit4,
-    cp.deduct, cp.dedtype
+    cp.deduct, cp.dedtype, cp.misc
   FROM (
     SELECT cp.*, ROW_NUMBER() OVER (PARTITION BY cp.polid, cp.lobid, cp.cpremid ORDER BY cp.effdate DESC) AS rn
     FROM afw_cprem cp
@@ -109,7 +109,7 @@ const PROPERTY_SUBJECT_QUERY = `
   )
   SELECT pi.piid, soi.soiid, loc.locno, bld.bldgno, loc.addr1, loc.city, loc.state, loc.zip,
     soi.subofins, soi.isubamt, COALESCE(soi.valuation, cprem_320.valuation) AS valuation,
-    cprem_320.coverage, cprem_320.ilimit1, cprem_320.vlimit1, cprem_320.deduct, cprem_320.dedtype, cprem_320.coinspct
+    cprem_320.coverage, cprem_320.misc, cprem_320.ilimit1, cprem_320.vlimit1, cprem_320.deduct, cprem_320.dedtype, cprem_320.coinspct
   FROM cprem_320
   JOIN soi ON soi.polid = cprem_320.polid AND soi.soiid = cprem_320.attachid
   JOIN pi ON pi.polid = soi.polid AND pi.piid = soi.piid
@@ -172,12 +172,13 @@ type LimitColumns = {
 
 type CoverageQueryRow = LimitColumns & {
   lineofbus: string | null; descriptionlobs: string | null; attachtype: number | null; covlevel: string | null; coverage: string | null
+  misc: string | null
 }
 
 type PropertySubjectQueryRow = {
   piid: string; soiid: string; locno: string | null; bldgno: string | null; coinspct: string | null; addr1: string | null; city: string | null; state: string | null; zip: string | null
   subofins: string | null; isubamt: number | null; valuation: string | null
-  coverage: string | null; ilimit1: number | null; vlimit1: string | null; deduct: number | null; dedtype: string | null
+  coverage: string | null; misc: string | null; ilimit1: number | null; vlimit1: string | null; deduct: number | null; dedtype: string | null
 }
 
 type VehicleCoverageQueryRow = LimitColumns & {
@@ -221,14 +222,24 @@ function formatDeductible(deduct: number | null, dedtype: string | null): string
   return money(deduct)
 }
 
-// Carrier-specific coverage codes (e.g. "WTRBN", "DPPRM") show up in afw_cprem.coverage with no
-// description anywhere in the synced schema (checked afw_prcode and every *cov*/*code* table,
-// 2026-09-22). They're kept in the document as-is — dropping them would hide a real limit — but
-// collected so the tool can tell the CSR which lines to relabel by hand.
+// Carrier-specific coverage codes (e.g. "WTRBN", "DPPRM", "IM001") show up in afw_cprem.coverage.
+// Their description is usually on the same row in afw_cprem.misc (14,563 of 16,987 limit-bearing
+// code rows, 2026-11-19: "WWPOP" -> "Worldwide Property Off Premise", Cincinnati's "IM001" ->
+// "Modular Building Serial # FSSI-9617 ..."), which coverageLabel uses for display. Codes with no
+// misc text are kept as-is — dropping them would hide a real limit — and collected so the tool can
+// tell the CSR which lines to relabel by hand.
 const CARRIER_CODE_PATTERN = /^[A-Z0-9]{4,6}$/
 
 function isCarrierCode(coverage: string): boolean {
   return CARRIER_CODE_PATTERN.test(coverage)
+}
+
+// Display label only: pattern checks (cause of loss, peril, umbrella, EL) keep testing the raw
+// coverage so their classification doesn't shift.
+function coverageLabel(coverage: string | null, misc: string | null): string {
+  const code = clean(coverage)
+  const description = clean(misc).replace(/[\s,;]+$/, "")
+  return isCarrierCode(code) && description ? description : code
 }
 
 // Keyed on the rendered values, not cpremid — AMS360 carries several identical rows for the same
@@ -305,7 +316,7 @@ function umbrellaRows(r: CoverageQueryRow): CoverageLimitRow[] {
 }
 
 function genericRow(r: CoverageQueryRow): CoverageLimitRow {
-  return { coverage: clean(r.coverage), limit: joinedLimit(r), deductible: formatDeductible(r.deduct, r.dedtype) }
+  return { coverage: coverageLabel(r.coverage, r.misc), limit: joinedLimit(r), deductible: formatDeductible(r.deduct, r.dedtype) }
 }
 
 // Which proposal section each AMS360 line of business fills, in the skill's section order
@@ -533,7 +544,7 @@ function buildPropertySubjectRows(rows: PropertySubjectQueryRow[]): PropertySubj
 
     for(const r of additionalRows) {
       pending.push({
-        piid: first.piid, ...place, subject: clean(r.coverage),
+        piid: first.piid, ...place, subject: coverageLabel(r.coverage, r.misc),
         limit: limitPart(r.ilimit1, r.vlimit1), valuation: "", causeOfLoss: "", coinsurance: "",
         deductible: formatDeductible(r.deduct, r.dedtype), perilDeductibles: [], isAdditional: true
       })
