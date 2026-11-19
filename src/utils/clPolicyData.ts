@@ -123,7 +123,7 @@ const NAMED_INSUREDS_QUERY = `
   SELECT t.namedins
   FROM (
     SELECT t.namedins, t.status,
-      ROW_NUMBER() OVER (PARTITION BY t.polid, t.cniid ORDER BY t.effdate DESC) AS rn
+      ROW_NUMBER() OVER (PARTITION BY t.polid, t.cniid ORDER BY t.effdate DESC, t.changeddate DESC NULLS LAST) AS rn
     FROM afw_cnamedinsured t
     WHERE t.polid = $1
   ) t
@@ -149,12 +149,12 @@ const LOCATIONS_QUERY = `
   SELECT x.locno, x.addr1, x.addr2, x.city, x.state, x.zip
   FROM (
     SELECT active.*,
-      ROW_NUMBER() OVER (PARTITION BY active.polid, active.locno ORDER BY active.effdate DESC) AS locno_rn
+      ROW_NUMBER() OVER (PARTITION BY active.polid, active.locno ORDER BY active.effdate DESC, active.changeddate DESC NULLS LAST) AS locno_rn
     FROM (
-      SELECT t.polid, t.locno, t.addr1, t.addr2, t.city, t.state, t.zip, t.effdate
+      SELECT t.polid, t.locno, t.addr1, t.addr2, t.city, t.state, t.zip, t.effdate, t.changeddate
       FROM (
         SELECT t.*,
-          ROW_NUMBER() OVER (PARTITION BY t.polid, t.clocid ORDER BY t.effdate DESC) AS rn
+          ROW_NUMBER() OVER (PARTITION BY t.polid, t.clocid ORDER BY t.effdate DESC, t.changeddate DESC NULLS LAST) AS rn
         FROM afw_clocation t
         WHERE t.polid = $1
       ) t
@@ -191,7 +191,7 @@ const PROPERTY_QUERY = `
   WITH cprem_320 AS (
     SELECT * FROM (
       SELECT cp.*,
-        ROW_NUMBER() OVER (PARTITION BY polid, lobid, cpremid ORDER BY effdate DESC) AS rn
+        ROW_NUMBER() OVER (PARTITION BY polid, lobid, cpremid ORDER BY effdate DESC, changeddate DESC NULLS LAST) AS rn
       FROM afw_cprem cp
       WHERE attachtype = 320 AND polid = $1
     ) x WHERE rn = 1 AND status != 'D'
@@ -199,7 +199,7 @@ const PROPERTY_QUERY = `
   soi AS (
     SELECT * FROM (
       SELECT s.*,
-        ROW_NUMBER() OVER (PARTITION BY polid, lobid, soiid ORDER BY effdate DESC) AS rn
+        ROW_NUMBER() OVER (PARTITION BY polid, lobid, soiid ORDER BY effdate DESC, changeddate DESC NULLS LAST) AS rn
       FROM afw_140subofins s
       WHERE polid = $1
     ) x WHERE rn = 1 AND status != 'D' AND TRIM(subofins) IN ('Building', 'Business Personal Property', 'Personal Property')
@@ -207,7 +207,7 @@ const PROPERTY_QUERY = `
   pi AS (
     SELECT * FROM (
       SELECT p.*,
-        ROW_NUMBER() OVER (PARTITION BY polid, lobid, piid ORDER BY effdate DESC) AS rn
+        ROW_NUMBER() OVER (PARTITION BY polid, lobid, piid ORDER BY effdate DESC, changeddate DESC NULLS LAST) AS rn
       FROM afw_140premiseinfo p
       WHERE polid = $1
     ) x WHERE rn = 1 AND status != 'D'
@@ -215,7 +215,7 @@ const PROPERTY_QUERY = `
   loc AS (
     SELECT * FROM (
       SELECT c.*,
-        ROW_NUMBER() OVER (PARTITION BY polid, clocid ORDER BY effdate DESC) AS rn
+        ROW_NUMBER() OVER (PARTITION BY polid, clocid ORDER BY effdate DESC, changeddate DESC NULLS LAST) AS rn
       FROM afw_clocation c
       WHERE polid = $1
     ) x WHERE rn = 1 AND status != 'D'
@@ -248,7 +248,7 @@ const GL_EXPOSURE_QUERY = `
     loc.locno, loc.addr1, loc.city, loc.state, loc.zip, gcc.description AS gl_description
   FROM (
     SELECT t.clocid, t.classcode, t.classification, t.prembasis, t.exposure, t.status,
-      ROW_NUMBER() OVER (PARTITION BY t.polid, t.lobid, t.shazid ORDER BY t.effdate DESC) AS rn
+      ROW_NUMBER() OVER (PARTITION BY t.polid, t.lobid, t.shazid ORDER BY t.effdate DESC, t.changeddate DESC NULLS LAST) AS rn
     FROM afw_126shazard t
     WHERE t.polid = $1
   ) t
@@ -256,7 +256,7 @@ const GL_EXPOSURE_QUERY = `
     SELECT c.locno, c.addr1, c.city, c.state, c.zip
     FROM afw_clocation c
     WHERE c.polid = $1 AND c.clocid = t.clocid AND c.status != 'D'
-    ORDER BY c.effdate DESC LIMIT 1
+    ORDER BY c.effdate DESC, c.changeddate DESC NULLS LAST LIMIT 1
   ) loc ON true
   LEFT JOIN gl_classification_code gcc ON gcc.classcode = t.classcode
   WHERE t.rn = 1 AND t.status != 'D'
@@ -266,6 +266,12 @@ const GL_EXPOSURE_QUERY = `
 // 146equipsummary/146schedequip both key on a composite (polid, lobid, imefid, imesumid[, imseid])
 // rather than a single own id — the PARTITION BY below must cover every part of that key or rows
 // under-dedupe (confirmed against the live schema while planning this tool).
+// Exception, 2026-11-19 (Patrick, Crossfire Development LLC): the blanket summary is grouped WITHOUT
+// lobid. A policy change can re-file the same imesumid under a new lobid, leaving a live latest row
+// under each (12 summaries tenant-wide, 3 with two live versions). Crossfire's 4/24 change put
+// $714,421 under the old lobid at 4:30 PM, then $546,421 (what AMS360 shows) under a new lobid at
+// 6:33 PM; keyed with lobid, both survived and the older one won. imesumid is a GUID, so the same
+// id under two lobids is one summary; the most recently entered version (changeddate) wins.
 //
 // Client-reported 2026-09-15 (Defatta Custom Homes LLC): the Blanket Summary section was missing
 // Covered Location, Scheduled/Unscheduled, Coverage, and Deductible — all present on the client's
@@ -288,7 +294,7 @@ const EQUIPMENT_BLANKET_QUERY = `
     loc.addr1, loc.city, loc.state, loc.zip, prem.coverage, prem.deduct
   FROM (
     SELECT t.category, t.totalitems, t.amtofins, t.schedulecode, t.imlocid, t.cpremid, t.status,
-      ROW_NUMBER() OVER (PARTITION BY t.polid, t.lobid, t.imefid, t.imesumid ORDER BY t.effdate DESC) AS rn
+      ROW_NUMBER() OVER (PARTITION BY t.polid, t.imefid, t.imesumid ORDER BY t.effdate DESC, t.changeddate DESC NULLS LAST) AS rn
     FROM afw_146equipsummary t
     WHERE t.polid = $1
   ) t
@@ -297,7 +303,7 @@ const EQUIPMENT_BLANKET_QUERY = `
     SELECT COALESCE(il.addr1, cl.addr1) AS addr1, COALESCE(il.city, cl.city) AS city,
       COALESCE(il.state, cl.state) AS state, COALESCE(il.zip, cl.zip) AS zip
     FROM (
-      SELECT il.*, ROW_NUMBER() OVER (PARTITION BY il.polid, il.lobid, il.imlocid ORDER BY il.effdate DESC) AS rn
+      SELECT il.*, ROW_NUMBER() OVER (PARTITION BY il.polid, il.lobid, il.imlocid ORDER BY il.effdate DESC, il.changeddate DESC NULLS LAST) AS rn
       FROM afw_146locations il
       WHERE il.polid = $1 AND il.imlocid = t.imlocid
     ) il
@@ -308,7 +314,7 @@ const EQUIPMENT_BLANKET_QUERY = `
   LEFT JOIN LATERAL (
     SELECT cp.coverage, cp.deduct
     FROM (
-      SELECT cp.*, ROW_NUMBER() OVER (PARTITION BY cp.polid, cp.lobid, cp.cpremid ORDER BY cp.effdate DESC) AS rn
+      SELECT cp.*, ROW_NUMBER() OVER (PARTITION BY cp.polid, cp.lobid, cp.cpremid ORDER BY cp.effdate DESC, cp.changeddate DESC NULLS LAST) AS rn
       FROM afw_cprem cp
       WHERE cp.polid = $1 AND cp.cpremid = t.cpremid
     ) cp
@@ -330,7 +336,7 @@ const EQUIPMENT_ITEMS_QUERY = `
   SELECT t.equipno, t.manufacturer, t.model, t.equipdesc, t.serialno, t.iinsamt
   FROM (
     SELECT t.equipno, t.manufacturer, t.model, t.equipdesc, t.serialno, t.iinsamt, t.status,
-      ROW_NUMBER() OVER (PARTITION BY t.polid, t.lobid, t.imefid, t.imesumid, t.imseid ORDER BY t.effdate DESC) AS rn
+      ROW_NUMBER() OVER (PARTITION BY t.polid, t.lobid, t.imefid, t.imesumid, t.imseid ORDER BY t.effdate DESC, t.changeddate DESC NULLS LAST) AS rn
     FROM afw_146schedequip t
     WHERE t.polid = $1
   ) t
@@ -342,7 +348,7 @@ const VEHICLES_QUERY = `
   SELECT t.vehno, t.vehyear, t.make, t.model, t.vin
   FROM (
     SELECT t.vehno, t.vehyear, t.make, t.model, t.vin, t.status,
-      ROW_NUMBER() OVER (PARTITION BY t.polid, t.lobid, t.vehdid ORDER BY t.effdate DESC) AS rn
+      ROW_NUMBER() OVER (PARTITION BY t.polid, t.lobid, t.vehdid ORDER BY t.effdate DESC, t.changeddate DESC NULLS LAST) AS rn
     FROM afw_127vehicle t
     WHERE t.polid = $1
   ) t
@@ -363,7 +369,7 @@ const DRIVERS_QUERY = `
   SELECT t.driverno, t.name, t.licensestate
   FROM (
     SELECT t.driverno, t.name, t.licensestate, t.status,
-      ROW_NUMBER() OVER (PARTITION BY t.polid, t.lobid, t.drivid ORDER BY t.effdate DESC) AS rn
+      ROW_NUMBER() OVER (PARTITION BY t.polid, t.lobid, t.drivid ORDER BY t.effdate DESC, t.changeddate DESC NULLS LAST) AS rn
     FROM afw_127driver t
     WHERE t.polid = $1
   ) t
@@ -378,7 +384,7 @@ const WC_EXPOSURE_QUERY = `
   SELECT t.ratingclasscode, t.categories, t.vestannremun, t.iestannremun
   FROM (
     SELECT t.ratingclasscode, t.categories, t.vestannremun, t.iestannremun, t.status,
-      ROW_NUMBER() OVER (PARTITION BY t.polid, t.lobid, t.wratid ORDER BY t.effdate DESC) AS rn
+      ROW_NUMBER() OVER (PARTITION BY t.polid, t.lobid, t.wratid ORDER BY t.effdate DESC, t.changeddate DESC NULLS LAST) AS rn
     FROM afw_130rating t
     WHERE t.polid = $1
   ) t

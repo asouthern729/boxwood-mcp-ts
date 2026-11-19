@@ -46,7 +46,7 @@ const COVERAGE_QUERY = `
     cp.vlimit1, cp.ilimit1, cp.vlimit2, cp.ilimit2, cp.vlimit3, cp.ilimit3, cp.vlimit4, cp.ilimit4,
     cp.deduct, cp.dedtype, cp.misc
   FROM (
-    SELECT cp.*, ROW_NUMBER() OVER (PARTITION BY cp.polid, cp.lobid, cp.cpremid ORDER BY cp.effdate DESC) AS rn
+    SELECT cp.*, ROW_NUMBER() OVER (PARTITION BY cp.polid, cp.lobid, cp.cpremid ORDER BY cp.effdate DESC, cp.changeddate DESC NULLS LAST) AS rn
     FROM afw_cprem cp
     WHERE cp.polid = $1
   ) cp
@@ -70,7 +70,7 @@ const PROPERTY_SUBJECT_QUERY = `
   WITH cprem_320 AS (
     SELECT * FROM (
       SELECT cp.*,
-        ROW_NUMBER() OVER (PARTITION BY polid, lobid, cpremid ORDER BY effdate DESC) AS rn
+        ROW_NUMBER() OVER (PARTITION BY polid, lobid, cpremid ORDER BY effdate DESC, changeddate DESC NULLS LAST) AS rn
       FROM afw_cprem cp
       WHERE attachtype = 320 AND polid = $1
     ) x WHERE rn = 1 AND status != 'D'
@@ -78,7 +78,7 @@ const PROPERTY_SUBJECT_QUERY = `
   soi AS (
     SELECT * FROM (
       SELECT s.*,
-        ROW_NUMBER() OVER (PARTITION BY polid, lobid, soiid ORDER BY effdate DESC) AS rn
+        ROW_NUMBER() OVER (PARTITION BY polid, lobid, soiid ORDER BY effdate DESC, changeddate DESC NULLS LAST) AS rn
       FROM afw_140subofins s
       WHERE polid = $1
     ) x WHERE rn = 1 AND status != 'D'
@@ -86,7 +86,7 @@ const PROPERTY_SUBJECT_QUERY = `
   pi AS (
     SELECT * FROM (
       SELECT p.*,
-        ROW_NUMBER() OVER (PARTITION BY polid, lobid, piid ORDER BY effdate DESC) AS rn
+        ROW_NUMBER() OVER (PARTITION BY polid, lobid, piid ORDER BY effdate DESC, changeddate DESC NULLS LAST) AS rn
       FROM afw_140premiseinfo p
       WHERE polid = $1
     ) x WHERE rn = 1 AND status != 'D'
@@ -94,7 +94,7 @@ const PROPERTY_SUBJECT_QUERY = `
   loc AS (
     SELECT * FROM (
       SELECT c.*,
-        ROW_NUMBER() OVER (PARTITION BY polid, clocid ORDER BY effdate DESC) AS rn
+        ROW_NUMBER() OVER (PARTITION BY polid, clocid ORDER BY effdate DESC, changeddate DESC NULLS LAST) AS rn
       FROM afw_clocation c
       WHERE polid = $1
     ) x WHERE rn = 1 AND status != 'D'
@@ -102,7 +102,7 @@ const PROPERTY_SUBJECT_QUERY = `
   bld AS (
     SELECT * FROM (
       SELECT b.*,
-        ROW_NUMBER() OVER (PARTITION BY polid, cbldgid ORDER BY effdate DESC) AS rn
+        ROW_NUMBER() OVER (PARTITION BY polid, cbldgid ORDER BY effdate DESC, changeddate DESC NULLS LAST) AS rn
       FROM afw_cbuilding b
       WHERE polid = $1
     ) x WHERE rn = 1 AND status != 'D'
@@ -123,7 +123,7 @@ const PROPERTY_SUBJECT_QUERY = `
 const AUTO_SYMBOL_QUERY = `
   SELECT c.isliability1, c.isliability2, c.isliability3, c.isliability4, c.isliability7, c.isliability8, c.isliability9
   FROM (
-    SELECT c.*, ROW_NUMBER() OVER (PARTITION BY c.polid, c.lobid, c.casid ORDER BY c.effdate DESC) AS rn
+    SELECT c.*, ROW_NUMBER() OVER (PARTITION BY c.polid, c.lobid, c.casid ORDER BY c.effdate DESC, c.changeddate DESC NULLS LAST) AS rn
     FROM afw_127coverage1 c
     WHERE c.polid = $1
   ) c
@@ -136,7 +136,7 @@ const AUTO_SYMBOL_QUERY = `
 const WC_STATES_QUERY = `
   SELECT DISTINCT rtrim(w.state) AS state
   FROM (
-    SELECT w.*, ROW_NUMBER() OVER (PARTITION BY w.polid, w.lobid, w.wpolid ORDER BY w.effdate DESC) AS rn
+    SELECT w.*, ROW_NUMBER() OVER (PARTITION BY w.polid, w.lobid, w.wpolid ORDER BY w.effdate DESC, w.changeddate DESC NULLS LAST) AS rn
     FROM afw_130policy w
     WHERE w.polid = $1
   ) w
@@ -149,13 +149,13 @@ const VEHICLE_COVERAGE_QUERY = `
     cp.vlimit1, cp.ilimit1, cp.vlimit2, cp.ilimit2, cp.vlimit3, cp.ilimit3, cp.vlimit4, cp.ilimit4,
     cp.deduct, cp.dedtype
   FROM (
-    SELECT cp.*, ROW_NUMBER() OVER (PARTITION BY cp.polid, cp.lobid, cp.cpremid ORDER BY cp.effdate DESC) AS rn
+    SELECT cp.*, ROW_NUMBER() OVER (PARTITION BY cp.polid, cp.lobid, cp.cpremid ORDER BY cp.effdate DESC, cp.changeddate DESC NULLS LAST) AS rn
     FROM afw_cprem cp
     WHERE cp.polid = $1 AND cp.attachtype = 336
   ) cp
   JOIN (
     SELECT t.* FROM (
-      SELECT t.*, ROW_NUMBER() OVER (PARTITION BY t.polid, t.lobid, t.vehdid ORDER BY t.effdate DESC) AS rn
+      SELECT t.*, ROW_NUMBER() OVER (PARTITION BY t.polid, t.lobid, t.vehdid ORDER BY t.effdate DESC, t.changeddate DESC NULLS LAST) AS rn
       FROM afw_127vehicle t
       WHERE t.polid = $1
     ) t WHERE t.rn = 1 AND t.status != 'D'
