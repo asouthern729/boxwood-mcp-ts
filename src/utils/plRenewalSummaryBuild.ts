@@ -4,6 +4,7 @@ import { sanitizeForFilename } from "./docArchive.js"
 import { fetchPlPolicyCoverage, orderPlSections } from "./plCoverageData.js"
 import { buildPlRenewalSummaryDoc } from "./plRenewalSummaryDoc.js"
 import { archivePlRenewalSummary } from "./plRenewalSummaryArchive.js"
+import type { PlRenewalSummaryManifestEntry } from "./plRenewalSummaryArchive.js"
 import { dedupeSamePolicyNumber, withDownloadedRenewalTerms } from "./plRenewalTerms.js"
 
 // Build + archive one PL Renewal Summary. Shared by the pl_renewal_summary MCP tool (chat / on
@@ -36,12 +37,24 @@ function renewsOn(policy: ResolvedPolicy, renewedPolids: Set<string>): string {
   return formatDate(renewedPolids.has(policy.polid) ? policy.poleffdate : policy.polexpdate)
 }
 
-export async function buildAndArchivePlRenewalSummary(filters: ClPolicyFilters): Promise<PlRenewalSummaryBuild> {
-  const resolution = await resolveClPolicies(filters, PERSONAL_BOOK)
-  if(resolution.kind !== "ok") return resolution
+export type PlRenewalSummaryDoc = {
+  buffer: Buffer
+  entry: PlRenewalSummaryManifestEntry
+  clientName: string
+  clientSortName: string
+  polnos: string[]
+  renewedPolnos: string[]
+  duplicateTermPolnos: string[]
+  includedSections: string[]
+  carrierCodes: string[]
+  combining: boolean
+}
 
-  const { clientName } = resolution
-  const deduped = await dedupeSamePolicyNumber(resolution.matches)
+// Builds the document from the client's current in-force terms without archiving it — shared by
+// buildAndArchivePlRenewalSummary below and scripts/rebuildPlRenewalSummaries.ts. singlePolicy marks
+// a polno request that resolved to one policy, which is filed per term instead of per renewal date.
+export async function buildPlRenewalSummary(currentTerms: ResolvedPolicy[], clientName: string, singlePolicy: boolean): Promise<PlRenewalSummaryDoc> {
+  const deduped = await dedupeSamePolicyNumber(currentTerms)
   const { policies: matches, renewedPolids } = await withDownloadedRenewalTerms(deduped.policies)
   const renewedPolnos = matches.filter((m) => renewedPolids.has(m.polid)).map((m) => m.polno)
   const combining = matches.length > 1
@@ -65,24 +78,44 @@ export async function buildAndArchivePlRenewalSummary(filters: ClPolicyFilters):
   // One archived file per single policy term (polid), or — for an account-level summary, the
   // automatic kind — one per client per upcoming renewal date, so a later download for the same
   // renewal rebuilds that file instead of adding another.
-  const filename = filters.polno && !combining
+  const filename = singlePolicy && !combining
     ? `${ sanitizeForFilename(clientName) }_${ sanitizeForFilename(primaryPolicy.polno) }_${ primaryPolicy.polid }.docx`
     : `${ sanitizeForFilename(clientName) }_${ soonestRenewal }_Personal_Insurance_Summary.docx`
 
-  archivePlRenewalSummary(buffer, {
-    filename,
-    generated_at: new Date().toISOString(),
-    csr_code: primaryPolicy.csrcode,
-    csr_name: primaryPolicy.csr_name,
-    client_name: primaryPolicy.customer_sort_name?.trim() || clientName,
-    polnos: matches.map((m) => m.polno).join(", "),
-    renewal_date: soonestRenewal,
-    renewal_date_label: renewalDates.length === 1 ? renewalDates[0] : `${ renewalDates[0] } – ${ renewalDates[renewalDates.length - 1] }`
-  })
+  const clientSortName = primaryPolicy.customer_sort_name?.trim() || clientName
 
   return {
-    kind: "ok", buffer, filename, clientName, clientSortName: primaryPolicy.customer_sort_name?.trim() || clientName,
+    buffer,
+    entry: {
+      filename,
+      generated_at: new Date().toISOString(),
+      csr_code: primaryPolicy.csrcode,
+      csr_name: primaryPolicy.csr_name,
+      client_name: clientSortName,
+      polnos: matches.map((m) => m.polno).join(", "),
+      renewal_date: soonestRenewal,
+      renewal_date_label: renewalDates.length === 1 ? renewalDates[0] : `${ renewalDates[0] } – ${ renewalDates[renewalDates.length - 1] }`,
+      // The current terms the document was built from (before any downloaded renewal term was
+      // swapped in), so a rebuild can resolve exactly these terms again. Absent before 2026-11-21.
+      polids: deduped.policies.map((m) => m.polid)
+    },
+    clientName,
+    clientSortName,
     polnos: matches.map((m) => m.polno),
-    renewedPolnos, duplicateTermPolnos: deduped.unresolvedPolnos, includedSections, carrierCodes, combining
+    renewedPolnos,
+    duplicateTermPolnos: deduped.unresolvedPolnos,
+    includedSections,
+    carrierCodes,
+    combining
   }
+}
+
+export async function buildAndArchivePlRenewalSummary(filters: ClPolicyFilters): Promise<PlRenewalSummaryBuild> {
+  const resolution = await resolveClPolicies(filters, PERSONAL_BOOK)
+  if(resolution.kind !== "ok") return resolution
+
+  const { buffer, entry, ...built } = await buildPlRenewalSummary(resolution.matches, resolution.clientName, Boolean(filters.polno))
+  archivePlRenewalSummary(buffer, entry)
+
+  return { kind: "ok", buffer, filename: entry.filename, ...built }
 }
