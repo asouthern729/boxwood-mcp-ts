@@ -1,6 +1,6 @@
 services:
   boxwood-mcp:
-    image: ghcr.io/asouthern729/boxwood-mcp-ts:1.0.6
+    image: ghcr.io/asouthern729/boxwood-mcp-ts:1.0.7
     restart: unless-stopped
     network_mode: host
     environment:
@@ -45,7 +45,7 @@ services:
   # the host's /var/log/boxwood-mcp. Own memory limit so a LibreOffice-heavy build can't starve the
   # web server; the three 09:00 jobs run at the same time, hence 2g.
   jobs:
-    image: ghcr.io/asouthern729/boxwood-mcp-ts:1.0.6
+    image: ghcr.io/asouthern729/boxwood-mcp-ts:1.0.7
     restart: unless-stopped
     command: ["supercronic", "/app/cron/crontab"]
     network_mode: host
