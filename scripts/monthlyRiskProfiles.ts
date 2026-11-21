@@ -1,11 +1,11 @@
 // Monthly batch build of the CL "Pre-Renewal Review" (risk_profile MCP tool) — the companion to
 // scripts/monthlyRenewalPremiumSummaries.ts, on the same schedule per Patrick (2026-09-15): "Run on
 // the 1st of the month for all policies/accounts renewing 60 days later. Oct 1 should create these
-// for all accounts renewing in December." Run on the 1st of month M, this covers every commercial
-// account with a policy expiring in month M+2, one document per account.
+// for all accounts renewing in December." Widened to three months out on 2026-11-21: run on the 1st
+// of month M, this covers every commercial account with a policy expiring in month M+3, one document per account.
 //
 // Each account's document combines only its policies expiring in the target month — an earlier
-// renewal on the same account (e.g. a November policy on a December run) was already covered by an
+// renewal on the same account (e.g. a December policy on a January run) was already covered by an
 // earlier month's run, and including it would also change the combined set's archive key. Policies
 // renewing after the target month are excluded by the resolve window itself.
 //
@@ -15,7 +15,7 @@
 //
 // Usage: npx tsx scripts/monthlyRiskProfiles.ts [--month=YYYY-MM]
 //   --month  overrides the target month (for manual/backtesting runs) instead of computing
-//            "current month + 2" from today's date.
+//            "current month + 3" from today's date.
 
 import "dotenv/config"
 import { formatDate, resolveClPolicies } from "../src/utils/clPolicyData.js"

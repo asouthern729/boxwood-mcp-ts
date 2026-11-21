@@ -2,8 +2,7 @@ import { runReadOnlyQuery } from "../db.js"
 
 // Shared by the monthly CL batch scripts (scripts/monthlyRenewalPremiumSummaries.ts,
 // scripts/monthlyRiskProfiles.ts) — Patrick, 2026-09-15: both run on the 1st of the month for every
-// account renewing two calendar months out ("Oct 1 should create these for all accounts renewing in
-// December"), so both must agree on the target month and on which accounts it covers.
+// account renewing a set number of calendar months out, so both must agree on the target month and on which accounts it covers.
 
 // Mirrors the commercial "genuinely in force" filter used by both generateRenewalPremiumSummary's
 // ACCOUNT_POLICIES_QUERY and clPolicyData's RESOLVE_POLICY_QUERY (typeofbus=2, polsubtype!='S',
@@ -38,7 +37,11 @@ function toDateString(date: Date): string {
   return date.toISOString().slice(0, 10)
 }
 
-// current month + 2, with year rollover (e.g. run in November → target January of next year).
+// Originally two months out ("Oct 1 should create these for all accounts renewing in December");
+// widened to three on 2026-11-21 (Oct 1 now builds January's).
+export const MONTHS_AHEAD = 3
+
+// current month + MONTHS_AHEAD, with year rollover (e.g. run in November → target February of next year).
 // monthArg (YYYY-MM) overrides it for manual/backtesting runs.
 function resolveTargetMonth(monthArg: string | undefined): { year: number; month: number } {
   if(monthArg) {
@@ -48,7 +51,7 @@ function resolveTargetMonth(monthArg: string | undefined): { year: number; month
   }
 
   const now = new Date()
-  const target = new Date(Date.UTC(now.getUTCFullYear(), now.getUTCMonth() + 2, 1))
+  const target = new Date(Date.UTC(now.getUTCFullYear(), now.getUTCMonth() + MONTHS_AHEAD, 1))
   return { year: target.getUTCFullYear(), month: target.getUTCMonth() }
 }
 

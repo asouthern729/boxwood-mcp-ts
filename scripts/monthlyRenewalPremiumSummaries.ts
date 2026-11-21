@@ -1,6 +1,6 @@
 // Monthly batch build of Patrick's "Commercial Renewal Premium Summary" workbook
-// (renewal_premium_spreadsheet MCP tool) for every commercial account with a policy expiring two
-// calendar months out — run on the 1st of month M, this covers everything expiring in month M+2,
+// (renewal_premium_spreadsheet MCP tool) for every commercial account with a policy expiring three
+// calendar months out — run on the 1st of month M, this covers everything expiring in month M+3,
 // so the workbook is already archived by the time an account manager starts renewal prep.
 //
 // Calls generateRenewalPremiumSummary() (src/utils/renewalPremiumSummaryGenerate.ts) directly —
@@ -14,7 +14,7 @@
 //
 // Usage: npx tsx scripts/monthlyRenewalPremiumSummaries.ts [--month=YYYY-MM]
 //   --month  overrides the target month (for manual/backtesting runs) instead of computing
-//            "current month + 2" from today's date.
+//            "current month + 3" from today's date.
 
 import "dotenv/config"
 import { generateRenewalPremiumSummary, NoCommercialPoliciesError } from "../src/utils/renewalPremiumSummaryGenerate.js"
