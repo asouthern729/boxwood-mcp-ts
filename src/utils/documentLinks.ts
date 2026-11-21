@@ -34,7 +34,7 @@ export function documentId(tool: DocumentTool, filename: string): string {
   return `${ hex.slice(0, 8) }-${ hex.slice(8, 12) }-${ hex.slice(12, 16) }-${ hex.slice(16, 20) }-${ hex.slice(20, 32) }`
 }
 
-function spreadsheetPolids(entry: RenewalPremiumSummaryManifestEntry): Set<string> {
+export function spreadsheetPolids(entry: RenewalPremiumSummaryManifestEntry): Set<string> {
   return new Set((entry.cell_map ?? []).flatMap((row) => row.polids ?? []))
 }
 
@@ -45,11 +45,31 @@ const onDisk = (dir: string) => <E extends { filename: string }>(entry: E) => ex
 
 // The spreadsheet(s) for a CL Renewal Summary's terms. Entries without polids (archived before they
 // were recorded) link to nothing.
+//
+// Several only when a summary's terms span two renewal months (spreadsheets are per account per
+// renewal month) — then each is named by its month.
 export function linksForClRenewalSummary(entry: ClRenewalSummaryManifestEntry, spreadsheets = readPremiumManifest().filter(onDisk(RENEWAL_PREMIUM_SUMMARY_OUTPUT_DIR))): DocumentLink[] {
   if(!entry.polids?.length) return []
-  return spreadsheets
-    .filter((sheet) => shares(entry.polids!, spreadsheetPolids(sheet)))
-    .map((sheet) => ({ tool: "renewal-premium-summary", id: documentId("renewal-premium-summary", sheet.filename), label: "Renewal Premium Spreadsheet" }))
+  const linked = spreadsheets.filter((sheet) => shares(entry.polids!, spreadsheetPolids(sheet)))
+  return linked.map((sheet) => ({
+    tool: "renewal-premium-summary",
+    id: documentId("renewal-premium-summary", sheet.filename),
+    label: linked.length > 1 ? `Renewal Premium Spreadsheet (${ monthLabel(sheet.renewal_date) })` : "Renewal Premium Spreadsheet"
+  }))
+}
+
+// "Feb 2027" from a YYYY-MM-DD date.
+function monthLabel(date: string): string {
+  return new Date(`${ date.slice(0, 7) }-15T12:00:00Z`).toLocaleString("en-US", { month: "short", year: "numeric", timeZone: "UTC" })
+}
+
+// Finds an archived document by its id, or undefined.
+export function findSpreadsheet(id: string): RenewalPremiumSummaryManifestEntry | undefined {
+  return readPremiumManifest().filter(onDisk(RENEWAL_PREMIUM_SUMMARY_OUTPUT_DIR)).find((entry) => documentId("renewal-premium-summary", entry.filename) === id)
+}
+
+export function findClRenewalSummary(id: string): ClRenewalSummaryManifestEntry | undefined {
+  return readClRenewalSummaryManifest().filter(onDisk(CL_RENEWAL_SUMMARY_OUTPUT_DIR)).find((entry) => documentId("cl-renewal-summary", entry.filename) === id)
 }
 
 // The CL Renewal Summaries for a spreadsheet's terms — named by policy number when there's more

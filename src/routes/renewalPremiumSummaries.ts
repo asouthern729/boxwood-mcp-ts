@@ -9,6 +9,7 @@ import { ErrorResponse } from "../utils/errorResponse.js"
 import type { RenewalPremiumSummaryManifestEntry } from "../utils/renewalPremiumSummaryArchive.js"
 import { RENEWAL_PREMIUM_SUMMARY_OUTPUT_DIR, deleteRenewalPremiumSummary, premiumSections, readManifest } from "../utils/renewalPremiumSummaryArchive.js"
 import { documentId, linksForRenewalPremiumSummary } from "../utils/documentLinks.js"
+import { LinkedBuildError, buildSpreadsheetForClRenewalSummary } from "../utils/linkedDocumentBuild.js"
 import { CL_RENEWAL_SUMMARY_OUTPUT_DIR, readClRenewalSummaryManifest } from "../utils/clRenewalSummaryArchive.js"
 import { runRenewalPremiumSummaryChatTurn } from "../utils/renewalPremiumSummaryChat.js"
 import { RenewalPremiumSummaryRefreshError, refreshRenewalPremiumSummary } from "../utils/renewalPremiumSummaryRefresh.js"
@@ -72,6 +73,23 @@ router.get(`${ BASE }/renewal-premium-summaries/manifest`, auth0, (_req, res) =>
 // truth for what's archived) rather than a regex pattern before any filesystem access, both to 404
 // on garbage and to rule out path traversal; a filename that isn't in the manifest is never read
 // regardless of what it looks like.
+// Builds the Renewal Premium Spreadsheet for a CL Renewal Summary's renewal month, from the summary's
+// preview (linkedDocumentBuild.ts) — 200 { id, created }, id being the spreadsheet to open (created:
+// false when one already exists).
+router.post(`${ BASE }/renewal-premium-summaries/linked`, auth0, asyncHandler(async(req: Request, res: Response, next: NextFunction) => {
+  const summaryId = typeof req.body?.summary_id === "string" ? req.body.summary_id : ""
+  if(!summaryId) {
+    return next(new ErrorResponse("summary_id is required.", 400))
+  }
+
+  try {
+    res.status(200).json(await buildSpreadsheetForClRenewalSummary(summaryId))
+  } catch(error) {
+    if(error instanceof LinkedBuildError) return next(new ErrorResponse(error.message, error.status))
+    throw error
+  }
+}))
+
 router.get(`${ BASE }/renewal-premium-summaries/files/:filename`, auth0, (req: Request<{ filename: string }>, res: Response) => {
   const { filename } = req.params
   const entry = readManifest().find((e) => e.filename === filename)

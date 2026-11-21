@@ -20,6 +20,7 @@ import { logger } from "../utils/logger.js"
 import { extractQuote, QuoteExtractionError } from "../utils/quoteExtraction.js"
 import { groupByCsr } from "./riskProfile.js"
 import { documentId, linksForClRenewalSummary } from "../utils/documentLinks.js"
+import { LinkedBuildError, buildClRenewalSummaryForSpreadsheet } from "../utils/linkedDocumentBuild.js"
 import { RENEWAL_PREMIUM_SUMMARY_OUTPUT_DIR, readManifest as readPremiumManifest } from "../utils/renewalPremiumSummaryArchive.js"
 
 // Mirrors routes/riskProfile.ts route-for-route (manifest grouped by CSR, file download/delete
@@ -50,6 +51,23 @@ router.get(`${ BASE }/cl-renewal-summary/manifest`, auth0, (_req, res) => {
 
   res.json({ groups: groupByCsr(entriesWithSize) })
 })
+
+// Builds the CL Renewal Summary for a Renewal Premium Spreadsheet's policy terms, from the spreadsheet's
+// preview (linkedDocumentBuild.ts) — 200 { id, created }, id being the summary to open (created: false
+// when one already exists). Takes a few seconds: a full document build.
+router.post(`${ BASE }/cl-renewal-summary/linked`, auth0, asyncHandler(async(req: Request, res: Response, next: NextFunction) => {
+  const spreadsheetId = typeof req.body?.spreadsheet_id === "string" ? req.body.spreadsheet_id : ""
+  if(!spreadsheetId) {
+    return next(new ErrorResponse("spreadsheet_id is required.", 400))
+  }
+
+  try {
+    res.status(200).json(await buildClRenewalSummaryForSpreadsheet(spreadsheetId))
+  } catch(error) {
+    if(error instanceof LinkedBuildError) return next(new ErrorResponse(error.message, error.status))
+    throw error
+  }
+}))
 
 router.get(`${ BASE }/cl-renewal-summary/files/:filename`, auth0, (req: Request<{ filename: string }>, res: Response) => {
   const { filename } = req.params

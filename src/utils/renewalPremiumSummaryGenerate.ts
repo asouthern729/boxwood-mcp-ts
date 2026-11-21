@@ -84,6 +84,11 @@ function formatDate(value: string | null): string {
 
 export class NoCommercialPoliciesError extends Error {}
 
+// YYYY-MM of a YYYY-MM-DD renewal date — the per-renewal-month part of an archived workbook's key.
+export function renewalMonthOf(renewalDate: string): string {
+  return renewalDate.slice(0, 7)
+}
+
 export type GenerateRenewalPremiumSummaryParams = {
   custid: string
   renewalWithinDays: number
@@ -110,6 +115,8 @@ export type GenerateRenewalPremiumSummaryResult =
       status: "generated"
       custid: string
       clientName: string
+      // The archived copy's filename (the index page's key) — `filename` is the client-facing download name
+      archiveFilename: string
       includedCount: number
       otherCount: number
       filename: string
@@ -213,9 +220,16 @@ export async function generateRenewalPremiumSummary(params: GenerateRenewalPremi
   const downloadUrl = `${ publicBaseUrl }/downloads/${ token }`
 
   const earliestRenewalDate = included.reduce((earliest, p) => (p.polexpdate < earliest ? p.polexpdate : earliest), included[0].polexpdate)
+  // One archived workbook per account per renewal month (Andrew, 2026-11-21). Keyed by account alone,
+  // the 1st-of-month batch for an account's next renewal overwrote the workbook for its earlier one —
+  // e.g. December's run for March renewals replaced the February workbook two months before February
+  // renewed, losing its refreshed values and its link to the CL Renewal Summary. Rebuilding the same
+  // account and month still overwrites in place. Workbooks archived before this keep their old
+  // custid-only names; documentLinks.ts ids follow the filename either way.
+  const archiveFilename = `${ sanitizeForFilename(clientName) }_${ custid }_${ renewalMonthOf(formatDate(earliestRenewalDate)) }.xlsx`
 
   archiveRenewalPremiumSummary(buffer, {
-    filename: `${ sanitizeForFilename(clientName) }_${ custid }.xlsx`,
+    filename: archiveFilename,
     generated_at: new Date().toISOString(),
     custid,
     csr_code: included[0].csrcode,
@@ -231,6 +245,7 @@ export async function generateRenewalPremiumSummary(params: GenerateRenewalPremi
     status: "generated",
     custid,
     clientName,
+    archiveFilename,
     includedCount: included.length,
     otherCount: other.length,
     filename,
