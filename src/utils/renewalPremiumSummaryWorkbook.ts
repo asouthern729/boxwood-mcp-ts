@@ -26,6 +26,12 @@ const LOB_LABEL: Record<KnownLobCode, string> = {
   WORK: "Workers Comp", EPLI: "EPLI", INMRC: "Inland Marine", DO: "D&O"
 }
 
+// A line's name as the template labels it (trimmed — the template's own "General Liability " has a
+// trailing space).
+export function lobLabel(code: KnownLobCode): string {
+  return LOB_LABEL[code].trim()
+}
+
 // Column H is the template's "Trending Percent Increase" column. Patrick (9/29 "final lap"): remove
 // it. Its header and per-line ranges are cleared rather than the column deleted — column H also sits
 // inside the section banner and the Quote Notes boxes, and deleting it would mean shifting the Market
@@ -70,9 +76,13 @@ export type RenewalPremiumSummaryInput = {
 // exactly that value, so a figure an employee typed in by hand is never replaced. Optional: entries
 // archived before this existed don't carry them (see renewalPremiumSummaryRefresh.ts for how those
 // are seeded).
+//
+// title (extra rows only) is the row's coverage text as written to column B — the index page's line
+// status names the row by it. Absent on entries archived before 2026-11-21; a known row's name comes
+// from its code (lobLabel).
 export type RenewalPremiumSummaryCellMapEntry =
   | { row: number; kind: "known"; code: KnownLobCode; polnos: string[]; current?: number | null; renewal?: number | null }
-  | { row: number; kind: "extra"; polnos: string[]; current?: number | null; renewal?: number | null }
+  | { row: number; kind: "extra"; polnos: string[]; title?: string; current?: number | null; renewal?: number | null }
 
 export type BuildRenewalPremiumSummaryWorkbookResult = {
   buffer: Buffer
@@ -186,7 +196,7 @@ export async function buildRenewalPremiumSummaryWorkbook(input: RenewalPremiumSu
       if(entry.extra.renewal !== null) eCell.value = entry.extra.renewal
       sheet.getCell(`D${ row }`).value = entry.extra.carrier
       maxCarrierLen = Math.max(maxCarrierLen, entry.extra.carrier.length)
-      cellMap.push({ row, kind: "extra", polnos: entry.extra.policyNos.split(", "), current: entry.extra.current, renewal: entry.extra.renewal })
+      cellMap.push({ row, kind: "extra", polnos: entry.extra.policyNos.split(", "), title: entry.extra.coverage, current: entry.extra.current, renewal: entry.extra.renewal })
     } else if(entry.kind === "blank") {
       // Explicitly cleared (not just left unwritten) — this row may land on a template position that
       // already has a default line label.

@@ -7,7 +7,7 @@ import { recordDownload } from "../utils/downloadLog.js"
 import asyncHandler from "../middleware/async/index.js"
 import { ErrorResponse } from "../utils/errorResponse.js"
 import type { RenewalPremiumSummaryManifestEntry } from "../utils/renewalPremiumSummaryArchive.js"
-import { RENEWAL_PREMIUM_SUMMARY_OUTPUT_DIR, deleteRenewalPremiumSummary, readManifest } from "../utils/renewalPremiumSummaryArchive.js"
+import { RENEWAL_PREMIUM_SUMMARY_OUTPUT_DIR, deleteRenewalPremiumSummary, premiumSections, readManifest } from "../utils/renewalPremiumSummaryArchive.js"
 import { runRenewalPremiumSummaryChatTurn } from "../utils/renewalPremiumSummaryChat.js"
 import { RenewalPremiumSummaryRefreshError, refreshRenewalPremiumSummary } from "../utils/renewalPremiumSummaryRefresh.js"
 
@@ -52,7 +52,7 @@ export function groupByCsr(entries: ManifestEntryWithSize[]): CsrGroup[] {
 router.get(`${ BASE }/renewal-premium-summaries/manifest`, auth0, (_req, res) => {
   const entriesWithSize = readManifest()
     .filter((entry) => existsSync(path.join(RENEWAL_PREMIUM_SUMMARY_OUTPUT_DIR, entry.filename)))
-    .map((entry) => ({ ...entry, sizeBytes: statSync(path.join(RENEWAL_PREMIUM_SUMMARY_OUTPUT_DIR, entry.filename)).size }))
+    .map((entry) => ({ ...entry, sizeBytes: statSync(path.join(RENEWAL_PREMIUM_SUMMARY_OUTPUT_DIR, entry.filename)).size, sections: premiumSections(entry) }))
 
   res.json({ groups: groupByCsr(entriesWithSize) })
 })

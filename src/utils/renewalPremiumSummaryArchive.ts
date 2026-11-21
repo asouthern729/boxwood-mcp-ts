@@ -1,7 +1,7 @@
 import { existsSync, mkdirSync, readFileSync, unlinkSync, writeFileSync } from "node:fs"
 import path from "node:path"
 import { outputDir } from "../config/config.js"
-import type { RenewalPremiumSummaryCellMapEntry } from "./renewalPremiumSummaryWorkbook.js"
+import { lobLabel, type RenewalPremiumSummaryCellMapEntry } from "./renewalPremiumSummaryWorkbook.js"
 
 // Same on-disk convention as riskProfileArchive.ts's cl-risk-profile dir — written under
 // <OUTPUT_ROOT>/ (retention-cron-cleaned), its own subdirectory since this is a
@@ -41,6 +41,29 @@ export type RenewalPremiumSummaryManifestEntry = {
   // What that last Refresh changed, in staff-facing words (e.g. "1 current premium updated, 2 renewal
   // premiums added") — the index page shows it on hover. Absent on entries refreshed before it existed.
   last_refresh_reason?: string
+}
+
+// Each line of the workbook with whether its Renewal premium is in yet — the index page's line status,
+// in the CL Renewal Summary manifest's `sections` shape so the dashboard shows both the same way
+// (Patrick, 2026-11-21). Read from cell_map: a line is renewed once the tool has written a renewal
+// premium to it, at generation or by a Refresh as the renewal term lands in AMS360. Undefined when the
+// entry predates cell_map recording renewal values — the daily Refresh records them the first time it
+// runs over the entry.
+//
+// AMS360 is the trigger, deliberately (Andrew, 2026-11-21): the status — and the planned link that
+// carries these premiums into the CL Renewal Summary — means "renewal premium is in AMS360". A
+// premium an AM types into a downloaded copy (e.g. from a carrier quote before the renewal is in
+// AMS360) is never seen here. Revisit once the workbooks live on OneDrive where staff edit them (due
+// before end of 2026): then the edited copy can be read, and hand-entered renewal premiums count.
+export function premiumSections(entry: RenewalPremiumSummaryManifestEntry): { title: string; polno: string; renewed: boolean }[] | undefined {
+  const cellMap = entry.cell_map
+  if(!cellMap?.length || cellMap.some((c) => c.renewal === undefined)) return undefined
+
+  return cellMap.map((c) => ({
+    title: c.kind === "known" ? lobLabel(c.code) : c.title ?? c.polnos.join(", "),
+    polno: c.polnos.join(", "),
+    renewed: c.renewal !== null && c.renewal !== undefined
+  }))
 }
 
 // Exported for the renewal-premium-summaries index route (src/routes/renewalPremiumSummaries.ts) —
