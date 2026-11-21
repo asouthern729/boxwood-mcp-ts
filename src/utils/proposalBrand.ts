@@ -17,12 +17,15 @@ import { AGENCY, columnWidths, numericColumns, type Block, type DocComment } fro
 // Boxwood's house style for generated client documents (Patrick, 2026-11-21: every output document
 // should share it). Helpers are document-neutral; each document supplies its own wording (cover
 // eyebrow, headlines, header name, tagline). Used so far by the CL proposal document
-// (clProposalDoc.ts — Proposal Builder and CL Renewal Summary). The Pre-Renewal Review
+// (clProposalDoc.ts — Proposal Builder and CL Renewal Summary) and the PL Renewal Summary
+// (plRenewalSummaryDoc.ts). The Pre-Renewal Review
 // (riskProfileDoc.ts) still uses the older look in proposalStyle.ts, pending its own restyle.
 //
 // Layout: a cover docx section with zero margins (coverPage, no header/footer) and an interior
 // section with INTERIOR_MARGINS, interiorHeader/interiorFooter, sections opened with sectionOpener,
-// and a closing section whose page footer is closingFooter.
+// and a closing section — starting a new page — whose page footer is closingFooter, which puts the
+// mint band at the foot of the last page. A compact flowing document (the PL Renewal Summary
+// letter, plRenewalSummaryDoc.ts) skips the cover and passes its own margins/text width.
 
 export const GREEN = "459361"
 export const CHAR = "231F20"
@@ -125,11 +128,13 @@ export function body(text: string, o: ParaOpts & { italics?: boolean } = {}): Pa
 // Replaces the old logo + green banner. The comment, if any, anchors on the headline. pageBreak sets
 // pageBreakBefore on the eyebrow rather than adding a break paragraph, which would leave an empty
 // line at the top of the new page.
-export function sectionOpener({ eyebrowText, title, accent, pageBreak: breakBefore, comment }: { eyebrowText: string; title: string; accent?: string; pageBreak?: boolean; comment?: DocComment }): Paragraph[] {
+// compact (the PL letter, no page breaks between sections): 14pt headline, tighter spacing, and
+// `before` to separate it from the section above. textWidth sizes the accent rule on other margins.
+export function sectionOpener({ eyebrowText, title, accent, pageBreak: breakBefore, comment, compact = false, before, textWidth }: { eyebrowText: string; title: string; accent?: string; pageBreak?: boolean; comment?: DocComment; compact?: boolean; before?: number; textWidth?: number }): Paragraph[] {
   return [
-    eyebrow(eyebrowText, { after: 60, pageBreakBefore: breakBefore }),
-    accentRule({ after: 160 }),
-    headline([[title + (accent ? " " : ""), CHAR], ...(accent ? [[accent, GREEN] as [string, string]] : [])], { size: 36, after: 200, comment })
+    eyebrow(eyebrowText, { before, after: compact ? 40 : 60, pageBreakBefore: breakBefore }),
+    accentRule({ after: compact ? 100 : 160, textWidth }),
+    headline([[title + (accent ? " " : ""), CHAR], ...(accent ? [[accent, GREEN] as [string, string]] : [])], { size: compact ? 28 : 36, after: compact ? 140 : 200, comment })
   ]
 }
 
@@ -164,8 +169,10 @@ export function bullet(text: string): Paragraph {
 // ---------- CARDS & BANDS ----------
 
 // Fact cards: green top rule, tiny eyebrow label, bold value; `cols` per row. A value's "\n" breaks
-// the line (the cover's street | city lines).
-export function factGrid(facts: [string, string][], { textWidth = TEXT_WIDTH, cols = 3, labelColor = GREEN, valueColor = CHAR }: { textWidth?: number; cols?: number; labelColor?: string; valueColor?: string } = {}): Table {
+// the line (the cover's street | city lines). keepWithNext holds every row on the page with what
+// follows (a flowing document, so a section's cards don't split from its table).
+export function factGrid(facts: [string, string][], { textWidth = TEXT_WIDTH, cols = 3, labelColor = GREEN, valueColor = CHAR, keepWithNext }: { textWidth?: number; cols?: number; labelColor?: string; valueColor?: string; keepWithNext?: boolean } = {}): Table {
+  const keep = keepWithNext || undefined
   const gap = 280
   const cw = Math.floor((textWidth - gap * (cols - 1)) / cols)
   const widths: number[] = []
@@ -176,6 +183,7 @@ export function factGrid(facts: [string, string][], { textWidth = TEXT_WIDTH, co
   widths[widths.length - 1] += textWidth - widths.reduce((a, b) => a + b, 0)
 
   const value = (text: string) => new Paragraph({
+    keepNext: keep,
     children: text.split("\n").map((line, i) => run(line, { size: 20, bold: true, color: valueColor, break: i > 0 ? 1 : undefined }))
   })
 
@@ -189,19 +197,20 @@ export function factGrid(facts: [string, string][], { textWidth = TEXT_WIDTH, co
         width: { size: w, type: WidthType.DXA },
         borders: { ...NO_BORDERS, top: f ? { style: BorderStyle.SINGLE, size: 18, color: GREEN } : NONE },
         margins: { top: 100, bottom: 160, left: 0, right: 0 },
-        children: f ? [eyebrow(f[0], { size: 14, after: 40, color: labelColor, keepNext: false }), value(f[1])] : [new Paragraph("")]
+        children: f ? [eyebrow(f[0], { size: 14, after: 40, color: labelColor, keepNext: keepWithNext ?? false }), value(f[1])] : [(keep ? new Paragraph({ keepNext: true }) : new Paragraph(""))]
       }))
-      if(i < cols - 1) cells.push(new TableCell({ width: { size: gap, type: WidthType.DXA }, borders: NO_BORDERS, children: [new Paragraph("")] }))
+      if(i < cols - 1) cells.push(new TableCell({ width: { size: gap, type: WidthType.DXA }, borders: NO_BORDERS, children: [(keep ? new Paragraph({ keepNext: true }) : new Paragraph(""))] }))
     }
     rows.push(new TableRow({ cantSplit: true, children: cells }))
   }
   return new Table({ width: { size: textWidth, type: WidthType.DXA }, columnWidths: widths, layout: TableLayoutType.FIXED, borders: TABLE_NO_BORDERS, rows })
 }
 
-// Full-bleed band: one shaded cell pulled out to the page edges. Interior pages: offset -1440 (the
-// side margin); the cover (zero margins): offset 0.
+// Full-bleed band: one shaded cell pulled out to the page edges. Interior pages: offset = minus the
+// side margin (-1440 on the CL documents, -900 on the PL letter), and the cell pads back in by the
+// same amount so its content lines up with the text; the cover (zero margins): offset 0.
 export function band(fill: string, children: Block[], { top = 440, bottom = 440, offset = -SIDE_MARGIN }: { top?: number; bottom?: number; offset?: number } = {}): Table {
-  const side = offset ? SIDE_MARGIN : 900
+  const side = offset ? -offset : 900
   return new Table({
     width: { size: PAGE_WIDTH, type: WidthType.DXA },
     columnWidths: [PAGE_WIDTH],
@@ -222,16 +231,18 @@ export function band(fill: string, children: Block[], { top = 440, bottom = 440,
 }
 
 // Logo + tagline | agency name, address, phone | website — on the cover (offset 0, 5220/5220) and
-// closing the document (offset -1440, 4680/4680).
-export function contactBand({ offset, top, bottom, tagline = DEFAULT_TAGLINE }: { offset: number; top: number; bottom: number; tagline?: string }): Table {
-  const half = offset ? TEXT_WIDTH / 2 : 5220
+// closing the document (offset -1440, 4680/4680). keepNext holds it on the same page as whatever
+// follows (the PL letter's inline closing).
+export function contactBand({ offset, top, bottom, tagline = DEFAULT_TAGLINE, keepNext, logoWidth = 1.6 }: { offset: number; top: number; bottom: number; tagline?: string; keepNext?: boolean; logoWidth?: number }): Table {
+  const half = offset ? (PAGE_WIDTH + 2 * offset) / 2 : 5220
+  const keep = keepNext || undefined
   const left = new TableCell({
     width: { size: half, type: WidthType.DXA },
     borders: NO_BORDERS,
     verticalAlign: VerticalAlign.CENTER,
     children: [
-      new Paragraph({ spacing: { after: 120 }, children: [logoRun(1.6)] }),
-      new Paragraph({ children: [run(tagline, { bold: true, size: 22 })] })
+      new Paragraph({ keepNext: keep, spacing: { after: 120 }, children: [logoRun(logoWidth)] }),
+      new Paragraph({ keepNext: keep, children: [run(tagline, { bold: true, size: 22 })] })
     ]
   })
   const right = new TableCell({
@@ -239,9 +250,9 @@ export function contactBand({ offset, top, bottom, tagline = DEFAULT_TAGLINE }: 
     borders: NO_BORDERS,
     verticalAlign: VerticalAlign.CENTER,
     children: [
-      eyebrow("Boxwood Insurance Group", { size: 14, after: 60, align: AlignmentType.RIGHT, keepNext: false }),
-      new Paragraph({ alignment: AlignmentType.RIGHT, spacing: { after: 40 }, children: [run(AGENCY.address, { size: 16 })] }),
-      new Paragraph({ alignment: AlignmentType.RIGHT, children: [run(`${ AGENCY.phone } | ${ WEBSITE }`, { size: 16 })] })
+      eyebrow("Boxwood Insurance Group", { size: 14, after: 60, align: AlignmentType.RIGHT, keepNext: keepNext ?? false }),
+      new Paragraph({ keepNext: keep, alignment: AlignmentType.RIGHT, spacing: { after: 40 }, children: [run(AGENCY.address, { size: 16 })] }),
+      new Paragraph({ keepNext: keep, alignment: AlignmentType.RIGHT, children: [run(`${ AGENCY.phone } | ${ WEBSITE }`, { size: 16 })] })
     ]
   })
   return band(MINT, [new Table({
@@ -255,12 +266,38 @@ export function contactBand({ offset, top, bottom, tagline = DEFAULT_TAGLINE }: 
 
 // ---------- PAGE HEADER & FOOTER (interior section only) ----------
 
-export function interiorHeader(clientName: string): Header {
+// textWidth: the page's text width, for the right tab (CL 9360; the PL letter 10440).
+//
+// A name too long for one line beside the logo (~128 twips per 7pt letter-spaced capital) would wrap
+// under the logo and into the page; it goes in a two-column table instead, wrapping right-aligned
+// in its own column.
+const HEADER_LOGO_COLUMN = 2300
+const HEADER_CHAR = 128
+
+export function interiorHeader(clientName: string, { textWidth = TEXT_WIDTH }: { textWidth?: number } = {}): Header {
+  const name = run(clientName.toUpperCase(), { bold: true, size: 14, color: GREEN, characterSpacing: 30 })
+  if(clientName.length * HEADER_CHAR > textWidth - HEADER_LOGO_COLUMN) {
+    const rule = { style: BorderStyle.SINGLE, size: 4, color: ARC }
+    return new Header({
+      children: [new Table({
+        width: { size: textWidth, type: WidthType.DXA },
+        columnWidths: [HEADER_LOGO_COLUMN, textWidth - HEADER_LOGO_COLUMN],
+        layout: TableLayoutType.FIXED,
+        borders: { ...TABLE_NO_BORDERS, bottom: rule },
+        rows: [new TableRow({
+          children: [
+            new TableCell({ width: { size: HEADER_LOGO_COLUMN, type: WidthType.DXA }, borders: NO_BORDERS, verticalAlign: VerticalAlign.BOTTOM, margins: { top: 0, bottom: 120, left: 0, right: 0 }, children: [new Paragraph({ children: [logoRun(1.35)] })] }),
+            new TableCell({ width: { size: textWidth - HEADER_LOGO_COLUMN, type: WidthType.DXA }, borders: NO_BORDERS, verticalAlign: VerticalAlign.BOTTOM, margins: { top: 0, bottom: 120, left: 0, right: 0 }, children: [new Paragraph({ alignment: AlignmentType.RIGHT, children: [name] })] })
+          ]
+        })]
+      }), new Paragraph({ spacing: { after: 0 }, children: [run("", { size: 4 })] })]
+    })
+  }
   return new Header({
     children: [new Paragraph({
-      tabStops: [{ type: TabStopType.RIGHT, position: TEXT_WIDTH }],
+      tabStops: [{ type: TabStopType.RIGHT, position: textWidth }],
       border: { bottom: { style: BorderStyle.SINGLE, size: 4, color: ARC, space: 6 } },
-      children: [logoRun(1.35), run("\t"), run(clientName.toUpperCase(), { bold: true, size: 14, color: GREEN, characterSpacing: 30 })]
+      children: [logoRun(1.35), run("\t"), name]
     })]
   })
 }
@@ -269,10 +306,10 @@ export function interiorHeader(clientName: string): Header {
 // formatting of a PAGE field and falls back to the paragraph style. Add to Document styles.paragraphStyles.
 export const FOOTER_STYLE = { id: "BrandFooter", name: "Brand Footer", basedOn: "Normal", run: { font: "Arial", size: 14, bold: true, color: GREEN } }
 
-function footerLine(): Paragraph {
+function footerLine(textWidth = TEXT_WIDTH): Paragraph {
   return new Paragraph({
     style: FOOTER_STYLE.id,
-    tabStops: [{ type: TabStopType.RIGHT, position: TEXT_WIDTH }],
+    tabStops: [{ type: TabStopType.RIGHT, position: textWidth }],
     children: [
       run(`Boxwood Insurance Group | ${ AGENCY.phone } | ${ WEBSITE }`, { size: 14, bold: false }),
       run("\t"),
@@ -282,8 +319,8 @@ function footerLine(): Paragraph {
   })
 }
 
-export function interiorFooter(): Footer {
-  return new Footer({ children: [footerLine()] })
+export function interiorFooter({ textWidth = TEXT_WIDTH }: { textWidth?: number } = {}): Footer {
+  return new Footer({ children: [footerLine(textWidth)] })
 }
 
 // ---------- DATA TABLES ----------
@@ -297,26 +334,30 @@ const HEAD_BORDERS = { top: NONE, bottom: { style: BorderStyle.SINGLE, size: 12,
 const HEAD_MARGINS = { top: 90, bottom: 90, left: 140, right: 140 }
 const BODY_MARGINS = { top: 75, bottom: 75, left: 140, right: 140 }
 
-function cell(text: string, width: number, o: { borders: ITableCellBorders; fill: string; margins: typeof BODY_MARGINS; right: boolean; run: RunOpts }): TableCell {
+function cell(text: string, width: number, o: { borders: ITableCellBorders; fill: string; margins: typeof BODY_MARGINS; right: boolean; run: RunOpts; keepNext?: true }): TableCell {
   return new TableCell({
     width: { size: width, type: WidthType.DXA },
     borders: o.borders,
     verticalAlign: VerticalAlign.CENTER,
     shading: { fill: o.fill, type: ShadingType.CLEAR },
     margins: o.margins,
-    children: [new Paragraph({ alignment: o.right ? AlignmentType.RIGHT : AlignmentType.LEFT, children: [run(text, o.run)] })]
+    children: [new Paragraph({ keepNext: o.keepNext, alignment: o.right ? AlignmentType.RIGHT : AlignmentType.LEFT, children: [run(text, o.run)] })]
   })
 }
 
 // Empty cells print "—" unless keepBlank.
-export function dataTable(headers: string[], rows: string[][], { fractions, totalRow, keepBlank = false }: { fractions?: number[]; totalRow?: string[]; keepBlank?: boolean } = {}): Table {
+// rightAlign overrides the money-column detection per column (a matrix whose columns should all
+// align alike). keepWithNext holds the whole table on the page with what follows. widths fixes the
+// column widths (the two halves of a table split across pages must match).
+export function dataTable(headers: string[], rows: string[][], { fractions, totalRow, keepBlank = false, tableWidth = TEXT_WIDTH, rightAlign, keepWithNext, widths: fixedWidths }: { fractions?: number[]; totalRow?: string[]; keepBlank?: boolean; tableWidth?: number; rightAlign?: boolean[]; keepWithNext?: boolean; widths?: number[] } = {}): Table {
   const filled = rows.map((r) => headers.map((_, i) => (r[i] ?? "").trim() || (keepBlank ? "" : "—")))
   const sizing = totalRow ? [...filled, totalRow] : filled
-  const widths = columnWidths(headers, sizing, fractions, TEXT_WIDTH)
-  const right = numericColumns(sizing, headers.length)
+  const widths = fixedWidths ?? columnWidths(headers, sizing, fractions, tableWidth)
+  const right = rightAlign ?? numericColumns(sizing, headers.length)
+  const keep = keepWithNext || undefined
 
   return new Table({
-    width: { size: TEXT_WIDTH, type: WidthType.DXA },
+    width: { size: tableWidth, type: WidthType.DXA },
     columnWidths: widths,
     layout: TableLayoutType.FIXED,
     borders: TABLE_NO_BORDERS,
@@ -324,16 +365,16 @@ export function dataTable(headers: string[], rows: string[][], { fractions, tota
       new TableRow({
         tableHeader: true,
         cantSplit: true,
-        children: headers.map((h, i) => cell(h.toUpperCase(), widths[i], { borders: HEAD_BORDERS, fill: CHAR, margins: HEAD_MARGINS, right: right[i], run: { bold: true, color: WHITE, size: 15, characterSpacing: 20 } }))
+        children: headers.map((h, i) => cell(h.toUpperCase(), widths[i], { borders: HEAD_BORDERS, fill: CHAR, margins: HEAD_MARGINS, right: right[i], keepNext: keep, run: { bold: true, color: WHITE, size: 15, characterSpacing: 20 } }))
       }),
       ...filled.map((r, ri) => new TableRow({
         cantSplit: true,
-        children: r.map((text, i) => cell(text, widths[i], { borders: BODY_BORDERS, fill: ri % 2 ? PALE_MINT : WHITE, margins: BODY_MARGINS, right: right[i], run: { size: 18 } }))
+        children: r.map((text, i) => cell(text, widths[i], { borders: BODY_BORDERS, fill: ri % 2 ? PALE_MINT : WHITE, margins: BODY_MARGINS, right: right[i], keepNext: keep, run: { size: 18 } }))
       })),
       ...(totalRow
         ? [new TableRow({
             cantSplit: true,
-            children: totalRow.map((text, i) => cell(text, widths[i], { borders: NO_BORDERS, fill: GREEN, margins: HEAD_MARGINS, right: right[i], run: { bold: true, color: WHITE, size: 19 } }))
+            children: totalRow.map((text, i) => cell(text, widths[i], { borders: NO_BORDERS, fill: GREEN, margins: HEAD_MARGINS, right: right[i], keepNext: keep, run: { bold: true, color: WHITE, size: 19 } }))
           })]
         : [])
     ]
@@ -342,11 +383,15 @@ export function dataTable(headers: string[], rows: string[][], { fractions, tota
 
 // ---------- COVER ART ----------
 
-export function coverArcs(): Paragraph {
+// heightInches scales the art down (same aspect) on a crowded cover; default is the skill's 2.9" × 4.53".
+export function coverArcs(heightInches?: number): Paragraph {
+  const transformation = heightInches === undefined
+    ? { width: 2.9 * 96, height: 4.53 * 96 }
+    : { width: heightInches * (2.9 / 4.53) * 96, height: heightInches * 96 }
   return new Paragraph({
     alignment: AlignmentType.RIGHT,
     spacing: { before: 0, after: 0 },
-    children: [new ImageRun({ type: "png", data: readFileSync(ARCS_PATH), transformation: { width: 2.9 * 96, height: 4.53 * 96 } })]
+    children: [new ImageRun({ type: "png", data: readFileSync(ARCS_PATH), transformation })]
   })
 }
 
@@ -356,13 +401,14 @@ export type CoverOptions = {
   eyebrow: string                      // "Commercial Insurance Proposal"
   title: string                        // the client's name — charcoal 22pt
   titleAccent: string                  // "Your 2027–2028 insurance program." — green 18pt; keep to one line
-  subtitle: string                     // one sentence, 10pt
+  subtitle?: string                    // one sentence, 10pt; omitted on the Pre-Renewal Review
   preparedFor: {
     headline: [string, string]         // [charcoal, green]: ["Confidence in your coverage", "comes first."]
     facts: [string, string][]          // exactly three cards
     note?: string                      // small italic line under the cards
   }
-  preparedBy: [string, string][]       // three cards on the charcoal band
+  preparedBy: [string, string][]       // cards on the charcoal band, three per row; none omits the band
+  preparedByEyebrow?: string           // the band's label — default "Prepared By"
   tagline?: string
 }
 
@@ -381,6 +427,14 @@ function cardLines(value: string): number {
 // beyond its usual two-line cards and no note, so the cover stays one page with long names.
 const HERO_HEIGHT = 7200
 const CARD_LINE = 250
+// Each charcoal-band card row past the first (the Pre-Renewal Review's one card per policy) takes
+// ~750 twips. The hero gives that up first, down to the arc art's own height; then the contact
+// band's bottom padding, down to its normal 420; then — a crowded cover — the hero tightens its
+// logo spacing and scales the arc art down (to no less than 3.4").
+const BAND_CARD_ROW = 750
+const HERO_FLOOR = 6600
+const CONTACT_BOTTOM = 1400
+const ARCS_MIN_INCHES = 3.4
 
 // Mint hero (logo, eyebrow, two-tone title, arc art), "Prepared For" cards, charcoal "Prepared By"
 // band, mint contact band. Must fit one page (skill: trim hero padding first): the hero shrinks by
@@ -392,6 +446,23 @@ const CARD_LINE = 250
 // otherwise the arc art, which should bleed off the top edge, drops ~0.5".
 export function coverPage(o: CoverOptions): Block[] {
   const extraLines = Math.max(0, Math.max(...o.preparedFor.facts.map(([, v]) => cardLines(v))) - 2) + (o.preparedFor.note ? 1 : 0)
+  const extraBandRows = Math.max(0, Math.ceil(o.preparedBy.length / 3) - 1)
+  let heroHeight = HERO_HEIGHT - CARD_LINE * extraLines
+  let contactBottom = CONTACT_BOTTOM
+  let arcsInches: number | undefined
+  let crowded = false
+  if(extraBandRows > 0) {
+    const wanted = heroHeight - BAND_CARD_ROW * extraBandRows
+    heroHeight = Math.max(HERO_FLOOR, wanted)
+    const short = heroHeight - wanted
+    contactBottom = Math.max(420, CONTACT_BOTTOM - short)
+    const stillShort = short - (CONTACT_BOTTOM - contactBottom)
+    if(stillShort > 0) {
+      crowded = true
+      heroHeight = Math.max(4900, HERO_FLOOR - stillShort - 600)
+      arcsInches = Math.max(ARCS_MIN_INCHES, heroHeight / 1440)
+    }
+  }
   const hero = new Table({
     width: { size: PAGE_WIDTH, type: WidthType.DXA },
     columnWidths: [7740, 4500],
@@ -399,7 +470,7 @@ export function coverPage(o: CoverOptions): Block[] {
     borders: TABLE_NO_BORDERS,
     rows: [new TableRow({
       cantSplit: true,
-      height: { value: HERO_HEIGHT - CARD_LINE * extraLines, rule: HeightRule.ATLEAST },
+      height: { value: heroHeight, rule: HeightRule.ATLEAST },
       children: [
         new TableCell({
           width: { size: 7740, type: WidthType.DXA },
@@ -408,11 +479,11 @@ export function coverPage(o: CoverOptions): Block[] {
           margins: { top: 0, bottom: 0, left: 900, right: 0 },
           verticalAlign: VerticalAlign.CENTER,
           children: [
-            new Paragraph({ spacing: { before: 480, after: 700 }, children: [logoRun(2.3)] }),
+            new Paragraph({ spacing: { before: crowded ? 240 : 480, after: crowded ? 360 : 700 }, children: [logoRun(2.3)] }),
             eyebrow(o.eyebrow),
             accentRule({ textWidth: 6840, after: 240 }),
-            headline([[o.title, CHAR, 44], [o.titleAccent, GREEN, 36]], { breakBetween: true, after: 240 }),
-            body(o.subtitle, { after: 360 })
+            headline([[o.title, CHAR, 44], [o.titleAccent, GREEN, 36]], { breakBetween: true, after: o.subtitle ? 240 : 360 }),
+            ...(o.subtitle ? [body(o.subtitle, { after: 360 })] : [])
           ]
         }),
         new TableCell({
@@ -421,7 +492,7 @@ export function coverPage(o: CoverOptions): Block[] {
           shading: { fill: MINT, type: ShadingType.CLEAR },
           margins: { top: 0, bottom: 0, left: 0, right: 0 },
           verticalAlign: VerticalAlign.TOP,
-          children: [coverArcs()]
+          children: [coverArcs(arcsInches)]
         })
       ]
     })]
@@ -434,12 +505,14 @@ export function coverPage(o: CoverOptions): Block[] {
     ...(o.preparedFor.note ? [body(o.preparedFor.note, { italics: true, size: 17, before: 80, after: 0 })] : [])
   ], { offset: 0, top: 640, bottom: 760 })
 
-  const preparedBy = band(CHAR, [
-    eyebrow("Prepared By", { color: WHITE }),
-    factGrid(o.preparedBy, { labelColor: ARC, valueColor: WHITE, textWidth: COVER_TEXT_WIDTH })
-  ], { offset: 0, top: 440, bottom: 400 })
+  const preparedBy = o.preparedBy.length > 0
+    ? [band(CHAR, [
+        eyebrow(o.preparedByEyebrow ?? "Prepared By", { color: WHITE }),
+        factGrid(o.preparedBy, { labelColor: ARC, valueColor: WHITE, textWidth: COVER_TEXT_WIDTH })
+      ], { offset: 0, top: 440, bottom: 400 })]
+    : []
 
-  return [hero, preparedFor, preparedBy, contactBand({ offset: 0, top: 420, bottom: 1400, tagline: o.tagline })]
+  return [hero, preparedFor, ...preparedBy, contactBand({ offset: 0, top: 420, bottom: contactBottom, tagline: o.tagline })]
 }
 
 // "Prepared By" cards when no advisor is known: the agency itself.
@@ -459,12 +532,19 @@ export function advisorPreparedBy(advisor: { name: string; phone: string; email:
 // them: the closing page is its own docx section and this is that section's page footer, so it sits
 // at the bottom and can't split across pages. The usual footer line (page number) stays under it.
 
-export function closingFooter({ disclaimer, tagline }: { disclaimer: string; tagline?: string }): Footer {
+// sideMargin / textWidth for other page margins (the PL letter: 900 / 10440); disclaimer optional
+// (the PL letter's notice is at the top). compact: smaller logo and padding.
+export function closingFooter({ disclaimer, tagline, sideMargin = SIDE_MARGIN, textWidth = TEXT_WIDTH, compact = false }: { disclaimer?: string; tagline?: string; sideMargin?: number; textWidth?: number; compact?: boolean }): Footer {
+  const pad = compact ? 280 : 420
   return new Footer({
     children: [
-      contactBand({ offset: -SIDE_MARGIN, top: 420, bottom: 420, tagline }),
-      new Paragraph({ alignment: AlignmentType.CENTER, spacing: { before: 160, after: 200 }, children: [run(disclaimer, { italics: true, size: 14, color: DISCLAIMER_GRAY })] }),
-      footerLine()
+      compact
+        ? contactBand({ offset: -sideMargin, top: pad, bottom: pad, tagline, logoWidth: 1.25 })
+        : contactBand({ offset: -sideMargin, top: pad, bottom: pad, tagline }),
+      disclaimer
+        ? new Paragraph({ alignment: AlignmentType.CENTER, spacing: { before: 160, after: 200 }, children: [run(disclaimer, { italics: true, size: 14, color: DISCLAIMER_GRAY })] })
+        : new Paragraph({ spacing: { before: 0, after: 160 }, children: [] }),
+      footerLine(textWidth)
     ]
   })
 }

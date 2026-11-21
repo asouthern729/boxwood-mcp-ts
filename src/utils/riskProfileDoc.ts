@@ -1,25 +1,31 @@
-import { AlignmentType, BorderStyle, Document, ImageRun, LineRuleType, Packer, Paragraph } from "docx"
-import { readFileSync } from "node:fs"
-import path from "node:path"
+import { Document, LineRuleType, Packer, Paragraph, SectionType } from "docx"
+import { blocksPiece, createLayout, type Block, type BlockPiece, type Piece, tablePiece } from "./docLayout.js"
 import {
-  AGENCY, CELL_PADDING, GREEN as PROPOSAL_GREEN, HEADER_FILL, MARGIN, MUTED, PAGE_WIDTH, PROPOSAL_LOGO_PATH, TEXT,
-  banner, centered, columnWidths, dataTable, divider, pageBreak, run, subHeader, type Block
-} from "./proposalStyle.js"
+  COVER_MARGINS, FOOTER_STYLE, CHAR, PAGE_HEIGHT, PAGE_WIDTH, closingFooter, coverPage as brandCover, interiorFooter,
+  interiorHeader, sectionOpener, subHeader
+} from "./proposalBrand.js"
 
-// The Pre-Renewal Review, styled like the CL Renewal Summary (Andrew, 2026-10-10): same palette,
-// cover, banners and data tables (proposalStyle.ts), but sections flow on from one another instead
-// of each starting a page, and nothing about premium appears anywhere. Section data comes from
-// already-queried Postgres rows (clPolicyData.ts).
+// The Pre-Renewal Review (risk_profile). Content follows Patrick's pre-renewal-review skill:
+// exposures and schedules only — no coverage summaries, nothing about premium — with sections only
+// for lines in force, in the skill's order. Section data comes from already-queried Postgres rows
+// (clPolicyData.ts).
 //
-// Page breaks: an unconditional break per section wastes half a page or splits a table awkwardly,
-// so layoutSections() estimates each section's height and only breaks when the next section won't
-// fit in what's left (ported from the client-supplied pre-renewal-review skill's build-template.js).
+// Styled in Boxwood's house style (proposalBrand.ts, Patrick 2026-11-21: every output document
+// shares it): the house cover (no advisor block — Patrick removed it; the charcoal band lists the
+// program's carriers and lines instead), the logo + client-name page header and page-number footer,
+// compact section openers, charcoal-header data tables, and the mint contact band at the foot of the
+// last page. Side margins stay 0.625" so the six-column tables keep their room.
+//
+// Page breaks (the skill's "keep it condensed"): an unconditional break per section wastes half a
+// page or splits a table awkwardly, so layoutSections() estimates each section's height and only
+// breaks when the next section won't fit in what's left. The content after the last break is the
+// closing page, cut to one page by docLayout's splitForClosing so the band prints there only.
 
-// The older palette — still used by the PL Renewal Summary (plRenewalSummaryDoc.ts).
-export const GREEN = "459361"
-export const NEARBLACK = "231F20"
-export const LIGHTGREEN = "E3F0E7"
-export const LOGO_PATH = path.join(import.meta.dirname, "..", "..", "assets", "boxwood-logo.png")
+const MARGIN_X = 900
+const TEXT_WIDTH = PAGE_WIDTH - 2 * MARGIN_X // 10440 DXA
+const MARGINS = { top: 1300, right: MARGIN_X, bottom: 900, left: MARGIN_X, header: 400, footer: 400 }
+
+const layout = createLayout(TEXT_WIDTH)
 
 export function money(v: number | string | null | undefined): string {
   if(v === null || v === undefined || v === "") return ""
@@ -31,69 +37,76 @@ export function money(v: number | string | null | undefined): string {
 }
 
 // ---------- HEIGHT ESTIMATION / PAGE-FIT LOGIC ----------
-// Estimates in twips for proposalStyle's figures (9pt table text, 70/80 cell margins, 14pt banner,
-// 12pt sub-header). If those change, re-check against a rendered PDF.
-const PAGE_USABLE_HEIGHT = 15840 - 2 * MARGIN // 14040 twips per page
+// Table heights come from docLayout; the rest are this document's own figures, in twips.
+const PAGE_USABLE_HEIGHT = Math.floor(0.97 * (PAGE_HEIGHT - MARGINS.top - MARGINS.bottom))
+// A page carrying the full-size closing band, with docLayout's safety margin.
+const CLOSING_PAGE_HEIGHT = Math.floor(0.92 * (PAGE_HEIGHT - MARGINS.top - 2900))
 const SECTION_GAP = 560 // the extra space between sections, ~0.4" — exact line height, so it's precise
-const BANNER_HEIGHT = 700 // banner row (100+100 margins + 14pt line) plus its spacer
-const SUB_HEADER_HEIGHT = 560
-const ROW_LINE_HEIGHT = 230
-const BODY_ROW_VPAD = 140
-const HEADER_ROW_VPAD = 160
-const TEXT_CHAR_WIDTH = 100 // ~one 9pt Arial character, in DXA
+const OPENER_HEIGHT = 1050 // measured from a render: eyebrow, rule, 14pt headline and their spacing
+const SUB_HEADER_HEIGHT = 580
 
-function estimateCellLines(text: string, width: number): number {
-  const charsPerLine = Math.max(1, Math.floor((width - CELL_PADDING) / TEXT_CHAR_WIDTH))
-  return Math.max(1, Math.ceil(String(text).length / charsPerLine))
+const pad = (n: number) => String(n).padStart(2, "0")
+
+type SectionBody = { title: string; pieces: Piece[] }
+// A section opener can also force its own page break (pageBreakBefore) when layoutSections starts
+// the section on a new page.
+type Section = Piece[]
+
+function opener(title: string, index: number, total: number): BlockPiece {
+  return blocksPiece(OPENER_HEIGHT, (_startsPage, breakBefore) => sectionOpener({
+    eyebrowText: `Section ${ pad(index + 1) } of ${ pad(total) }`, title, compact: true, before: 0, pageBreak: breakBefore, textWidth: TEXT_WIDTH
+  }), { keepWithNext: true })
 }
 
-function estimateRowHeight(values: string[], widths: number[], vpad: number): number {
-  const lines = Math.max(1, ...values.map((v, i) => estimateCellLines(v, widths[i])))
-  return lines * ROW_LINE_HEIGHT + vpad
-}
+// Dropped when it would open a page.
+const sectionGap = () => blocksPiece(SECTION_GAP, (startsPage) => startsPage ? [] : [
+  new Paragraph({ spacing: { before: 0, after: 0, line: SECTION_GAP, lineRule: LineRuleType.EXACT }, children: [] })
+])
 
-function estimateTableHeight(headers: string[], rows: string[][]): number {
-  const widths = columnWidths(headers, rows)
-  return estimateRowHeight(headers, widths, HEADER_ROW_VPAD) + rows.reduce((h, r) => h + estimateRowHeight(r, widths, BODY_ROW_VPAD), 0)
-}
-
-type DocSection = { height: number; blocks: Block[] }
-
-function gap(): Paragraph {
-  return new Paragraph({ spacing: { before: 0, after: 0, line: SECTION_GAP, lineRule: LineRuleType.EXACT }, children: [] })
-}
+const sectionHeight = (section: Section) => section.reduce((h, p) => h + layout.pieceHeight(p), 0)
 
 // The gap goes before every section except one starting a page. A section taller than a page still
 // starts on a fresh page and flows on — the `cursor > 0` guard keeps it from breaking when already
-// at the top of one.
-function layoutSections(sectionList: DocSection[]): Block[] {
-  let cursor = 0
-  const out: Block[] = []
+// at the top of one. "break" marks a forced page break.
+type Item = Piece | "break"
 
-  for(const sec of sectionList) {
+function layoutSections(sections: Section[]): Item[] {
+  let cursor = 0
+  const out: Item[] = []
+
+  for(const sec of sections) {
+    const height = sectionHeight(sec)
     const gapHeight = cursor > 0 ? SECTION_GAP : 0
 
-    if(cursor > 0 && gapHeight + sec.height > PAGE_USABLE_HEIGHT - cursor) {
-      out.push(pageBreak())
+    if(cursor > 0 && gapHeight + height > PAGE_USABLE_HEIGHT - cursor) {
+      out.push("break")
       cursor = 0
     } else if(gapHeight > 0) {
-      out.push(gap())
+      out.push(sectionGap())
       cursor += gapHeight
     }
 
-    out.push(...sec.blocks)
-    cursor = cursor + sec.height <= PAGE_USABLE_HEIGHT ? cursor + sec.height : (cursor + sec.height) % PAGE_USABLE_HEIGHT
+    out.push(...sec)
+    cursor = cursor + height <= PAGE_USABLE_HEIGHT ? cursor + height : (cursor + height) % PAGE_USABLE_HEIGHT
   }
 
   return out
 }
 
-function tableSection(title: string, headers: string[], rows: string[][], opts: { keepBlank?: boolean } = {}): DocSection | null {
-  if(rows.length === 0) return null
-  return {
-    height: BANNER_HEIGHT + estimateTableHeight(headers, rows),
-    blocks: [...banner(title, { withLogo: false }), dataTable(headers, rows, undefined, opts)]
+function renderFlow(items: Item[]): Block[] {
+  const out: Block[] = []
+  let breakNext = false
+  for(const item of items) {
+    if(item === "break") { breakNext = true; continue }
+    out.push(...(item.kind === "table" ? layout.render([item], false) : item.render(false, breakNext)))
+    breakNext = false
   }
+  return out
+}
+
+function tableSection(title: string, headers: string[], rows: string[][], opts: { keepBlank?: boolean } = {}): SectionBody | null {
+  if(rows.length === 0) return null
+  return { title, pieces: [tablePiece(headers, rows, opts)] }
 }
 
 // ---------- SECTION INPUT TYPES ----------
@@ -146,17 +159,17 @@ export type RiskProfileInput = {
   wcExposure: WcExposureRow[]
 }
 
-function namedInsuredsSection(clientName: string, additional: string[]): DocSection | null {
+function namedInsuredsSection(clientName: string, additional: string[]): SectionBody | null {
   return tableSection("Named Insureds", ["Named Insured"], [clientName, ...additional].map((n) => [n]))
 }
 
-function locationsSection(rows: LocationRow[]): DocSection | null {
+function locationsSection(rows: LocationRow[]): SectionBody | null {
   return tableSection("Locations Schedule", ["Loc #", "Address", "City", "State", "Zip"], rows.map((l) => [l.locNo, l.address, l.city, l.state, l.zip]))
 }
 
 // One row per premise/address — see PropertyRow's own comment and PROPERTY_QUERY in clPolicyData.ts
 // for how this is derived. Description stays blank for staff to annotate.
-function propertySection(rows: PropertyRow[]): DocSection | null {
+function propertySection(rows: PropertyRow[]): SectionBody | null {
   return tableSection(
     "Property Coverage",
     ["Address", "Building Limit", "BPP Limit", "Causes of Loss Form", "Deductible", "Description"],
@@ -166,7 +179,7 @@ function propertySection(rows: PropertyRow[]): DocSection | null {
 }
 
 // Renewal Exposure is left blank for the renewal meeting.
-function glSection(rows: GlExposureRow[]): DocSection | null {
+function glSection(rows: GlExposureRow[]): SectionBody | null {
   return tableSection(
     "General Liability Exposure",
     ["Location", "Class Code", "Classification", "Basis", "Current Exposure", "Renewal Exposure"],
@@ -175,12 +188,10 @@ function glSection(rows: GlExposureRow[]): DocSection | null {
   )
 }
 
-function equipmentSection(blankets: EquipmentBlanket[], items: EquipmentItemRow[]): DocSection | null {
+function equipmentSection(blankets: EquipmentBlanket[], items: EquipmentItemRow[]): SectionBody | null {
   if(blankets.length === 0 && items.length === 0) return null
 
-  const blocks: Block[] = banner("Equipment List & Value", { withLogo: false })
-  let height = BANNER_HEIGHT
-
+  const pieces: Piece[] = []
   for(const blanket of blankets) {
     const rows = [
       ["Covered Location", blanket.coveredLocation],
@@ -191,33 +202,31 @@ function equipmentSection(blankets: EquipmentBlanket[], items: EquipmentItemRow[
       ["Total Scheduled Items", blanket.totalItems],
       ["Deductible", blanket.deductible]
     ]
-    blocks.push(subHeader("Blanket Summary"), dataTable(["Field", "Value"], rows))
-    height += SUB_HEADER_HEIGHT + estimateTableHeight(["Field", "Value"], rows)
+    pieces.push(blocksPiece(SUB_HEADER_HEIGHT, () => [subHeader("Blanket Summary")], { keepWithNext: true }), tablePiece(["Field", "Value"], rows))
   }
 
   if(items.length > 0) {
     const headers = ["Item #", "Manufacturer", "Model", "Description", "Serial #", "Value"]
     const rows = items.map((e) => [e.itemNo, e.manufacturer, e.model, e.description, e.serialNo, e.value])
-    blocks.push(subHeader("Scheduled Items"), dataTable(headers, rows))
-    height += SUB_HEADER_HEIGHT + estimateTableHeight(headers, rows)
+    pieces.push(blocksPiece(SUB_HEADER_HEIGHT, () => [subHeader("Scheduled Items")], { keepWithNext: true }), tablePiece(headers, rows))
   }
 
-  return { height, blocks }
+  return { title: "Equipment List & Value", pieces }
 }
 
-function vehiclesSection(rows: VehicleRow[]): DocSection | null {
+function vehiclesSection(rows: VehicleRow[]): SectionBody | null {
   return tableSection("Vehicle List", ["Veh #", "Year", "Make", "Model", "VIN"], rows.map((v) => [v.vehNo, v.year, v.make, v.model, v.vin]))
 }
 
 // Only columns DRIVERS_QUERY selects — no DOB/license number, which are kept out of the replicated
 // database on purpose (see DRIVERS_QUERY). Date Hired dropped per client feedback (9/13).
-function driversSection(rows: DriverRow[]): DocSection | null {
+function driversSection(rows: DriverRow[]): SectionBody | null {
   return tableSection("Driver Information Schedule", ["Driver #", "Name", "License State"], rows.map((d) => [d.driverNo, d.name, d.licenseState]))
 }
 
 // No Location column per Patrick (9/13): "Just class codes and exposure." Renewal Payroll is left
 // blank for the renewal meeting.
-function wcSection(rows: WcExposureRow[]): DocSection | null {
+function wcSection(rows: WcExposureRow[]): SectionBody | null {
   return tableSection(
     "Workers' Compensation Exposure",
     ["Class Code", "Classification", "Current Payroll", "Renewal Payroll"],
@@ -226,50 +235,66 @@ function wcSection(rows: WcExposureRow[]): DocSection | null {
   )
 }
 
-// Mirrors the CL Renewal Summary's cover (clProposalDoc.ts coverPage). The "Current Policy Period" /
-// "Renewal Effective" lines always show (client feedback, 2026-09-15; kept by Andrew 2026-10-10) and
-// reflect the primary (first-matched) policy's dates; the Carrier | Line of Business table lists
-// every policy in the document.
+// The house cover (proposalBrand.coverPage). The skill's cover ends with the policy period — no
+// meeting date, agent or contact block (Patrick) — so the Prepared For cards are the insured and the
+// "Current Policy Period" / "Renewal Effective" dates (always shown: client feedback 2026-09-15, kept
+// by Andrew 2026-10-10; the primary policy's dates), and the charcoal band, instead of an advisor,
+// lists every policy in the document as line of business → carrier (Andrew, 2026-10-10: "just need
+// the carrier and line of business").
 function coverPage(input: RiskProfileInput): Block[] {
-  return [
-    new Paragraph({ alignment: AlignmentType.CENTER, spacing: { after: 720 }, children: [new ImageRun({ type: "png", data: readFileSync(PROPOSAL_LOGO_PATH), transformation: { width: 3048000 / 9525, height: 885825 / 9525 } })] }),
-    centered([run("PRE-RENEWAL REVIEW", { bold: true, color: PROPOSAL_GREEN, size: 52 })], { before: 600, after: 160 }),
-    divider(HEADER_FILL, 4),
-    centered([run(input.clientName, { bold: true, size: 44 })], { before: 280, after: 120 }),
-    centered([run(`Current Policy Period: ${ input.currentPeriod }`, { size: 26 })], { before: 120 }),
-    centered([run(`Renewal Effective: ${ input.renewalDate }`, { size: 26 })], { after: 360 }),
-    ...(input.coverPolicies.length > 0
-      ? [dataTable(["Carrier", "Line of Business"], input.coverPolicies.map((p) => [p.carrier, p.lineOfBusiness]))]
-      : []),
-    new Paragraph({ spacing: { before: 360 }, border: { bottom: { style: BorderStyle.SINGLE, size: 12, color: PROPOSAL_GREEN, space: 1 } }, children: [] }),
-    centered([run(AGENCY.name, { bold: true, color: PROPOSAL_GREEN, size: 22 })], { before: 240 }),
-    centered([run(AGENCY.address, { color: MUTED })]),
-    pageBreak()
-  ]
+  return brandCover({
+    eyebrow: "Pre-Renewal Review",
+    title: input.clientName,
+    titleAccent: `Renewal effective ${ input.renewalDate }.`,
+    preparedFor: {
+      headline: ["Confidence in your coverage", "comes first."],
+      facts: [["Named Insured", input.clientName], ["Current Policy Period", input.currentPeriod], ["Renewal Effective", input.renewalDate]]
+    },
+    preparedBy: input.coverPolicies.map((p) => [p.lineOfBusiness, p.carrier]),
+    preparedByEyebrow: "Your Program"
+  })
 }
 
 // Returns the section names actually included, in document order — the caller reports this back to
 // the user so they know which sections were present in the source data (never surfaced in the
 // document itself, matching the skill's own "no commentary in the deliverable" rule).
 export async function buildRiskProfileDoc(input: RiskProfileInput): Promise<{ buffer: Buffer; includedSections: string[] }> {
-  const sections = [
-    { name: "Named Insureds", section: namedInsuredsSection(input.clientName, input.additionalNamedInsureds) },
-    { name: "Locations Schedule", section: locationsSection(input.locations) },
-    { name: "Property Coverage", section: propertySection(input.property) },
-    { name: "General Liability Exposure", section: glSection(input.glExposure) },
-    { name: "Equipment List & Value", section: equipmentSection(input.equipmentBlanket, input.equipmentItems) },
-    { name: "Vehicle List", section: vehiclesSection(input.vehicles) },
-    { name: "Driver Information Schedule", section: driversSection(input.drivers) },
-    { name: "Workers' Compensation Exposure", section: wcSection(input.wcExposure) }
-  ].filter((s): s is { name: string; section: DocSection } => s.section !== null)
+  const bodies = [
+    namedInsuredsSection(input.clientName, input.additionalNamedInsureds),
+    locationsSection(input.locations),
+    propertySection(input.property),
+    glSection(input.glExposure),
+    equipmentSection(input.equipmentBlanket, input.equipmentItems),
+    vehiclesSection(input.vehicles),
+    driversSection(input.drivers),
+    wcSection(input.wcExposure)
+  ].filter((s): s is SectionBody => s !== null)
+  const sections = bodies.map((b, i) => [opener(b.title, i, bodies.length), ...b.pieces])
+
+  // The closing page is what layoutSections puts after its last page break (or everything, when
+  // the sections fit on one page). Whatever of it won't fit above the band flows on before it.
+  const items = layoutSections(sections)
+  const lastBreak = items.lastIndexOf("break")
+  const tail = items.slice(lastBreak + 1) as Piece[]
+  const { before, closing } = layout.splitForClosing(tail, CLOSING_PAGE_HEIGHT, { breakBefore: lastBreak >= 0 })
+  const flow = [...renderFlow(items.slice(0, Math.max(0, lastBreak))), ...before]
+
+  const page = { size: { width: PAGE_WIDTH, height: PAGE_HEIGHT }, margin: MARGINS }
+  const header = { default: interiorHeader(input.clientName, { textWidth: TEXT_WIDTH }) }
 
   const doc = new Document({
-    styles: { default: { document: { run: { font: "Arial", size: 20, color: TEXT } } } },
-    sections: [{
-      properties: { page: { size: { width: PAGE_WIDTH, height: 15840 }, margin: { top: MARGIN, right: MARGIN, bottom: MARGIN, left: MARGIN } } },
-      children: [...coverPage(input), ...layoutSections(sections.map((s) => s.section))]
-    }]
+    styles: { default: { document: { run: { font: "Arial", size: 20, color: CHAR } } }, paragraphStyles: [FOOTER_STYLE] },
+    sections: [
+      { properties: { page: { size: { width: PAGE_WIDTH, height: PAGE_HEIGHT }, margin: COVER_MARGINS } }, children: coverPage(input) },
+      ...(flow.length > 0 ? [{ properties: { type: SectionType.NEXT_PAGE, page }, headers: header, footers: { default: interiorFooter({ textWidth: TEXT_WIDTH }) }, children: flow }] : []),
+      {
+        properties: { type: SectionType.NEXT_PAGE, page },
+        headers: header,
+        footers: { default: closingFooter({ sideMargin: MARGIN_X, textWidth: TEXT_WIDTH }) },
+        children: closing
+      }
+    ]
   })
 
-  return { buffer: Buffer.from(await Packer.toBuffer(doc) as unknown as Uint8Array), includedSections: sections.map((s) => s.name) }
+  return { buffer: Buffer.from(await Packer.toBuffer(doc) as unknown as Uint8Array), includedSections: bodies.map((b) => b.title) }
 }
