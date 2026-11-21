@@ -185,11 +185,13 @@ export async function refreshRenewalPremiumSummary(filename: string, options: Re
     return { filename, refreshed_at: refreshedAt, written: false, dry_run: true, changes, skipped_rows: skippedRows }
   }
 
+  // Every non-dry Refresh syncs the linked CL Renewal Summaries' Premium Summary page, whether or not
+  // this workbook changed: a pair already complete when the sync shipped (2026-11-21) — or a summary
+  // built or rebuilt since — has nothing to change here but still needs its page. The sync only
+  // rebuilds a summary whose page would read differently, so an unchanged pair costs a signature check.
   if(edits.length === 0) {
     const seededBaseline = updatedCellMap.some((e, i) => e.current !== entry.cell_map![i].current || e.renewal !== entry.cell_map![i].renewal || e.polids !== entry.cell_map![i].polids)
-    if(!seededBaseline) return { filename, refreshed_at: refreshedAt, written: false, dry_run: false, changes, skipped_rows: skippedRows }
-    recordRenewalPremiumSummaryCellMap(filename, updatedCellMap)
-    // Newly recorded polids can complete a linked summary's premiums.
+    if(seededBaseline) recordRenewalPremiumSummaryCellMap(filename, updatedCellMap)
     const rebuilt = await syncLinkedRenewalSummaries({ ...entry, cell_map: updatedCellMap })
     return { filename, refreshed_at: refreshedAt, written: false, dry_run: false, changes, skipped_rows: skippedRows, renewal_summaries_rebuilt: rebuilt }
   }
@@ -209,7 +211,8 @@ export async function refreshRenewalPremiumSummary(filename: string, options: Re
   }
 
   if(appliedChanges.length === 0) {
-    return { filename, refreshed_at: refreshedAt, written: false, dry_run: false, changes: [], skipped_rows: skippedRows }
+    const rebuilt = await syncLinkedRenewalSummaries(entry)
+    return { filename, refreshed_at: refreshedAt, written: false, dry_run: false, changes: [], skipped_rows: skippedRows, renewal_summaries_rebuilt: rebuilt }
   }
 
   recordRenewalPremiumSummaryRefresh(filename, buffer, refreshedAt, updatedCellMap, refreshReason(appliedChanges))
