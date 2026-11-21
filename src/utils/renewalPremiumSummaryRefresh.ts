@@ -130,6 +130,10 @@ export async function refreshRenewalPremiumSummary(filename: string, options: Re
       continue
     }
 
+    // Rows archived before cell_map carried polids get them here — safe only now, past the check
+    // above: the polno's in-force term is still the one this report was built from.
+    if(cellMapEntry.polids === undefined) cellMapEntry.polids = freshEntries.map((f) => f!.polid)
+
     const freshCurrent = combineSum(freshEntries.map((f) => f!.current))
     const freshRenewal = combineSum(freshEntries.map((f) => f!.renewal))
 
@@ -179,7 +183,7 @@ export async function refreshRenewalPremiumSummary(filename: string, options: Re
   }
 
   if(edits.length === 0) {
-    const seededBaseline = updatedCellMap.some((e, i) => e.current !== entry.cell_map![i].current || e.renewal !== entry.cell_map![i].renewal)
+    const seededBaseline = updatedCellMap.some((e, i) => e.current !== entry.cell_map![i].current || e.renewal !== entry.cell_map![i].renewal || e.polids !== entry.cell_map![i].polids)
     if(seededBaseline) recordRenewalPremiumSummaryCellMap(filename, updatedCellMap)
     return { filename, refreshed_at: refreshedAt, written: false, dry_run: false, changes, skipped_rows: skippedRows }
   }

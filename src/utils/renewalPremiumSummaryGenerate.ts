@@ -182,11 +182,12 @@ export async function generateRenewalPremiumSummary(params: GenerateRenewalPremi
             renewal: existing.renewal !== null || renewal !== null ? (existing.renewal ?? 0) + (renewal ?? 0) : null,
             carrier: existing.carrier.split("; ").includes(carrier) ? existing.carrier : `${ existing.carrier }; ${ carrier }`,
             coverage: existing.coverage.split("; ").includes(coverage) ? existing.coverage : `${ existing.coverage }; ${ coverage }`,
-            policyNos: existing.policyNos.split(", ").includes(policy.polno) ? existing.policyNos : `${ existing.policyNos }, ${ policy.polno }`
+            policyNos: existing.policyNos.split(", ").includes(policy.polno) ? existing.policyNos : `${ existing.policyNos }, ${ policy.polno }`,
+            polids: [...existing.polids, policy.polid]
           }
-        : { current, renewal, carrier, coverage, policyNos: policy.polno }
+        : { current, renewal, carrier, coverage, policyNos: policy.polno, polids: [policy.polid] }
     } else {
-      extraRows.push({ coverage, policyNos: policy.polno, current, renewal, carrier })
+      extraRows.push({ coverage, policyNos: policy.polno, polids: [policy.polid], current, renewal, carrier })
     }
   }
 

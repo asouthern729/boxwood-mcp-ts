@@ -8,6 +8,8 @@ import asyncHandler from "../middleware/async/index.js"
 import { ErrorResponse } from "../utils/errorResponse.js"
 import type { RenewalPremiumSummaryManifestEntry } from "../utils/renewalPremiumSummaryArchive.js"
 import { RENEWAL_PREMIUM_SUMMARY_OUTPUT_DIR, deleteRenewalPremiumSummary, premiumSections, readManifest } from "../utils/renewalPremiumSummaryArchive.js"
+import { documentId, linksForRenewalPremiumSummary } from "../utils/documentLinks.js"
+import { CL_RENEWAL_SUMMARY_OUTPUT_DIR, readClRenewalSummaryManifest } from "../utils/clRenewalSummaryArchive.js"
 import { runRenewalPremiumSummaryChatTurn } from "../utils/renewalPremiumSummaryChat.js"
 import { RenewalPremiumSummaryRefreshError, refreshRenewalPremiumSummary } from "../utils/renewalPremiumSummaryRefresh.js"
 
@@ -49,10 +51,19 @@ export function groupByCsr(entries: ManifestEntryWithSize[]): CsrGroup[] {
   })
 }
 
+// Each entry also carries its document id (the dashboard's URL key) and links to the CL Renewal
+// Summaries for the same policy terms (documentLinks.ts).
 router.get(`${ BASE }/renewal-premium-summaries/manifest`, auth0, (_req, res) => {
+  const summaries = readClRenewalSummaryManifest().filter((summary) => existsSync(path.join(CL_RENEWAL_SUMMARY_OUTPUT_DIR, summary.filename)))
   const entriesWithSize = readManifest()
     .filter((entry) => existsSync(path.join(RENEWAL_PREMIUM_SUMMARY_OUTPUT_DIR, entry.filename)))
-    .map((entry) => ({ ...entry, sizeBytes: statSync(path.join(RENEWAL_PREMIUM_SUMMARY_OUTPUT_DIR, entry.filename)).size, sections: premiumSections(entry) }))
+    .map((entry) => ({
+      ...entry,
+      sizeBytes: statSync(path.join(RENEWAL_PREMIUM_SUMMARY_OUTPUT_DIR, entry.filename)).size,
+      sections: premiumSections(entry),
+      id: documentId("renewal-premium-summary", entry.filename),
+      links: linksForRenewalPremiumSummary(entry, summaries)
+    }))
 
   res.json({ groups: groupByCsr(entriesWithSize) })
 })

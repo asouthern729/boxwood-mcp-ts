@@ -45,8 +45,8 @@ const FIRST_SPARE_ROW = 20
 const OTHER_POLICIES_FIRST_ROW = 27
 const OTHER_POLICIES_MAX_ROWS = 6 // matches the template's 6 pre-styled "other" data rows (27-32)
 
-export type LobRowFill = { current: number | null; renewal: number | null; carrier: string; coverage: string; policyNos: string }
-export type ExtraRow = { coverage: string; policyNos: string; current: number | null; renewal: number | null; carrier: string }
+export type LobRowFill = { current: number | null; renewal: number | null; carrier: string; coverage: string; policyNos: string; polids: string[] }
+export type ExtraRow = { coverage: string; policyNos: string; polids: string[]; current: number | null; renewal: number | null; carrier: string }
 export type OtherPolicyRow = { coveragePolicy: string; expirationDate: string }
 export type PremiumAsOfNote = { polno: string; date: string }
 // Flags a policy whose Current premium didn't come from afw_basicpolinfo.fulltermpremium directly
@@ -80,9 +80,15 @@ export type RenewalPremiumSummaryInput = {
 // title (extra rows only) is the row's coverage text as written to column B — the index page's line
 // status names the row by it. Absent on entries archived before 2026-11-21; a known row's name comes
 // from its code (lobLabel).
+//
+// polids are the row's policy terms (the expiring terms, as at generation) — the key that links this
+// workbook to the CL Renewal Summary built for the same terms (documentLinks.ts), and later carries a
+// row's premiums into that document's matching sections. Absent on entries archived before
+// 2026-11-21; Refresh fills them in for rows whose term hasn't renewed yet.
+type CellMapCommon = { row: number; polnos: string[]; polids?: string[]; current?: number | null; renewal?: number | null }
 export type RenewalPremiumSummaryCellMapEntry =
-  | { row: number; kind: "known"; code: KnownLobCode; polnos: string[]; current?: number | null; renewal?: number | null }
-  | { row: number; kind: "extra"; polnos: string[]; title?: string; current?: number | null; renewal?: number | null }
+  | CellMapCommon & { kind: "known"; code: KnownLobCode }
+  | CellMapCommon & { kind: "extra"; title?: string }
 
 export type BuildRenewalPremiumSummaryWorkbookResult = {
   buffer: Buffer
@@ -189,14 +195,14 @@ export async function buildRenewalPremiumSummaryWorkbook(input: RenewalPremiumSu
       if(entry.fill.renewal !== null) eCell.value = entry.fill.renewal
       sheet.getCell(`D${ row }`).value = entry.fill.carrier
       maxCarrierLen = Math.max(maxCarrierLen, entry.fill.carrier.length)
-      cellMap.push({ row, kind: "known", code: entry.code, polnos: entry.fill.policyNos.split(", "), current: entry.fill.current, renewal: entry.fill.renewal })
+      cellMap.push({ row, kind: "known", code: entry.code, polnos: entry.fill.policyNos.split(", "), polids: entry.fill.polids, current: entry.fill.current, renewal: entry.fill.renewal })
     } else if(entry.kind === "extra") {
       setCoverageCell(bCell, entry.extra.coverage, entry.extra.policyNos)
       cCell.value = entry.extra.current !== null ? entry.extra.current : ""
       if(entry.extra.renewal !== null) eCell.value = entry.extra.renewal
       sheet.getCell(`D${ row }`).value = entry.extra.carrier
       maxCarrierLen = Math.max(maxCarrierLen, entry.extra.carrier.length)
-      cellMap.push({ row, kind: "extra", polnos: entry.extra.policyNos.split(", "), title: entry.extra.coverage, current: entry.extra.current, renewal: entry.extra.renewal })
+      cellMap.push({ row, kind: "extra", polnos: entry.extra.policyNos.split(", "), polids: entry.extra.polids, title: entry.extra.coverage, current: entry.extra.current, renewal: entry.extra.renewal })
     } else if(entry.kind === "blank") {
       // Explicitly cleared (not just left unwritten) — this row may land on a template position that
       // already has a default line label.

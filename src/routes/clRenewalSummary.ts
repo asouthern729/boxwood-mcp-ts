@@ -19,6 +19,8 @@ import type { QuoteUpload } from "../utils/clQuoteStore.js"
 import { logger } from "../utils/logger.js"
 import { extractQuote, QuoteExtractionError } from "../utils/quoteExtraction.js"
 import { groupByCsr } from "./riskProfile.js"
+import { documentId, linksForClRenewalSummary } from "../utils/documentLinks.js"
+import { RENEWAL_PREMIUM_SUMMARY_OUTPUT_DIR, readManifest as readPremiumManifest } from "../utils/renewalPremiumSummaryArchive.js"
 
 // Mirrors routes/riskProfile.ts route-for-route (manifest grouped by CSR, file download/delete
 // validated against the manifest, embedded chat) so the future employee-dashboard frontend can treat
@@ -33,10 +35,18 @@ const MAX_CHAT_MESSAGE_LENGTH = 2000
 const MAX_QUOTE_PDF_BYTES = 24 * 1024 * 1024
 const NOT_FOUND = { error: "not_found", error_description: "This renewal summary doesn't exist." }
 
+// Each entry also carries its document id (the dashboard's URL key) and links to the Renewal Premium
+// Spreadsheet for the same policy terms (documentLinks.ts).
 router.get(`${ BASE }/cl-renewal-summary/manifest`, auth0, (_req, res) => {
+  const spreadsheets = readPremiumManifest().filter((sheet) => existsSync(path.join(RENEWAL_PREMIUM_SUMMARY_OUTPUT_DIR, sheet.filename)))
   const entriesWithSize = readClRenewalSummaryManifest()
     .filter((entry) => existsSync(path.join(CL_RENEWAL_SUMMARY_OUTPUT_DIR, entry.filename)))
-    .map((entry) => ({ ...entry, sizeBytes: statSync(path.join(CL_RENEWAL_SUMMARY_OUTPUT_DIR, entry.filename)).size }))
+    .map((entry) => ({
+      ...entry,
+      sizeBytes: statSync(path.join(CL_RENEWAL_SUMMARY_OUTPUT_DIR, entry.filename)).size,
+      id: documentId("cl-renewal-summary", entry.filename),
+      links: linksForClRenewalSummary(entry, spreadsheets)
+    }))
 
   res.json({ groups: groupByCsr(entriesWithSize) })
 })
