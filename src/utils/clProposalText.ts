@@ -1,5 +1,6 @@
 import { carrierKey, joinList } from "./clProposalLines.js"
 import type { SlotLine } from "./clProposalLines.js"
+import type { WhyBoxwoodPoint } from "./clProposalDoc.js"
 
 // The proposal's narrative paragraphs — fixed wording filled from data (Andrew, 2026-10-08: no LLM
 // pass for now; revisit once Patrick has seen real output). The Executive Summary follows the
@@ -82,7 +83,9 @@ export function executiveSummary(facts: NarrativeFacts): string[] {
   ]
 }
 
-export function whyBoxwood(facts: NarrativeFacts): string[] {
+// Each paragraph carries the 1–3 word lead-in the restyled proposal prints above it (Why Boxwood
+// band, insurance-proposal-copy-reformatting skill Section 6).
+export function whyBoxwood(facts: NarrativeFacts): WhyBoxwoodPoint[] {
   const scope = [
     facts.locationCount > 1 ? plural(facts.locationCount, "location") : "",
     facts.namedInsuredCount > 1 ? plural(facts.namedInsuredCount, "named insured") : "",
@@ -98,7 +101,7 @@ export function whyBoxwood(facts: NarrativeFacts): string[] {
     : " Boxwood is an independent agency, so we build each program around how the business actually operates and place it with the carriers best suited to it."
 
   return [
-    opening + placement,
-    "When a claim happens, our team stays involved from first notice through resolution rather than leaving you to navigate the carrier alone. We also review the program with you before each renewal, so payroll, vehicles, equipment, and locations stay accurate and the coverage keeps pace as the business grows."
+    { lead: "The right program", text: opening + placement },
+    { lead: "Claims & renewals", text: "When a claim happens, our team stays involved from first notice through resolution rather than leaving you to navigate the carrier alone. We also review the program with you before each renewal, so payroll, vehicles, equipment, and locations stay accurate and the coverage keeps pace as the business grows." }
   ]
 }

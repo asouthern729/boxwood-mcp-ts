@@ -126,7 +126,8 @@ function longestToken(text: string): number {
 // Each column gets at least the width of its longest unbreakable word or figure (header or cell),
 // so "$3,933,000" or "Building" never wraps mid-word (seen on the first quote-built property table,
 // 2026-10-08); what's left is shared by the given fractions, or else by each column's content length.
-export function columnWidths(headers: string[], rows: string[][], fractions?: number[]): number[] {
+// tableWidth defaults to this module's TABLE_WIDTH; proposalBrand.ts passes its own 9360.
+export function columnWidths(headers: string[], rows: string[][], fractions?: number[], tableWidth = TABLE_WIDTH): number[] {
   const floors = headers.map((h, i) => Math.max(
     MIN_COLUMN,
     CELL_PADDING + CHAR_DXA * Math.max(longestToken(h), ...rows.map((r) => longestToken(r[i] ?? "")))
@@ -136,18 +137,18 @@ export function columnWidths(headers: string[], rows: string[][], fractions?: nu
 
   // Too many columns to honour every floor: scale the floors down evenly (rare — the extractor is
   // asked for six columns at most).
-  if(floorTotal >= TABLE_WIDTH) return fitToTable(floors.map((f) => Math.floor(f * TABLE_WIDTH / floorTotal)))
+  if(floorTotal >= tableWidth) return fitToTable(floors.map((f) => Math.floor(f * tableWidth / floorTotal)), tableWidth)
 
-  const spare = TABLE_WIDTH - floorTotal
+  const spare = tableWidth - floorTotal
   const weightTotal = weights.reduce((a, b) => a + b, 0) || 1
-  return fitToTable(floors.map((f, i) => f + Math.floor(spare * weights[i] / weightTotal)))
+  return fitToTable(floors.map((f, i) => f + Math.floor(spare * weights[i] / weightTotal)), tableWidth)
 }
 
 // Rounding leaves the sum a few DXA off; the widest column absorbs it so the table is exactly
-// TABLE_WIDTH.
-function fitToTable(widths: number[]): number[] {
+// tableWidth.
+function fitToTable(widths: number[], tableWidth: number): number[] {
   const widest = widths.indexOf(Math.max(...widths))
-  widths[widest] += TABLE_WIDTH - widths.reduce((a, b) => a + b, 0)
+  widths[widest] += tableWidth - widths.reduce((a, b) => a + b, 0)
   return widths
 }
 
@@ -155,7 +156,7 @@ function fitToTable(widths: number[]): number[] {
 // location, vehicle and driver numbers, VIN digits — stay left like his schedules.
 const NUMERIC_CELL = /^(\$[\d,.]+\*?( \/ \$[\d,.]+)*|[\d,.]+%?|—)$/
 
-function numericColumns(rows: string[][], columnCount: number): boolean[] {
+export function numericColumns(rows: string[][], columnCount: number): boolean[] {
   return Array.from({ length: columnCount }, (_, i) => {
     const values = rows.map((r) => r[i] ?? "").filter((v) => v !== "" && v !== "—")
     return values.length > 0 && values.every((v) => NUMERIC_CELL.test(v)) && values.some((v) => /[$%]/.test(v))
