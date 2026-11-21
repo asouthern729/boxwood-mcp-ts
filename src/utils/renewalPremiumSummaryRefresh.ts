@@ -4,6 +4,7 @@ import { RENEWAL_PREMIUM_SUMMARY_OUTPUT_DIR, readManifest, recordRenewalPremiumS
 import { fetchCurrentRenewalByPolno } from "./renewalPremiumSummaryPolicyValues.js"
 import type { NumericCellEdit } from "./xlsxCellPatch.js"
 import { patchNumericCells, readCells } from "./xlsxCellPatch.js"
+import { syncLinkedRenewalSummaries } from "./renewalSummaryPremiumSync.js"
 
 export class RenewalPremiumSummaryRefreshError extends Error {}
 
@@ -30,6 +31,8 @@ export type RenewalPremiumSummaryRefreshResult = {
   dry_run: boolean
   changes: RenewalPremiumSummaryRefreshChange[]
   skipped_rows: RenewalPremiumSummaryRefreshSkip[]
+  // CL Renewal Summaries rebuilt because their Premium Summary page changed (renewalSummaryPremiumSync.ts)
+  renewal_summaries_rebuilt?: string[]
 }
 
 export type RefreshRenewalPremiumSummaryOptions = {
@@ -184,8 +187,11 @@ export async function refreshRenewalPremiumSummary(filename: string, options: Re
 
   if(edits.length === 0) {
     const seededBaseline = updatedCellMap.some((e, i) => e.current !== entry.cell_map![i].current || e.renewal !== entry.cell_map![i].renewal || e.polids !== entry.cell_map![i].polids)
-    if(seededBaseline) recordRenewalPremiumSummaryCellMap(filename, updatedCellMap)
-    return { filename, refreshed_at: refreshedAt, written: false, dry_run: false, changes, skipped_rows: skippedRows }
+    if(!seededBaseline) return { filename, refreshed_at: refreshedAt, written: false, dry_run: false, changes, skipped_rows: skippedRows }
+    recordRenewalPremiumSummaryCellMap(filename, updatedCellMap)
+    // Newly recorded polids can complete a linked summary's premiums.
+    const rebuilt = await syncLinkedRenewalSummaries({ ...entry, cell_map: updatedCellMap })
+    return { filename, refreshed_at: refreshedAt, written: false, dry_run: false, changes, skipped_rows: skippedRows, renewal_summaries_rebuilt: rebuilt }
   }
 
   const { buffer, missing } = await patchNumericCells(originalBuffer, 1, edits)
@@ -207,6 +213,7 @@ export async function refreshRenewalPremiumSummary(filename: string, options: Re
   }
 
   recordRenewalPremiumSummaryRefresh(filename, buffer, refreshedAt, updatedCellMap, refreshReason(appliedChanges))
+  const rebuilt = await syncLinkedRenewalSummaries({ ...entry, cell_map: updatedCellMap })
 
-  return { filename, refreshed_at: refreshedAt, written: true, dry_run: false, changes: appliedChanges, skipped_rows: skippedRows }
+  return { filename, refreshed_at: refreshedAt, written: true, dry_run: false, changes: appliedChanges, skipped_rows: skippedRows, renewal_summaries_rebuilt: rebuilt }
 }

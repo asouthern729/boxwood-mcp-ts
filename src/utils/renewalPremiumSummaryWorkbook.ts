@@ -85,7 +85,11 @@ export type RenewalPremiumSummaryInput = {
 // workbook to the CL Renewal Summary built for the same terms (documentLinks.ts), and later carries a
 // row's premiums into that document's matching sections. Absent on entries archived before
 // 2026-11-21; Refresh fills them in for rows whose term hasn't renewed yet.
-type CellMapCommon = { row: number; polnos: string[]; polids?: string[]; current?: number | null; renewal?: number | null }
+//
+// carrier is the row's Carrier text (column D) as written — the CL Renewal Summary's Premium Summary
+// names each line's carrier from it. Absent on entries archived before 2026-11-21; read from the
+// workbook's column D instead.
+type CellMapCommon = { row: number; polnos: string[]; polids?: string[]; carrier?: string; current?: number | null; renewal?: number | null }
 export type RenewalPremiumSummaryCellMapEntry =
   | CellMapCommon & { kind: "known"; code: KnownLobCode }
   | CellMapCommon & { kind: "extra"; title?: string }
@@ -195,14 +199,14 @@ export async function buildRenewalPremiumSummaryWorkbook(input: RenewalPremiumSu
       if(entry.fill.renewal !== null) eCell.value = entry.fill.renewal
       sheet.getCell(`D${ row }`).value = entry.fill.carrier
       maxCarrierLen = Math.max(maxCarrierLen, entry.fill.carrier.length)
-      cellMap.push({ row, kind: "known", code: entry.code, polnos: entry.fill.policyNos.split(", "), polids: entry.fill.polids, current: entry.fill.current, renewal: entry.fill.renewal })
+      cellMap.push({ row, kind: "known", code: entry.code, polnos: entry.fill.policyNos.split(", "), polids: entry.fill.polids, carrier: entry.fill.carrier, current: entry.fill.current, renewal: entry.fill.renewal })
     } else if(entry.kind === "extra") {
       setCoverageCell(bCell, entry.extra.coverage, entry.extra.policyNos)
       cCell.value = entry.extra.current !== null ? entry.extra.current : ""
       if(entry.extra.renewal !== null) eCell.value = entry.extra.renewal
       sheet.getCell(`D${ row }`).value = entry.extra.carrier
       maxCarrierLen = Math.max(maxCarrierLen, entry.extra.carrier.length)
-      cellMap.push({ row, kind: "extra", polnos: entry.extra.policyNos.split(", "), polids: entry.extra.polids, title: entry.extra.coverage, current: entry.extra.current, renewal: entry.extra.renewal })
+      cellMap.push({ row, kind: "extra", polnos: entry.extra.policyNos.split(", "), polids: entry.extra.polids, title: entry.extra.coverage, carrier: entry.extra.carrier, current: entry.extra.current, renewal: entry.extra.renewal })
     } else if(entry.kind === "blank") {
       // Explicitly cleared (not just left unwritten) — this row may land on a template position that
       // already has a default line label.

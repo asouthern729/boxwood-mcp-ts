@@ -48,6 +48,10 @@ export type DocArchiveEntry = {
   // renewal values (AMS360 renewal term or an uploaded quote) or still the expiring term — the index
   // page lists these under the policy numbers. Absent means the entry predates this field.
   sections?: { title: string; polno: string; renewed: boolean }[]
+  // CL Renewal Summary only: the Premium Summary page's rows and total as last printed — from the
+  // linked Renewal Premium Spreadsheet once every line's renewal premium is in (renewalSummaryPremiums.ts);
+  // null when the page isn't printed. A spreadsheet change that would alter it triggers a rebuild.
+  premium_signature?: string | null
   // Lines of business on the policy whose section is missing from the document (coverageGaps.ts) —
   // for the CSR only; the dashboard flags the document. Absent or empty means none were found (or the
   // entry predates the check, 2026-11-19).

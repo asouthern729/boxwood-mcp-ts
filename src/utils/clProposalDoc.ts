@@ -231,8 +231,9 @@ function lineSection(line: ProposalLine, index: number, total: number, comments:
 }
 
 // Skill Section 4 puts "Bind Conditions & Notes" under the Premium Summary, on a page of its own.
-// The CL Renewal Summary drops the premium table (Patrick, 2026-10-07), so its notes keep that page
-// by themselves.
+// The CL Renewal Summary dropped the premium table (Patrick, 2026-10-07) and now prints it only once
+// its linked Renewal Premium Spreadsheet has every renewal premium (Andrew, 2026-11-21 —
+// renewalSummaryPremiums.ts); without it, its notes keep that page by themselves.
 function bindConditions(input: ClProposalInput, comments: DocComment[], breakBefore: boolean): Block[] {
   const premium = input.premiumSummary
   if(input.bindConditions.items.length === 0 && !premium) return []

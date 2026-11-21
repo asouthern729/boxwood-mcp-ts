@@ -18,9 +18,10 @@ import type { LineOfBusiness, QuoteExtraction, QuoteLineExtraction } from "./quo
 //     own title when the line already has a section from another carrier (Patrick's TN Equine
 //     example: American Modern dwelling fire beside Cincinnati property); a stand-alone add-on
 //     (specialty_addon) becomes its own Section 5 add-on.
-//   - The CL Renewal Summary never shows premiums — its Premium Summary page is dropped (Patrick,
-//     2026-10-07). Each quoted line still carries its premium (SlotLine.premium) for the Proposal
-//     Builder's Premium Summary (Patrick, 2026-10-18).
+//   - The CL Renewal Summary's premiums come from its linked Renewal Premium Spreadsheet (AMS360),
+//     never from a quote (Andrew, 2026-11-21 — renewalSummaryPremiums.ts); a quoted line's premium
+//     only appears in that page's CSR comment, for comparison. Each quoted line still carries its
+//     premium (SlotLine.premium) for that and the Proposal Builder's Premium Summary (Patrick, 2026-10-18).
 //   - With withExposures (the Proposal Builder), a quoted line with no AMS360 schedules gets the
 //     quote's own GL class, vehicle and driver tables — built from quotes alone, nothing else
 //     supplies them (Patrick's Landon proposal, 2026-10-18).

@@ -1,6 +1,7 @@
 import { publicBaseUrl } from "../config/config.js"
 import { runReadOnlyQuery } from "../db.js"
 import { archiveRenewalPremiumSummary } from "./renewalPremiumSummaryArchive.js"
+import { syncLinkedRenewalSummaries } from "./renewalSummaryPremiumSync.js"
 import { computeCurrentRenewal } from "./renewalPremiumSummaryPolicyValues.js"
 import { fetchPolicyLobInfo } from "./policyLineOfBusiness.js"
 import { sanitizeForFilename } from "./riskProfileArchive.js"
@@ -228,7 +229,7 @@ export async function generateRenewalPremiumSummary(params: GenerateRenewalPremi
   // custid-only names; documentLinks.ts ids follow the filename either way.
   const archiveFilename = `${ sanitizeForFilename(clientName) }_${ custid }_${ renewalMonthOf(formatDate(earliestRenewalDate)) }.xlsx`
 
-  archiveRenewalPremiumSummary(buffer, {
+  const archiveEntry = {
     filename: archiveFilename,
     generated_at: new Date().toISOString(),
     custid,
@@ -239,7 +240,10 @@ export async function generateRenewalPremiumSummary(params: GenerateRenewalPremi
     renewal_date: formatDate(earliestRenewalDate),
     renewal_date_label: renewalDateLabel,
     cell_map: cellMap
-  })
+  }
+  archiveRenewalPremiumSummary(buffer, archiveEntry)
+  // A linked CL Renewal Summary may now have every renewal premium (or a changed one) for its page.
+  await syncLinkedRenewalSummaries(archiveEntry)
 
   return {
     status: "generated",

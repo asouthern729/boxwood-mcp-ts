@@ -13,6 +13,7 @@ import { executiveSummary } from "./clProposalText.js"
 import { withClRenewalTerms } from "./clRenewalTerms.js"
 import { renewalSummaryGaps, type CoverageGap } from "./coverageGaps.js"
 import { fetchPolicyLobInfo } from "./policyLineOfBusiness.js"
+import { linkedPremiumSummary } from "./renewalSummaryPremiums.js"
 
 export type GeneratedClRenewalSummary = {
   buffer: Buffer
@@ -178,6 +179,10 @@ export async function buildClRenewalSummary(
     { role: "Agency", name: "Boxwood Insurance Group, LLC", phone: AGENCY_PHONE, email: "www.boxwoodins.com" }
   ]
 
+  // The Premium Summary page, from the linked Renewal Premium Spreadsheet once every line's renewal
+  // premium is in (renewalSummaryPremiums.ts) — none until then.
+  const premiums = await linkedPremiumSummary(matches.map((m) => m.polid), lines)
+
   const { buffer, includedSections } = await buildClProposalDoc({
     clientName,
     clientAddress: contacts
@@ -196,6 +201,7 @@ export async function buildClRenewalSummary(
     locations: exposures.locations,
     lines,
     bindConditions: merged.bindConditions,
+    premiumSummary: premiums.summary,
     specialtyAddOns: merged.specialtyAddOns,
     serviceTeam
   })
@@ -217,6 +223,7 @@ export async function buildClRenewalSummary(
     renewal_polids: terms.filter((t) => t.isRenewal).map((t) => t.current.polid),
     sections: lines.map((l) => ({ title: l.title, polno: l.polno, renewed: !isPending(l) })),
     coverage_gaps: coverageGaps,
+    premium_signature: premiums.signature,
     ...renewalDateFields(matches)
   }
 

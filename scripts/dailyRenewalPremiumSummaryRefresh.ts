@@ -73,6 +73,10 @@ async function main() {
         unchanged.push(filename)
       }
 
+      for(const summary of result.renewal_summaries_rebuilt ?? []) {
+        console.log(`${ LOG_PREFIX }   rebuilt CL Renewal Summary ${ summary } — its Premium Summary changed`)
+      }
+
       for(const skip of result.skipped_rows) {
         console.log(`${ LOG_PREFIX }   skipped ${ filename } row ${ skip.row } [${ skip.polnos.join(", ") }]: ${ skip.reason }`)
       }
