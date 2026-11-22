@@ -4,7 +4,7 @@ import { pullAmsCrossCheck } from "./policyCheckAms.js"
 import { MAX_TOTAL_PAGES, PolicyCheckError, runPolicyCheck, type CheckDocument, type CheckRowFindings, type DocumentProfile, type PolicyCheckFindings } from "./policyCheckAnalysis.js"
 import { buildPolicyCheckDoc } from "./policyCheckDoc.js"
 import {
-  createCheck, finishRunning, getCheck, getOwnedAttachment, readAttachmentFile, saveFindings, updateAttachment, writeCheck, writeReport,
+  createCheck, finishRunning, getCheck, getOwnedAttachment, readAttachmentFile, saveFindings, writeCheck, writeReport,
   type CheckEntry, type PolicyCheckAttachment, type PolicyCheckUser
 } from "./policyCheckStore.js"
 
@@ -153,7 +153,7 @@ export function startCheck(user: PolicyCheckUser, attachmentIds: string[], o: { 
   if(missing.length > 0) throw new CheckRefused(`These files weren't found among your uploads: ${ missing.join(", ") }`)
   const attachments = records as PolicyCheckAttachment[]
 
-  const used = attachments.filter((a) => a.check_id)
+  const used = attachments.filter((a) => a.job_id)
   if(used.length > 0) throw new CheckRefused(`${ used.map((a) => a.filename).join(", ") } already belong(s) to another check. Upload the file again to use it in a new one.`)
   const reading = attachments.filter((a) => a.status === "processing")
   if(reading.length > 0) throw new CheckRefused(`Still reading ${ reading.map((a) => a.filename).join(", ") }. Try again in a moment.`)
@@ -170,9 +170,9 @@ export function startCheck(user: PolicyCheckUser, attachmentIds: string[], o: { 
     created_by: user,
     prepared_by: user.name,
     ...(o.notes?.trim() ? { notes: o.notes.trim().slice(0, 2000) } : {}),
+    mode: null,
     sources: attachments.map((a) => ({ id: a.id, filename: a.filename, role: a.role }))
-  })
-  for(const a of attachments) updateAttachment({ ...a, check_id: entry.id })
+  }, attachments)
   void executeCheck(entry, attachments)
   logger.info({ sub: user.sub, check: entry.id, files: attachments.length, pages }, "policy_check: check started")
   return entry

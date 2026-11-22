@@ -4,7 +4,7 @@ import { readFileSync } from "node:fs"
 import path from "node:path"
 import auth0 from "../middleware/auth/auth0/index.js"
 import asyncHandler from "../middleware/async/index.js"
-import { fetchUserInfo } from "../utils/auth0.js"
+import { currentUser, viewerSub } from "../utils/docToolUser.js"
 import { recordDownload } from "../utils/downloadLog.js"
 import { PdfConverterUnavailableError, pdfForDocx } from "../utils/docxToPdf.js"
 import { ErrorResponse } from "../utils/errorResponse.js"
@@ -14,7 +14,7 @@ import { runPolicyCheckChatTurn } from "../utils/policyCheckChat.js"
 import { CheckRefused, startCheck } from "../utils/policyCheckRun.js"
 import {
   attachmentSummary, deleteAttachment, deleteCheck, getCheck, getOwnedAttachment, listChecks, reportPath, reportSize,
-  saveAttachment, updateAttachment, type CheckEntry, type PolicyCheckAttachment, type PolicyCheckUser
+  saveAttachment, updateAttachment, type CheckEntry, type PolicyCheckAttachment
 } from "../utils/policyCheckStore.js"
 import { normalizedPdf } from "../utils/quoteExtraction.js"
 
@@ -32,26 +32,6 @@ const NOT_FOUND = { error: "not_found", error_description: "This check doesn't e
 const ATTACHMENT_NOT_FOUND = { error: "not_found", error_description: "This file doesn't exist." }
 
 const isRole = (value: unknown): value is PolicyCheckRole => typeof value === "string" && (ROLES as readonly string[]).includes(value)
-
-function viewerSub(req: Pick<Request, "auth0">): string {
-  const sub = req.auth0?.sub
-  if(!sub) throw new ErrorResponse("Not authorized to access this route", 401)
-  return sub
-}
-
-// Name and email from Auth0 /userinfo (the access token doesn't carry them), cached for an hour.
-const userCache = new Map<string, { user: PolicyCheckUser; at: number }>()
-
-async function currentUser(req: Pick<Request, "auth0" | "headers">): Promise<PolicyCheckUser> {
-  const sub = viewerSub(req)
-  const cached = userCache.get(sub)
-  if(cached && Date.now() - cached.at < 60 * 60 * 1000) return cached.user
-  const token = req.headers.authorization?.slice("Bearer ".length) ?? ""
-  const info = await fetchUserInfo(token)
-  const user = { sub, name: info.label ?? info.email ?? "Unknown", email: info.email ?? "" }
-  userCache.set(sub, { user, at: Date.now() })
-  return user
-}
 
 function publicEntry(entry: CheckEntry) {
   const { notes: _notes, ...rest } = entry
@@ -215,7 +195,7 @@ router.patch(`${ BASE }/attachments/:id`, auth0, express.json(), (req: Request<{
     res.status(400).json({ error: "invalid_role", error_description: "role must be baseline, compared or reference." })
     return
   }
-  if(record.check_id) {
+  if(record.job_id) {
     res.status(409).json({ error: "in_use", error_description: "This file is part of a check and can't be moved." })
     return
   }
@@ -230,7 +210,7 @@ router.delete(`${ BASE }/attachments/:id`, auth0, (req: Request<{ id: string }>,
     res.status(404).json(ATTACHMENT_NOT_FOUND)
     return
   }
-  if(record.check_id) {
+  if(record.job_id) {
     res.status(409).json({ error: "in_use", error_description: "This file is part of a check; delete the check to remove it." })
     return
   }
@@ -252,7 +232,7 @@ router.post(`${ BASE }/chat`, auth0, asyncHandler(async(req: Request, res: Respo
 
   const user = await currentUser(req)
   // Chips that went into a check meanwhile, or were deleted, are just left out.
-  const attachments = (attachment_ids as string[]).map((id) => getOwnedAttachment(id, user.sub)).filter((a): a is PolicyCheckAttachment => a !== null && !a.check_id)
+  const attachments = (attachment_ids as string[]).map((id) => getOwnedAttachment(id, user.sub)).filter((a): a is PolicyCheckAttachment => a !== null && !a.job_id)
 
   const started = Date.now()
   const turn = await runPolicyCheckChatTurn(message.trim(), session_id, user, attachments)

@@ -1,11 +1,10 @@
-import Anthropic, { toFile } from "@anthropic-ai/sdk"
 import { betaZodOutputFormat } from "@anthropic-ai/sdk/helpers/beta/zod"
 import { readFileSync } from "node:fs"
 import path from "node:path"
 import { PDFDocument } from "pdf-lib"
 import * as z from "zod"
 import type { AmsCrossCheck } from "./policyCheckAms.js"
-import { logger } from "./logger.js"
+import { DOC_TOOL_MODEL, DocToolError, MAX_TOTAL_PAGES, analyzeDocuments, anthropic } from "./docToolClaude.js"
 import { normalizedPdf } from "./quoteExtraction.js"
 
 // The two Claude reads behind the CL Policy Check (Andrew, 2026-11-22), built from Patrick's
@@ -17,17 +16,14 @@ import { normalizedPdf } from "./quoteExtraction.js"
 //      counts, the banner and premium arithmetic are done afterwards in code (policyCheckRun.ts),
 //      never left to the model.
 
-const MODEL = "claude-opus-5-5"
-// Opus 5.5 takes up to 600 PDF pages in one request.
-export const MAX_TOTAL_PAGES = 600
+const MODEL = DOC_TOOL_MODEL
+export { MAX_TOTAL_PAGES }
 const PROFILE_PAGES = 4
 
 const CHECKLIST_PATH = path.join(import.meta.dirname, "..", "..", "assets", "policy-check", "checklist.md")
 
-let client: Anthropic | null = null
-const anthropic = () => (client ??= new Anthropic())
-
-export class PolicyCheckError extends Error {}
+// Errors written for staff (shared with the other document tools).
+export const PolicyCheckError = DocToolError
 
 export type PolicyCheckRole = "baseline" | "compared" | "reference"
 export const ROLES: readonly PolicyCheckRole[] = ["baseline", "compared", "reference"]
@@ -243,66 +239,26 @@ How this run differs from the checklist's own instructions:
 ${ readFileSync(CHECKLIST_PATH, "utf8") }`
 }
 
-// Uploads each document to the Files API (keeps the request far under the 32 MB body limit), runs
-// the check, then deletes the uploads.
 export async function runPolicyCheck({ documents, ams, notes }: { documents: CheckDocument[]; ams: AmsCrossCheck; notes?: string }): Promise<PolicyCheckFindings> {
   const totalPages = documents.reduce((sum, d) => sum + d.pages, 0)
   if(totalPages > MAX_TOTAL_PAGES) {
     throw new PolicyCheckError(`These documents total ${ totalPages } pages; a check can read ${ MAX_TOTAL_PAGES } at most. Remove reference documents or upload only the relevant policy sections.`)
   }
 
-  const uploaded: string[] = []
-  try {
-    const blocks: Anthropic.Beta.BetaContentBlockParam[] = []
-    for(const role of ROLES) {
-      const docs = documents.filter((d) => d.role === role)
-      if(docs.length === 0) continue
-      blocks.push({ type: "text", text: ROLE_HEADING[role] })
-      for(const doc of docs) {
-        const meta = await anthropic().files.upload({ file: await toFile(normalizedPdf(doc.file), doc.filename, { type: "application/pdf" }) })
-        uploaded.push(meta.id)
-        blocks.push({ type: "document", source: { type: "file", file_id: meta.id }, title: `${ doc.label } — ${ doc.filename } (${ doc.pages } pp.)` })
-      }
-    }
-
-    blocks.push({
-      type: "text",
-      text: [
-        `AMS360 cross-check (Boxwood MCP, pulled ${ ams.pulled_at }):`,
-        JSON.stringify(ams),
-        notes?.trim() ? `\nAccount manager's notes for this check:\n${ notes.trim() }` : "",
-        "\nRun the policy check on these documents."
-      ].join("\n")
-    })
-
-    const stream = anthropic().beta.messages.stream({
-      model: MODEL,
-      max_tokens: 128000,
-      betas: ["server-side-fallback-2026-07-01"],
-      fallbacks: "default",
-      thinking: { type: "adaptive" },
-      output_config: { effort: "high", format: betaZodOutputFormat(PolicyCheckFindingsSchema) },
-      system: systemPrompt(),
-      messages: [{ role: "user", content: blocks }]
-    })
-
-    let response: Awaited<ReturnType<typeof stream.finalMessage>>
-    try {
-      response = await stream.finalMessage()
-    } catch(error) {
-      if(error instanceof Anthropic.APIError) throw error
-      if(stream.currentMessage?.stop_reason === "max_tokens") throw new PolicyCheckError("These documents produced more findings than fit in one check. Split the check by line of coverage.")
-      throw new PolicyCheckError("The check ran but its result couldn't be read. Run it again.")
-    }
-
-    logger.info({ usage: response.usage, stop_reason: response.stop_reason }, "policy_check: analysis finished")
-    if(response.stop_reason === "refusal") throw new PolicyCheckError("The documents couldn't be checked (the request was declined). Try different copies of the files.")
-    if(response.stop_reason === "max_tokens") throw new PolicyCheckError("These documents produced more findings than fit in one check. Split the check by line of coverage.")
-    if(!response.parsed_output) throw new PolicyCheckError("The check ran but its result couldn't be read. Run it again.")
-    return normalizeFindings(response.parsed_output as RawFindings)
-  } finally {
-    for(const id of uploaded) {
-      await anthropic().files.delete(id).catch((err: unknown) => logger.warn({ err, id }, "policy_check: couldn't delete uploaded file"))
-    }
-  }
+  const raw = await analyzeDocuments({
+    groups: ROLES.map((role) => ({
+      heading: ROLE_HEADING[role],
+      documents: documents.filter((d) => d.role === role).map((d) => ({ title: `${ d.label } — ${ d.filename } (${ d.pages } pp.)`, filename: d.filename, file: d.file }))
+    })),
+    trailingText: [
+      `AMS360 cross-check (Boxwood MCP, pulled ${ ams.pulled_at }):`,
+      JSON.stringify(ams),
+      notes?.trim() ? `\nAccount manager's notes for this check:\n${ notes.trim() }` : "",
+      "\nRun the policy check on these documents."
+    ].join("\n"),
+    system: systemPrompt(),
+    schema: PolicyCheckFindingsSchema,
+    logLabel: "policy_check"
+  })
+  return normalizeFindings(raw as RawFindings)
 }
