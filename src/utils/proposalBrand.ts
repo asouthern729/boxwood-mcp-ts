@@ -16,10 +16,9 @@ import { AGENCY, columnWidths, numericColumns, type Block, type DocComment } fro
 //
 // Boxwood's house style for generated client documents (Patrick, 2026-11-21: every output document
 // should share it). Helpers are document-neutral; each document supplies its own wording (cover
-// eyebrow, headlines, header name, tagline). Used so far by the CL proposal document
-// (clProposalDoc.ts — Proposal Builder and CL Renewal Summary) and the PL Renewal Summary
-// (plRenewalSummaryDoc.ts). The Pre-Renewal Review
-// (riskProfileDoc.ts) still uses the older look in proposalStyle.ts, pending its own restyle.
+// eyebrow, headlines, header name, tagline). Used by the CL proposal document (clProposalDoc.ts —
+// Proposal Builder and CL Renewal Summary), the PL Renewal Summary (plRenewalSummaryDoc.ts), the
+// Pre-Renewal Review (riskProfileDoc.ts) and the CL Coverage Comparison (coverageComparisonDoc.ts).
 //
 // Layout: a cover docx section with zero margins (coverPage, no header/footer) and an interior
 // section with INTERIOR_MARGINS, interiorHeader/interiorFooter, sections opened with sectionOpener,
@@ -348,8 +347,9 @@ function cell(text: string, width: number, o: { borders: ITableCellBorders; fill
 // Empty cells print "—" unless keepBlank.
 // rightAlign overrides the money-column detection per column (a matrix whose columns should all
 // align alike). keepWithNext holds the whole table on the page with what follows. widths fixes the
-// column widths (the two halves of a table split across pages must match).
-export function dataTable(headers: string[], rows: string[][], { fractions, totalRow, keepBlank = false, tableWidth = TEXT_WIDTH, rightAlign, keepWithNext, widths: fixedWidths }: { fractions?: number[]; totalRow?: string[]; keepBlank?: boolean; tableWidth?: number; rightAlign?: boolean[]; keepWithNext?: boolean; widths?: number[] } = {}): Table {
+// column widths (the two halves of a table split across pages must match). cellStyle colours or
+// bolds individual body cells (the CL Coverage Comparison's Same / Reduced tags), by row and column.
+export function dataTable(headers: string[], rows: string[][], { fractions, totalRow, keepBlank = false, tableWidth = TEXT_WIDTH, rightAlign, keepWithNext, widths: fixedWidths, cellStyle }: { fractions?: number[]; totalRow?: string[]; keepBlank?: boolean; tableWidth?: number; rightAlign?: boolean[]; keepWithNext?: boolean; widths?: number[]; cellStyle?: (row: number, col: number) => { color?: string; bold?: boolean } | undefined } = {}): Table {
   const filled = rows.map((r) => headers.map((_, i) => (r[i] ?? "").trim() || (keepBlank ? "" : "—")))
   const sizing = totalRow ? [...filled, totalRow] : filled
   const widths = fixedWidths ?? columnWidths(headers, sizing, fractions, tableWidth)
@@ -369,7 +369,7 @@ export function dataTable(headers: string[], rows: string[][], { fractions, tota
       }),
       ...filled.map((r, ri) => new TableRow({
         cantSplit: true,
-        children: r.map((text, i) => cell(text, widths[i], { borders: BODY_BORDERS, fill: ri % 2 ? PALE_MINT : WHITE, margins: BODY_MARGINS, right: right[i], keepNext: keep, run: { size: 18 } }))
+        children: r.map((text, i) => cell(text, widths[i], { borders: BODY_BORDERS, fill: ri % 2 ? PALE_MINT : WHITE, margins: BODY_MARGINS, right: right[i], keepNext: keep, run: { size: 18, ...cellStyle?.(ri, i) } }))
       })),
       ...(totalRow
         ? [new TableRow({

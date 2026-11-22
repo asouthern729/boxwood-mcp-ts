@@ -99,6 +99,7 @@ const TOOLS = [
   "pl-renewal-premium-change",
   "proposal-builder",
   "policy-check",
+  "coverage-comparison",
   "pl-renewal-summary",
   "download-report"
 ]

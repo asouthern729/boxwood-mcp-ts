@@ -21,6 +21,7 @@ import { router as boardRouter } from "./routes/board.js"
 import { router as plRenewalPremiumChangeRouter } from "./routes/plRenewalPremiumChange.js"
 import { router as proposalBuilderRouter } from "./routes/proposalBuilder.js"
 import { router as policyCheckRouter } from "./routes/policyCheck.js"
+import { router as coverageComparisonRouter } from "./routes/coverageComparison.js"
 import { router as jobsRouter } from "./routes/jobs.js"
 import { router as assistantRouter } from "./routes/assistant.js"
 import { router as siteRouter } from "./routes/site.js"
@@ -42,6 +43,7 @@ app.use(boardRouter)
 app.use(plRenewalPremiumChangeRouter)
 app.use(proposalBuilderRouter)
 app.use(policyCheckRouter)
+app.use(coverageComparisonRouter)
 app.use(jobsRouter)
 app.use(assistantRouter)
 app.use(siteRouter)

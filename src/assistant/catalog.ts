@@ -74,6 +74,15 @@ export const ASSISTANT_PAGES: AssistantPage[] = [
     mcpCapabilities: ["policy_check", "policy_check_results"]
   },
   {
+    path: "commercial/coverage-comparison",
+    title: "CL Coverage Comparison",
+    team: "Commercial",
+    summary: "Compares two sets of commercial quote or policy PDFs (current vs proposed, quote vs quote, expiring vs renewal) into a branded Word document to review with the client: At a Glance, Premium Summary, Key Points to Review, a side-by-side table for each coverage line, and a forms appendix.",
+    whenToUse: "Shopping or remarketing a commercial account and showing the client how two carriers' quotes, or their current program and a proposal, differ line by line. Works from uploaded PDFs only; it doesn't read AMS360.",
+    outputs: ["docx", "pdf"],
+    mcpCapabilities: ["coverage_comparison", "coverage_comparison_results"]
+  },
+  {
     path: "personal",
     title: "Personal tools",
     team: "Personal",
