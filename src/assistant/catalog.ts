@@ -65,6 +65,15 @@ export const ASSISTANT_PAGES: AssistantPage[] = [
     mcpCapabilities: ["customer_lookup", "proposal_builder"]
   },
   {
+    path: "commercial/policy-check",
+    title: "Policy Check",
+    team: "Commercial",
+    summary: "Checks an issued or renewal policy against the quote, binder or expiring policy, line by line, with an AMS360 cross-check. Produces an internal report: every discrepancy by priority on page one, matches included, a premium change schedule, a forms comparison and a draft correction request for the carrier.",
+    whenToUse: "An issued policy or renewal has come in from the carrier and the account manager needs to confirm it matches what was quoted/bound or carries forward the expiring term correctly, before it goes to the client.",
+    outputs: ["docx", "pdf"],
+    mcpCapabilities: ["policy_check", "policy_check_results"]
+  },
+  {
     path: "personal",
     title: "Personal tools",
     team: "Personal",

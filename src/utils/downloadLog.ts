@@ -98,6 +98,7 @@ const TOOLS = [
   "risk-profile",
   "pl-renewal-premium-change",
   "proposal-builder",
+  "policy-check",
   "pl-renewal-summary",
   "download-report"
 ]

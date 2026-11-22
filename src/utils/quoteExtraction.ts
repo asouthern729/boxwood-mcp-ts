@@ -108,7 +108,7 @@ const PDF_HEADER = Buffer.from("%PDF-")
 // Some carrier portals wrap the download: American Modern's dec page (Patrick's TN Equine email,
 // 2026-10-07) starts with a 22-byte Java serialization header before "%PDF-". Desktop viewers skip
 // leading junk, but the API rejects the file as "not valid" — so anything before the header is cut.
-function normalizedPdf(pdf: Buffer): Buffer {
+export function normalizedPdf(pdf: Buffer): Buffer {
   const start = pdf.indexOf(PDF_HEADER)
   if(start === -1 || start > 1024) throw new QuoteExtractionError("This file isn't a PDF — download the quote again as a PDF and upload that.")
   return start === 0 ? pdf : pdf.subarray(start)
