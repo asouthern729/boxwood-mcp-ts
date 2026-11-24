@@ -76,6 +76,10 @@
     letter-spacing: 0.04em;
   }
 
+  .in-progress-nav[hidden] {
+    display: none;
+  }
+
   .in-progress-nav:empty {
     display: none;
     margin: 0;
@@ -500,6 +504,64 @@
     text-decoration: underline;
   }
 
+  .status-filter {
+    display: flex;
+    flex-wrap: wrap;
+    align-items: center;
+    gap: 0.4rem;
+    margin: 0 0 1.5rem;
+  }
+
+  .status-filter .status-filter-label {
+    font-family: ui-monospace, SFMono-Regular, Menlo, Consolas, monospace;
+    font-size: 0.75rem;
+    font-weight: 600;
+    letter-spacing: 0.04em;
+    color: var(--muted);
+    opacity: 0.7;
+    margin-right: 0.3rem;
+  }
+
+  .status-filter button {
+    font: inherit;
+    font-size: 0.78rem;
+    font-weight: 600;
+    letter-spacing: 0.02em;
+    border-radius: 999px;
+    padding: 0.2rem 0.65rem;
+    border: 1px solid var(--border);
+    background: transparent;
+    color: var(--muted);
+    cursor: pointer;
+  }
+
+  .status-filter button[data-status="in_progress"][aria-pressed="true"] {
+    color: #ffffff;
+    background: var(--accent-blue);
+    border-color: transparent;
+  }
+
+  .status-filter button[data-status="completed"][aria-pressed="true"] {
+    color: var(--accent-blue);
+    background: var(--accent-blue-bg);
+    border-color: transparent;
+  }
+
+  .status-filter button[data-status="idea"][aria-pressed="true"] {
+    color: var(--text);
+  }
+
+  /* Hidden statuses read as switched off: faded and struck through */
+  .status-filter button[aria-pressed="false"] {
+    opacity: 0.5;
+    text-decoration: line-through;
+  }
+
+  .status-filter .count {
+    margin-left: 0.35rem;
+    opacity: 0.7;
+  }
+
   @media (max-width: 560px) {
     .item-name { width: 100%; margin-right: 0; }
   }
@@ -536,6 +598,10 @@
       <button type="button" id="chat-send">Send</button>
     </div>
   </section>
+
+  <div class="status-filter" id="status-filter" role="group" aria-label="Show ideas by status">
+    <span class="status-filter-label">Show</span>
+  </div>
 
   <div id="board"><p class="loading">Loading&hellip;</p></div>
 
@@ -582,7 +648,12 @@
   var PRIORITY_LEVELS = [1, 2, 3];
   var CATEGORY_ORDER = ["Commercial Lines", "Personal Lines", "Claims", "Employee Benefits", "Management Dashboards"];
 
+  var HIDDEN_STATUSES_KEY = "boxwood_roadmap_hidden_statuses";
+
   var container = document.getElementById("board");
+
+  // Statuses the viewer has switched off in the filter bar; remembered per browser
+  var hiddenStatuses = loadHiddenStatuses();
 
   function base64url(bytes) {
     var binary = "";
@@ -788,6 +859,7 @@
     var el = document.createElement("div");
     el.className = "item";
     el.id = itemAnchorId(item);
+    el.setAttribute("data-status", item.status);
 
     var head = document.createElement("div");
     head.className = "item-head";
@@ -846,7 +918,13 @@
     statusSelect.addEventListener("change", function () {
       var newStatus = statusSelect.value;
       patchItem(item.id, { status: newStatus }, session.accessToken)
-        .then(function () { statusSelect.setAttribute("data-status", newStatus); })
+        .then(function () {
+          statusSelect.setAttribute("data-status", newStatus);
+          el.setAttribute("data-status", newStatus);
+          // Only the counts update here; the card stays put until the filter changes, rather than
+          // vanishing the moment it's moved into a hidden status
+          updateFilterCounts();
+        })
         .catch(function () {
           alert("Couldn't save status — please try again.");
           statusSelect.value = item.status;
@@ -942,6 +1020,94 @@
     });
   }
 
+  function loadHiddenStatuses() {
+    try {
+      var saved = JSON.parse(localStorage.getItem(HIDDEN_STATUSES_KEY) || "[]");
+      return saved.filter(function (status) { return STATUSES.indexOf(status) !== -1; });
+    } catch (e) {
+      return [];
+    }
+  }
+
+  function saveHiddenStatuses() {
+    try {
+      localStorage.setItem(HIDDEN_STATUSES_KEY, JSON.stringify(hiddenStatuses));
+    } catch (e) {}
+  }
+
+  function initStatusFilter() {
+    var bar = document.getElementById("status-filter");
+    if (!bar) return;
+
+    STATUSES.forEach(function (status) {
+      var btn = document.createElement("button");
+      btn.type = "button";
+      btn.setAttribute("data-status", status);
+      btn.setAttribute("aria-pressed", String(hiddenStatuses.indexOf(status) === -1));
+      btn.textContent = STATUS_LABELS[status];
+
+      var count = document.createElement("span");
+      count.className = "count";
+      btn.appendChild(count);
+
+      btn.addEventListener("click", function () {
+        var i = hiddenStatuses.indexOf(status);
+        if (i === -1) hiddenStatuses.push(status);
+        else hiddenStatuses.splice(i, 1);
+
+        btn.setAttribute("aria-pressed", String(i !== -1));
+        saveHiddenStatuses();
+        applyStatusFilter();
+      });
+
+      bar.appendChild(btn);
+    });
+  }
+
+  function updateFilterCounts() {
+    var items = container.querySelectorAll(".item");
+
+    document.querySelectorAll("#status-filter button").forEach(function (btn) {
+      var status = btn.getAttribute("data-status");
+      var n = 0;
+      items.forEach(function (item) { if (item.getAttribute("data-status") === status) n++; });
+      btn.querySelector(".count").textContent = items.length ? String(n) : "";
+    });
+  }
+
+  // Hides cards in switched-off statuses, then any category left with nothing showing
+  function applyStatusFilter() {
+    container.querySelectorAll(".item").forEach(function (item) {
+      item.hidden = hiddenStatuses.indexOf(item.getAttribute("data-status")) !== -1;
+    });
+
+    var groups = container.querySelectorAll(".category-group");
+    var anyVisible = false;
+    groups.forEach(function (group) {
+      var visible = group.querySelector(".item:not([hidden])") !== null;
+      group.hidden = !visible;
+      if (visible) anyVisible = true;
+    });
+
+    var emptyNote = container.querySelector(".filter-empty");
+    if (groups.length && !anyVisible) {
+      if (!emptyNote) {
+        emptyNote = document.createElement("p");
+        emptyNote.className = "empty filter-empty";
+        emptyNote.textContent = "No ideas match the statuses shown. Switch one back on above.";
+        container.appendChild(emptyNote);
+      }
+    } else if (emptyNote) {
+      emptyNote.remove();
+    }
+
+    // The In Progress shortcuts would point at hidden cards
+    var inProgressNav = document.getElementById("in-progress-nav");
+    if (inProgressNav) inProgressNav.hidden = hiddenStatuses.indexOf("in_progress") !== -1;
+
+    updateFilterCounts();
+  }
+
   function render(items, session) {
     if (!items.length) {
       container.innerHTML = '<p class="empty">Nothing on the board yet.</p>';
@@ -968,6 +1134,7 @@
     });
 
     renderInProgressNav(items);
+    applyStatusFilter();
   }
 
   function getChatSessionId() {
@@ -1078,6 +1245,7 @@
     sessionPromise.then(function (session) {
       if (!session) return startLogin();
       initChat(session);
+      initStatusFilter();
       return loadBoard(session);
     });
   }
