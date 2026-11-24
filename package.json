@@ -4,12 +4,11 @@
   "description": "MCP server exposing customer/policy/invoice lookup tools over the boxwood-ams360 Postgres database",
   "type": "module",
   "main": "dist/app.js",
+  "image": "ghcr.io/asouthern729/boxwood-mcp-ts:1.1.5",
   "scripts": {
     "dev": "tsx watch src/app.ts",
     "build": "tsc -b",
-    "start": "node dist/app.js",
-    "deploy": "pm2 kill && pm2 reload ecosystem.config.cjs",
-    "deploy:site": "rsync -a --delete site/ /var/www/site/"
+    "start": "node dist/app.js"
   },
   "dependencies": {
     "@anthropic-ai/claude-agent-sdk": "^0.3.251",
