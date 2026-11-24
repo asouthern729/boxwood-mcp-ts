@@ -17,7 +17,7 @@ import { readCells } from "./xlsxCellPatch.js"
 //   such row has its renewal premium. Until then there's no page, so no partial total reaches a client.
 // - The spreadsheet's figures are the tool-written AMS360 renewal premiums (AMS360 is the trigger —
 //   see premiumSections in renewalPremiumSummaryArchive.ts). They win over an uploaded quote's
-//   premium; the quote's goes in the CSR comment for comparison.
+//   premium; the quote's figure is kept only as internal provenance (not printed).
 //
 // signature captures what the page shows (rows and total), so a spreadsheet change only rebuilds the
 // summaries whose page would actually change (renewalSummaryPremiumSync.ts).
@@ -78,7 +78,7 @@ export function premiumSignature(polids: string[]): string | null {
 }
 
 // The Premium Summary page for a CL Renewal Summary built from these terms. quoteLines: the document's
-// lines, whose uploaded-quote premiums (if any) are listed in the CSR comment for comparison.
+// lines, whose uploaded-quote premiums (if any) are recorded in the internal `comment` (not printed).
 export async function linkedPremiumSummary(polids: string[], quoteLines: SlotLine[]): Promise<LinkedPremiums> {
   const rows = completeRows(polids)
   if(!rows) return { signature: null }

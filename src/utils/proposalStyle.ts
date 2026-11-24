@@ -1,7 +1,7 @@
 import { readFileSync } from "node:fs"
 import path from "node:path"
 import {
-  AlignmentType, BorderStyle, CommentRangeEnd, CommentRangeStart, CommentReference, ImageRun, PageBreak, Paragraph,
+  AlignmentType, BorderStyle, ImageRun, PageBreak, Paragraph,
   ShadingType, Table, TableCell, TableLayoutType, TableRow, TextRun, VerticalAlign, WidthType
 } from "docx"
 
@@ -35,9 +35,7 @@ export const AGENCY = {
 
 export const PROPOSAL_LOGO_PATH = path.join(import.meta.dirname, "..", "..", "assets", "boxwood-proposal-logo.png")
 
-
 export type Block = Paragraph | Table
-export type DocComment = { id: number; text: string }
 
 export function run(text: string, opts: { bold?: boolean; italics?: boolean; size?: number; color?: string } = {}): TextRun {
   return new TextRun({ text, font: "Arial", bold: opts.bold, italics: opts.italics, size: opts.size, color: opts.color })
@@ -60,11 +58,9 @@ export function spacer(): Paragraph {
 
 // The green full-width banner every major section opens with, preceded by the small logo (skill:
 // every section except the very first after the cover, i.e. the Executive Summary).
-export function banner(title: string, { withLogo, comment }: { withLogo: boolean; comment?: DocComment }): Block[] {
+export function banner(title: string, { withLogo }: { withLogo: boolean }): Block[] {
   const text = run(title.toUpperCase(), { bold: true, color: "FFFFFF", size: 28 })
-  const children = comment
-    ? [new CommentRangeStart(comment.id), text, new CommentRangeEnd(comment.id), new TextRun({ children: [new CommentReference(comment.id)] })]
-    : [text]
+  const children = [text]
 
   return [
     ...(withLogo ? [logo(1809750, 523875)] : []),

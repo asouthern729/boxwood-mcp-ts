@@ -1,12 +1,12 @@
 import { readFileSync } from "node:fs"
 import path from "node:path"
 import {
-  AlignmentType, BorderStyle, CommentRangeEnd, CommentRangeStart, CommentReference, Footer, Header, HeightRule, ImageRun, LevelFormat,
+  AlignmentType, BorderStyle, Footer, Header, HeightRule, ImageRun, LevelFormat,
   LineRuleType, PageBreak, PageNumber, Paragraph, ShadingType, Table, TableCell, TableLayoutType, TableRow, TabStopType,
   TextRun, VerticalAlign, WidthType
 } from "docx"
 import type { ITableCellBorders } from "docx"
-import { AGENCY, columnWidths, numericColumns, type Block, type DocComment } from "./proposalStyle.js"
+import { AGENCY, columnWidths, numericColumns, type Block } from "./proposalStyle.js"
 
 // The visual language of Patrick's "insurance-proposal-copy-reformatting" skill (the restyled
 // insurance-proposal skill, matching Boxwood's High Net Worth one-pager): mint and charcoal
@@ -73,11 +73,6 @@ export function pageBreak(): Paragraph {
   return new Paragraph({ children: [new PageBreak()] })
 }
 
-// Wraps runs in a Word comment range (the account manager's "verify this" notes).
-function withComment(runs: (TextRun | ImageRun)[], comment?: DocComment): (TextRun | ImageRun | CommentRangeStart | CommentRangeEnd)[] {
-  if(!comment) return runs
-  return [new CommentRangeStart(comment.id), ...runs, new CommentRangeEnd(comment.id), new TextRun({ children: [new CommentReference(comment.id)] })]
-}
 
 // ---------- TYPE ----------
 
@@ -107,12 +102,12 @@ export function accentRule({ textWidth = TEXT_WIDTH, after = 200 }: { textWidth?
 
 // Two-tone headline: [["Your investment, ", CHAR], ["summarized.", GREEN]]. breakBetween puts each
 // part on its own line; sizes may differ per part.
-export function headline(parts: [string, string, number?][], o: { size?: number; after?: number; breakBetween?: boolean; comment?: DocComment } = {}): Paragraph {
-  const runs = parts.map(([text, color, size], i) => run(text, { bold: true, size: size ?? o.size ?? 36, color, break: o.breakBetween && i > 0 ? 1 : undefined }))
+export function headline(parts: [string, string, number?][], o: { size?: number; after?: number; breakBetween?: boolean } = {}): Paragraph {
+  const children = parts.map(([text, color, size], i) => run(text, { bold: true, size: size ?? o.size ?? 36, color, break: o.breakBetween && i > 0 ? 1 : undefined }))
   return new Paragraph({
     keepNext: true,
     spacing: { before: 0, after: o.after ?? 160, line: 252, lineRule: LineRuleType.AUTO },
-    children: withComment(runs, o.comment)
+    children
   })
 }
 
@@ -124,16 +119,16 @@ export function body(text: string, o: ParaOpts & { italics?: boolean } = {}): Pa
   })
 }
 
-// Replaces the old logo + green banner. The comment, if any, anchors on the headline. pageBreak sets
+// Replaces the old logo + green banner. pageBreak sets
 // pageBreakBefore on the eyebrow rather than adding a break paragraph, which would leave an empty
 // line at the top of the new page.
 // compact (the PL letter, no page breaks between sections): 14pt headline, tighter spacing, and
 // `before` to separate it from the section above. textWidth sizes the accent rule on other margins.
-export function sectionOpener({ eyebrowText, title, accent, pageBreak: breakBefore, comment, compact = false, before, textWidth }: { eyebrowText: string; title: string; accent?: string; pageBreak?: boolean; comment?: DocComment; compact?: boolean; before?: number; textWidth?: number }): Paragraph[] {
+export function sectionOpener({ eyebrowText, title, accent, pageBreak: breakBefore, compact = false, before, textWidth }: { eyebrowText: string; title: string; accent?: string; pageBreak?: boolean; compact?: boolean; before?: number; textWidth?: number }): Paragraph[] {
   return [
     eyebrow(eyebrowText, { before, after: compact ? 40 : 60, pageBreakBefore: breakBefore }),
     accentRule({ after: compact ? 100 : 160, textWidth }),
-    headline([[title + (accent ? " " : ""), CHAR], ...(accent ? [[accent, GREEN] as [string, string]] : [])], { size: compact ? 28 : 36, after: compact ? 140 : 200, comment })
+    headline([[title + (accent ? " " : ""), CHAR], ...(accent ? [[accent, GREEN] as [string, string]] : [])], { size: compact ? 28 : 36, after: compact ? 140 : 200 })
   ]
 }
 

@@ -76,14 +76,14 @@ The coverage sections never show premiums.
 
 **Upload Quote** (button, or drop a carrier quote PDF on the row):
 - Claude reads the quote. That line's section takes the quote's carrier, rating, limits, highlights and exclusions, but keeps AMS360's schedules of what's insured. Bind conditions are collected into one section.
-- Every section filled from a quote gets a Word comment asking the CSR to verify it. Review the comments, then delete them before sending. Comments never appear in the PDF.
+- Check every section filled from a quote against the quote before sending.
 - The quote's premium isn't printed.
 - Each quote shows as a chip with its status. Removing a quote (× then confirm) rebuilds the document without it.
 
 **Premium Summary page:**
 - It is filled from the linked Renewal Premium Spreadsheet: line, carrier, renewal annual premium and a total.
 - It is printed only when every policy in the summary has its renewal premium in AMS360; partial totals are never printed.
-- AMS360 figures win over a quote's premium. The quote's figure goes in a CSR comment for comparison.
+- AMS360 figures win over a quote's premium.
 - When the spreadsheet is built or refreshed, the linked summaries rebuild automatically.
 
 **Chat:**
@@ -110,7 +110,7 @@ The coverage sections never show premiums.
 **What it is:** a branded Commercial Insurance Proposal (Word or PDF) built from files you upload: carrier quote PDFs and AMS360-generated proposals (.docx or PDF).
 - An AMS360 proposal supplies the current program. A quote replaces the same line from the same carrier.
 - It includes a Premium Summary, bind conditions and Why Boxwood.
-- Each section has a Word comment naming the file it came from.
+- Check each section against the file it came from before sending.
 - It runs on demand only (no schedule).
 
 **How to use it:**

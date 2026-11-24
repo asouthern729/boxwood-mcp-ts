@@ -241,7 +241,7 @@ function premiumSummary(lines: SlotLine[]): ProposalPremiumSummary | undefined {
   ]
 
   // The quotes' own premium notes (what the total includes, pay-in-full discounts, audit) can carry
-  // reviewer remarks, so they go to the account manager in the comment, not to the client.
+  // reviewer remarks, so they stay in the internal `comment` (never printed), not in the client's document.
   const quoteNotes = lines.filter((l) => l.premium?.note).map((l) => `${ label(l) }: ${ l.premium!.note }`)
   return {
     rows,
@@ -285,7 +285,7 @@ function todayInChicago(): string {
   return new Intl.DateTimeFormat("en-US", { timeZone: "America/Chicago", month: "long", day: "numeric", year: "numeric" }).format(new Date())
 }
 
-// Every section's review comment names the file it came from ("…uploaded quote "x.pdf" (pages …)").
+// Every section's internal provenance `comment` names the file it came from ("…uploaded quote "x.pdf" (pages …)").
 function sourceFile(comment: string | undefined): string | undefined {
   return comment?.match(/"([^"]+)"/)?.[1]
 }

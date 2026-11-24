@@ -1,5 +1,5 @@
 import { BorderStyle, Document, LineRuleType, Packer, Paragraph, SectionType, Table, TableCell, TableLayoutType, TableRow, WidthType } from "docx"
-import type { Block, DocComment } from "./proposalStyle.js"
+import type { Block } from "./proposalStyle.js"
 import {
   AGENCY_PREPARED_BY, BULLET_NUMBERING, CHAR, COVER_MARGINS, FOOTER_STYLE, GREEN, INTERIOR_MARGINS, NO_BORDERS, ON_CHAR, PAGE_HEIGHT, PAGE_WIDTH,
   TABLE_NO_BORDERS, TEXT_WIDTH, WHITE, advisorPreparedBy, band, body, bullet, closingFooter, coverPage as brandCover, dataTable,
@@ -39,8 +39,9 @@ export type ProposalTable = {
 
 export type ProposalBulletGroup = { title: string; items: string[] }
 
-// One coverage line's section (skill Section 3). `comment` marks a section filled from an uploaded
-// quote — a Word comment on its banner naming the file and pages, for the account manager to verify.
+// One coverage line's section (skill Section 3). `comment` records where a section filled from an
+// uploaded file came from (file and pages). It's internal provenance only — never written into the
+// document (Andrew, 2026-11-24: no Claude comments on output documents).
 export type ProposalLine = {
   title: string
   overview: string
@@ -98,13 +99,6 @@ export type ClProposalInput = {
 
 
 // ---------- BUILDING BLOCKS ----------
-
-function register(comments: DocComment[], text: string | undefined): DocComment | undefined {
-  if(!text) return undefined
-  const comment = { id: comments.length, text }
-  comments.push(comment)
-  return comment
-}
 
 function tableBlocks(table: ProposalTable): Block[] {
   if(table.rows.length === 0) return []
@@ -220,9 +214,9 @@ function executiveSummary(input: ClProposalInput, breakBefore: boolean): Block[]
   ]
 }
 
-function lineSection(line: ProposalLine, index: number, total: number, comments: DocComment[], breakBefore: boolean): Block[] {
+function lineSection(line: ProposalLine, index: number, total: number, breakBefore: boolean): Block[] {
   return [
-    ...sectionOpener({ eyebrowText: `Coverage ${ pad(index + 1) } of ${ pad(total) }`, title: line.title, pageBreak: breakBefore, comment: register(comments, line.comment) }),
+    ...sectionOpener({ eyebrowText: `Coverage ${ pad(index + 1) } of ${ pad(total) }`, title: line.title, pageBreak: breakBefore }),
     ...(line.overview ? [body(line.overview, { italics: true })] : []),
     ...(line.keyFacts.length > 0 ? [factGrid(line.keyFacts)] : []),
     ...line.tables.flatMap(tableBlocks),
@@ -234,30 +228,29 @@ function lineSection(line: ProposalLine, index: number, total: number, comments:
 // The CL Renewal Summary dropped the premium table (Patrick, 2026-10-07) and now prints it only once
 // its linked Renewal Premium Spreadsheet has every renewal premium (Andrew, 2026-11-21 —
 // renewalSummaryPremiums.ts); without it, its notes keep that page by themselves.
-function bindConditions(input: ClProposalInput, comments: DocComment[], breakBefore: boolean): Block[] {
+function bindConditions(input: ClProposalInput, breakBefore: boolean): Block[] {
   const premium = input.premiumSummary
   if(input.bindConditions.items.length === 0 && !premium) return []
   const items = input.bindConditions.items.map(bullet)
   if(!premium) {
     return [
-      ...sectionOpener({ eyebrowText: "Program Notes", title: "Bind Conditions & Notes", pageBreak: breakBefore, comment: register(comments, input.bindConditions.comment) }),
+      ...sectionOpener({ eyebrowText: "Program Notes", title: "Bind Conditions & Notes", pageBreak: breakBefore }),
       ...items
     ]
   }
 
-  // One page: the premium table, then the notes under a sub-heading; one comment covers both.
-  const comment = [premium.comment, input.bindConditions.comment].filter(Boolean).join(" ")
+  // One page: the premium table, then the notes under a sub-heading.
   return [
-    ...sectionOpener({ eyebrowText: "Premium Summary", title: "Your investment,", accent: "summarized.", pageBreak: breakBefore, comment: register(comments, comment || undefined) }),
+    ...sectionOpener({ eyebrowText: "Premium Summary", title: "Your investment,", accent: "summarized.", pageBreak: breakBefore }),
     dataTable(["Line of Business", "Carrier", "Annual Premium"], premium.rows, { fractions: [0.36, 0.44, 0.2], totalRow: ["TOTAL PROGRAM PREMIUM", "", premium.total], keepBlank: true }),
     ...premium.notes.map(footnote),
     ...(items.length > 0 ? [subHeader("Bind Conditions & Notes"), ...items] : [])
   ]
 }
 
-function specialtyAddOn(addOn: ProposalSpecialtyAddOn, comments: DocComment[], breakBefore: boolean): Block[] {
+function specialtyAddOn(addOn: ProposalSpecialtyAddOn, breakBefore: boolean): Block[] {
   return [
-    ...sectionOpener({ eyebrowText: "Specialty Coverage", title: addOn.title, pageBreak: breakBefore, comment: register(comments, addOn.comment) }),
+    ...sectionOpener({ eyebrowText: "Specialty Coverage", title: addOn.title, pageBreak: breakBefore }),
     ...(addOn.paragraph ? [body(addOn.paragraph)] : []),
     ...tableBlocks({ title: "Coverage Terms", headers: ["Field", "Value"], rows: addOn.terms, fractions: [0.4, 0.6] }),
     ...(addOn.schedule ? tableBlocks(addOn.schedule) : [])
@@ -281,7 +274,6 @@ function closingPage(input: ClProposalInput): Block[] {
 // ---------- DOCUMENT ----------
 
 export async function buildClProposalDoc(input: ClProposalInput): Promise<{ buffer: Buffer; includedSections: string[] }> {
-  const comments: DocComment[] = []
   const why = input.whyBoxwood && input.whyBoxwood.length > 0 ? input.whyBoxwood : null
 
   // Interior pages in order; every one but the first opens with a page break.
@@ -291,18 +283,15 @@ export async function buildClProposalDoc(input: ClProposalInput): Promise<{ buff
 
   if(why) push(whyBoxwoodSection(why, next()))
   push(executiveSummary(input, next()))
-  input.lines.forEach((line, i) => push(lineSection(line, i, input.lines.length, comments, next())))
-  const bindBlocks = bindConditions(input, comments, next())
+  input.lines.forEach((line, i) => push(lineSection(line, i, input.lines.length, next())))
+  const bindBlocks = bindConditions(input, next())
   push(bindBlocks)
   // Add-ons flow on from whatever precedes them (skill: no forced break), except Bind Conditions keeps its page alone.
-  input.specialtyAddOns.forEach((addOn, i) => push(specialtyAddOn(addOn, comments, i === 0 && bindBlocks.length > 0)))
+  input.specialtyAddOns.forEach((addOn, i) => push(specialtyAddOn(addOn, i === 0 && bindBlocks.length > 0)))
 
   const interiorPage = { size: { width: PAGE_WIDTH, height: PAGE_HEIGHT }, margin: INTERIOR_MARGINS }
 
   const doc = new Document({
-    comments: {
-      children: comments.map((c) => ({ id: c.id, author: "Claude", initials: "CL", date: new Date(), children: [new Paragraph(c.text)] }))
-    },
     styles: { default: { document: { run: { font: "Arial", size: 20, color: CHAR } } }, paragraphStyles: [FOOTER_STYLE] },
     numbering: { config: [BULLET_NUMBERING] },
     sections: [{

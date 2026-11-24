@@ -9,9 +9,8 @@ import * as z from "zod"
 // the extraction survives a template change untouched.
 //
 // The fields mirror the insurance-proposal skill's references/coverage-fields.md (Patrick's own spec
-// for what a proposal shows per line). Each line lists the PDF pages it came from so the document
-// can point a reviewer at the source — each section built from a quote gets a Word comment saying
-// so (Andrew, 2026-10-01). Per-value page numbers were dropped 2026-10-08: nothing read them, and
+// for what a proposal shows per line). Each line lists the PDF pages it came from so each section
+// built from a quote records its source internally (it isn't written into the document). Per-value page numbers were dropped 2026-10-08: nothing read them, and
 // the schema had to shrink to fit the schedules tables under the structured-output grammar limit.
 
 export const LINES_OF_BUSINESS = [

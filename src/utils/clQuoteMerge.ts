@@ -20,16 +20,16 @@ import type { LineOfBusiness, QuoteExtraction, QuoteLineExtraction } from "./quo
 //     (specialty_addon) becomes its own Section 5 add-on.
 //   - The CL Renewal Summary's premiums come from its linked Renewal Premium Spreadsheet (AMS360),
 //     never from a quote (Andrew, 2026-11-21 — renewalSummaryPremiums.ts); a quoted line's premium
-//     only appears in that page's CSR comment, for comparison. Each quoted line still carries its
-//     premium (SlotLine.premium) for that and the Proposal Builder's Premium Summary (Patrick, 2026-10-18).
+//     is never printed there. Each quoted line still carries its
+//     premium (SlotLine.premium) for the Proposal Builder's Premium Summary (Patrick, 2026-10-18).
 //   - With withExposures (the Proposal Builder), a quoted line with no AMS360 schedules gets the
 //     quote's own GL class, vehicle and driver tables — built from quotes alone, nothing else
 //     supplies them (Patrick's Landon proposal, 2026-10-18).
 //   - Bind conditions from every quote are gathered into one "Bind Conditions & Notes" section, and
 //     each quote's number/expiry into the cover's validity note — Patrick's example does both.
 //   - When two uploads quote the same line, the later upload wins.
-//   - Every section built from a quote carries a Word comment naming the file and pages, so the
-//     account manager verifies it before the document goes to the client (Andrew, 2026-10-01).
+//   - Every section built from a quote records its source file and pages in `comment`. That's
+//     internal provenance only — never written into the document (Andrew, 2026-11-24).
 
 const SLOT_BY_LINE: Record<Exclude<LineOfBusiness, "specialty_addon">, LineSlot> = {
   property: "property",

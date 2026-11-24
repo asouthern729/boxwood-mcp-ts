@@ -165,7 +165,7 @@ Cover page (client, mailing address, policy period, Prepared By = the producer) 
 
 AMS360 has no A.M. Best ratings, enhancement lists or exclusions, so those appear only when an uploaded quote supplies them — never as placeholder text.
 
-**Uploaded quotes.** A quote PDF uploaded on the dashboard is read by Claude. A quoted line takes over the same line's section from the same carrier (carrier, rating, form, limits, highlights, exclusions); AMS360's schedules of what's insured stay. A line from a different carrier — or a line AMS360 doesn't have — gets its own section. Bind conditions and quote validity go to the Bind Conditions section and the cover. Every quote-built section carries a Word comment asking the CSR to verify it (comments never appear in the PDF). Quoted premiums are never printed.
+**Uploaded quotes.** A quote PDF uploaded on the dashboard is read by Claude. A quoted line takes over the same line's section from the same carrier (carrier, rating, form, limits, highlights, exclusions); AMS360's schedules of what's insured stay. A line from a different carrier — or a line AMS360 doesn't have — gets its own section. Bind conditions and quote validity go to the Bind Conditions section and the cover. The document carries no review comments — the CSR checks quote-built sections against the quote before sending. Quoted premiums are never printed.
 
 **Carrier-internal coverage codes.** Some carriers record coverages under a bare code (e.g. `WTRBN`, `DPPRM`, `FORMR`) with no description anywhere in the synced AMS360 data. They stay in the document as-is (dropping them would hide a real limit) and come back in the tool's `unresolved_coverage_codes` so the CSR can relabel them by hand — mention them when reporting the result.
 
