@@ -1,4 +1,5 @@
 import { createDocArchive } from "./docArchive.js"
+import type { ProposalAttachmentKind } from "./proposalAttachments.js"
 
 // <OUTPUT_ROOT>/proposal-builder/ — proposals built in the Proposal Builder chat purely from
 // uploaded files (proposalBuilderGenerate.ts). Unlike the CL index pages, these belong to the staff
@@ -27,7 +28,7 @@ export type ProposalEntry = {
   // Section titles the person asked to leave out; kept so a rebuild leaves them out too.
   omitted_sections?: string[]
   // Every attachment the document is built from, oldest first.
-  sources: { id: string; filename: string; kind: "quote_pdf" | "ams_docx" | "ams_pdf" }[]
+  sources: { id: string; filename: string; kind: ProposalAttachmentKind }[]
 }
 
 const proposalBuilderArchive = createDocArchive<ProposalEntry>("proposal-builder")

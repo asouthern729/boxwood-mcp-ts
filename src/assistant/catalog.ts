@@ -60,7 +60,7 @@ export const ASSISTANT_PAGES: AssistantPage[] = [
     title: "Proposal Builder",
     team: "Commercial",
     summary: "Builds a branded client proposal from carrier quotes and AMS360 proposals dropped into the chat.",
-    whenToUse: "Turning carrier quote PDFs into a client-ready proposal for new business or a remarket.",
+    whenToUse: "Turning carrier quotes (PDF, Word, Excel or a screenshot) into a client-ready proposal for new business or a remarket.",
     outputs: ["docx", "pdf"],
     mcpCapabilities: ["customer_lookup", "proposal_builder"]
   },

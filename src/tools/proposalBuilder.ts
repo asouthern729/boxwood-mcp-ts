@@ -30,7 +30,7 @@ async function waitForReads(ids: string[]): Promise<ProposalAttachment[]> {
 }
 
 // Proposal Builder (Andrew, 2026-10-10): builds a branded proposal in the CL Renewal Summary's layout
-// purely from files dropped on its chat — carrier quote PDFs and AMS360-generated proposals. Only
+// purely from files dropped on its chat — carrier quotes (PDF, .docx, .xlsx or image) and AMS360-generated proposals. Only
 // registered on the Proposal Builder chat's own server (utils/proposalBuilderChat.ts), bound to the
 // signed-in staff member, who owns what it builds; it isn't on the general MCP endpoint, which has no
 // way to upload files.
@@ -38,7 +38,7 @@ export function registerProposalBuilderTool(server: McpServer, user: ProposalCre
   server.registerTool(
     "proposal_builder",
     {
-      description: "Builds (or updates) a branded Commercial Insurance Proposal .docx from files the person attached in this chat — carrier quote PDFs and/or AMS360-generated proposals (.docx or PDF). An AMS360 proposal supplies the current program (coverage sections, schedules, named insureds, locations, service team); each quote replaces the same line from the same carrier or adds a new section. A Premium Summary lists each quoted line's annual premium (or the current premium for AMS360-only lines). Waits for files still being read (up to a few minutes). To add files to a proposal already built in this conversation, pass its filename as proposal_filename together with the new attachment_ids — the proposal is rebuilt in place with every file it was built from plus the new ones. To change an existing proposal without new files (e.g. leave a section out), pass proposal_filename with an empty attachment_ids. Returns a download link; the proposal also appears on the Proposal Builder page.",
+      description: "Builds (or updates) a branded Commercial Insurance Proposal .docx from files the person attached in this chat — carrier quotes (PDF, Word .docx, Excel .xlsx, or a PNG/JPEG screenshot or photo) and/or AMS360-generated proposals (.docx or PDF). An AMS360 proposal supplies the current program (coverage sections, schedules, named insureds, locations, service team); each quote replaces the same line from the same carrier or adds a new section. A Premium Summary lists each quoted line's annual premium (or the current premium for AMS360-only lines). Waits for files still being read (up to a few minutes). To add files to a proposal already built in this conversation, pass its filename as proposal_filename together with the new attachment_ids — the proposal is rebuilt in place with every file it was built from plus the new ones. To change an existing proposal without new files (e.g. leave a section out), pass proposal_filename with an empty attachment_ids. Returns a download link; the proposal also appears on the Proposal Builder page.",
       inputSchema: {
         attachment_ids: z.array(z.string()).describe("Ids of the attachments to build from, as listed in the message — may be empty only when proposal_filename is given"),
         proposal_filename: z.string().optional().describe("An existing proposal's filename (from an earlier proposal_builder result in this conversation) to add these files to"),

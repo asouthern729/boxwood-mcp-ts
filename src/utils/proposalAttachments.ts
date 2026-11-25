@@ -8,18 +8,20 @@ import { extractAmsProposal, type AmsProposalExtraction } from "./amsProposalExt
 import { convertDocxToPdf } from "./docxToPdf.js"
 import { logger } from "./logger.js"
 import { PROPOSAL_BUILDER_OUTPUT_DIR } from "./proposalBuilderArchive.js"
-import { QuoteExtractionError, extractQuote, type QuoteExtraction } from "./quoteExtraction.js"
+import { QuoteExtractionError, extractQuote, quoteFileKind, type QuoteExtraction } from "./quoteExtraction.js"
 import { deleteUpload, readUpload, saveUpload, uploadFilePath, writeUploadRecord, type UploadRecord } from "./uploadStore.js"
 
 const execFileAsync = promisify(execFile)
 
-// Files dropped on the Proposal Builder chat: carrier quote PDFs and AMS360-generated proposals
-// (.docx or PDF). Each is read by Claude in the background as soon as it's uploaded — the chat polls
+// Files dropped on the Proposal Builder chat: carrier quotes (PDF; since 2026-11-25 also Word .docx,
+// Excel .xlsx, or a PNG/JPEG screenshot or photo) and AMS360-generated proposals (.docx or PDF). Each is read by Claude in the background as soon as it's uploaded — the chat polls
 // its status — and owned by whoever uploaded it. A proposal records which attachments built it
 // (proposalBuilderArchive.ts), so they stay on disk until that proposal is deleted.
-//   <OUTPUT_ROOT>/proposal-builder/attachments/<id>.<pdf|docx> + <id>.json
+//   <OUTPUT_ROOT>/proposal-builder/attachments/<id>.<pdf|docx|xlsx|png|jpg> + <id>.json
 
-export type ProposalAttachmentKind = "quote_pdf" | "ams_docx" | "ams_pdf"
+export type ProposalAttachmentKind = "quote_pdf" | "quote_docx" | "quote_xlsx" | "quote_image" | "ams_docx" | "ams_pdf"
+
+const QUOTE_KINDS: ProposalAttachmentKind[] = ["quote_pdf", "quote_docx", "quote_xlsx", "quote_image"]
 
 export type ProposalAttachment = UploadRecord & {
   kind: ProposalAttachmentKind
@@ -74,16 +76,16 @@ function looksLikeAms(text: string): boolean {
   return AMS_MARKERS.filter((marker) => marker.test(text)).length >= 3
 }
 
+// A PDF or Word file is an AMS360 proposal when it carries AMS360's headings, and a carrier quote
+// otherwise. (Until 2026-11-25 a Word file that wasn't an AMS360 proposal was refused, since only
+// the AMS360 reader took Word; now it's read as a quote.)
 export async function detectKind(file: Buffer): Promise<ProposalAttachmentKind> {
-  if(file.subarray(0, 2).toString() === "PK" && file.includes("word/document.xml")) {
-    // The only Word file this reads is an AMS360 proposal; anything else (a branded proposal, a
-    // letter) would come back as a garbled program, so it's turned away up front.
-    if(looksLikeAms(await docxText(file))) return "ams_docx"
-    throw new UnsupportedAttachmentError("This Word file doesn't look like an AMS360 proposal. Upload the AMS360 proposal, or a carrier quote as a PDF.")
-  }
-
-  const headerAt = file.indexOf("%PDF-")
-  if(headerAt === -1 || headerAt > 1024) throw new UnsupportedAttachmentError("Upload a PDF quote or an AMS360 proposal (.docx or PDF).")
+  const fileKind = quoteFileKind(file)
+  if(fileKind === "docx") return looksLikeAms(await docxText(file)) ? "ams_docx" : "quote_docx"
+  if(fileKind === "xlsx") return "quote_xlsx"
+  if(fileKind === "png" || fileKind === "jpeg") return "quote_image"
+  if(fileKind === "xls") throw new UnsupportedAttachmentError("This is an older Excel file (.xls). Open it in Excel, save it as .xlsx, and upload that.")
+  if(fileKind !== "pdf") throw new UnsupportedAttachmentError("Upload a quote (PDF, Word .docx, Excel .xlsx, or a PNG/JPEG image) or an AMS360 proposal (.docx or PDF).")
 
   const text = await pdfText(file)
   return looksLikeAms(text) ? "ams_pdf" : "quote_pdf"
@@ -91,9 +93,16 @@ export async function detectKind(file: Buffer): Promise<ProposalAttachmentKind> 
 
 // ---------- Store ----------
 
+function attachmentExt(kind: ProposalAttachmentKind, file: Buffer): string {
+  if(kind === "ams_docx" || kind === "quote_docx") return "docx"
+  if(kind === "quote_xlsx") return "xlsx"
+  if(kind === "quote_image") return quoteFileKind(file) === "png" ? "png" : "jpg"
+  return "pdf"
+}
+
 export function saveAttachment(file: Buffer, filename: string, kind: ProposalAttachmentKind, ownerSub: string): ProposalAttachment {
   return saveUpload<ProposalAttachment>(ATTACHMENTS_DIR, file, {
-    filename, kind, owner_sub: ownerSub, ext: kind === "ams_docx" ? "docx" : "pdf"
+    filename, kind, owner_sub: ownerSub, ext: attachmentExt(kind, file)
   })
 }
 
@@ -137,9 +146,9 @@ export function attachmentSummary(record: ProposalAttachment) {
 
 export async function processAttachment(record: ProposalAttachment, file: Buffer): Promise<void> {
   try {
-    if(record.kind === "quote_pdf") {
+    if(QUOTE_KINDS.includes(record.kind)) {
       const quote = await extractQuote(file, record.filename)
-      if(quote.lines.length === 0) throw new QuoteExtractionError("No coverage lines were found in this PDF — is it a quote or binder?")
+      if(quote.lines.length === 0) throw new QuoteExtractionError("No coverage lines were found in this file — is it a quote or binder?")
       writeUploadRecord(ATTACHMENTS_DIR, { ...record, status: "done", quote })
       return
     }

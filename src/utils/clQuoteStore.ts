@@ -5,7 +5,7 @@ import {
   deleteUpload, deleteUploadDir, listUploads, saveUpload, uploadFilePath, writeUploadRecord, type UploadRecord, type UploadStatus
 } from "./uploadStore.js"
 
-// Quote PDFs uploaded against an archived CL Renewal Summary, and what was extracted from each —
+// Quotes (PDF; .docx, .xlsx, PNG or JPEG since 2026-11-25) uploaded against an archived CL Renewal Summary, and what was extracted from each —
 // <OUTPUT_ROOT>/cl-renewal-summary/quotes/<document>/<id>.pdf + <id>.json, where <document> is the
 // archive filename minus ".docx". That archive filename is keyed on the policy terms the document
 // covers (see clRenewalSummaryGenerate.ts), so every rebuild of the same terms — a rebuild after
@@ -26,8 +26,8 @@ export function quotePdfPath(archiveFilename: string, id: string): string {
   return uploadFilePath(documentDir(archiveFilename), { id })
 }
 
-export function saveQuoteUpload(archiveFilename: string, pdf: Buffer, filename: string): QuoteUpload {
-  return saveUpload<QuoteUpload>(documentDir(archiveFilename), pdf, { filename, ext: "pdf" })
+export function saveQuoteUpload(archiveFilename: string, file: Buffer, filename: string, ext: "pdf" | "xlsx" | "docx" | "png" | "jpg" = "pdf"): QuoteUpload {
+  return saveUpload<QuoteUpload>(documentDir(archiveFilename), file, { filename, ext })
 }
 
 export function completeQuoteUpload(archiveFilename: string, record: QuoteUpload, extraction: QuoteExtraction): QuoteUpload {

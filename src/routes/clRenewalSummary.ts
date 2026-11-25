@@ -17,7 +17,7 @@ import {
 } from "../utils/clQuoteStore.js"
 import type { QuoteUpload } from "../utils/clQuoteStore.js"
 import { logger } from "../utils/logger.js"
-import { extractQuote, QuoteExtractionError } from "../utils/quoteExtraction.js"
+import { extractQuote, quoteFileKind, QuoteExtractionError } from "../utils/quoteExtraction.js"
 import { groupByCsr } from "./riskProfile.js"
 import { documentId, linksForClRenewalSummary } from "../utils/documentLinks.js"
 import { LinkedBuildError, buildClRenewalSummaryForSpreadsheet } from "../utils/linkedDocumentBuild.js"
@@ -130,7 +130,7 @@ router.delete(`${ BASE }/cl-renewal-summary/files/:filename`, auth0, (req: Reque
   res.status(200).json({ filename })
 })
 
-// ---------- Uploaded quote PDFs (Patrick, 2026-09-29: "option to upload pdf for separate policies") ----------
+// ---------- Uploaded quotes: PDF, .docx, .xlsx or image (Patrick, 2026-09-29: "option to upload pdf for separate policies") ----------
 // Upload → the PDF is read by Claude (quoteExtraction.ts) → the document is rebuilt in place with
 // the quoted lines merged in (clQuoteMerge.ts).
 // Reading a quote takes a minute or more, longer than a request should hang, so the upload returns
@@ -147,12 +147,12 @@ function quoteSummary(upload: QuoteUpload) {
   }
 }
 
-async function processQuoteUpload(filename: string, upload: QuoteUpload, pdf: Buffer): Promise<void> {
+async function processQuoteUpload(filename: string, upload: QuoteUpload, file: Buffer): Promise<void> {
   try {
-    const extraction = await extractQuote(pdf, upload.filename)
+    const extraction = await extractQuote(file, upload.filename)
 
     if(extraction.lines.length === 0) {
-      failQuoteUpload(filename, upload, "No coverage lines were found in this PDF — is it a quote or binder?")
+      failQuoteUpload(filename, upload, "No coverage lines were found in this file — is it a quote or binder?")
       return
     }
 
@@ -180,12 +180,15 @@ router.get(`${ BASE }/cl-renewal-summary/files/:filename/quotes`, auth0, (req: R
   res.json({ quotes: listQuoteUploads(filename).map(quoteSummary) })
 })
 
-// Body is the raw PDF (Content-Type: application/pdf); the original filename comes in ?name= so the
-// quote's recorded source names the file the account manager actually uploaded.
+const QUOTE_TYPES_MESSAGE = "Upload the quote as a PDF, Word document (.docx), Excel workbook (.xlsx), or a PNG/JPEG image."
+
+// Body is the raw file: a PDF, or (since 2026-11-25) a .docx, .xlsx, or PNG/JPEG image. The type is read from
+// the bytes, so any Content-Type (or none) is accepted; browsers label spreadsheets inconsistently. The original
+// filename comes in ?name= so the quote's recorded source names the file the account manager uploaded.
 router.post(
   `${ BASE }/cl-renewal-summary/files/:filename/quotes`,
   auth0,
-  express.raw({ type: "application/pdf", limit: MAX_QUOTE_PDF_BYTES }),
+  express.raw({ type: () => true, limit: MAX_QUOTE_PDF_BYTES }),
   (req: Request<{ filename: string }, unknown, Buffer, { name?: string }>, res: Response) => {
     const { filename } = req.params
     const entry = readClRenewalSummaryManifest().find((e) => e.filename === filename)
@@ -200,18 +203,23 @@ router.post(
       return
     }
 
-    const pdf = req.body
-    // The PDF header can sit a little way in: American Modern's portal download starts with a 22-byte
-    // wrapper before "%PDF-" (quoteExtraction.ts strips it before sending).
-    const headerAt = Buffer.isBuffer(pdf) ? pdf.indexOf("%PDF-") : -1
-    if(headerAt === -1 || headerAt > 1024) {
-      res.status(400).json({ error: "invalid_pdf", error_description: "Upload a PDF file." })
+    const file = req.body
+    // A PDF header can sit a little way in: American Modern's portal download starts with a 22-byte
+    // wrapper before "%PDF-" (quoteExtraction.ts allows for it).
+    const kind = Buffer.isBuffer(file) ? quoteFileKind(file) : null
+    if(kind === "xls") {
+      res.status(400).json({ error: "invalid_file", error_description: "This is an older Excel file (.xls). Open it in Excel, save it as .xlsx, and upload that." })
+      return
+    }
+    if(kind === null) {
+      res.status(400).json({ error: "invalid_file", error_description: QUOTE_TYPES_MESSAGE })
       return
     }
 
-    const name = typeof req.query.name === "string" && req.query.name.trim() ? path.basename(req.query.name.trim()) : "quote.pdf"
-    const upload = saveQuoteUpload(filename, pdf, name)
-    void processQuoteUpload(filename, upload, pdf)
+    const ext = kind === "jpeg" ? "jpg" : kind
+    const name = typeof req.query.name === "string" && req.query.name.trim() ? path.basename(req.query.name.trim()) : `quote.${ ext }`
+    const upload = saveQuoteUpload(filename, file, name, ext)
+    void processQuoteUpload(filename, upload, file)
 
     res.status(202).json(quoteSummary(upload))
   }

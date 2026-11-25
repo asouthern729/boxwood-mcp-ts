@@ -74,7 +74,7 @@ The coverage sections never show premiums.
 
 **Row status:** each row says either "Awaiting renewal terms" or "Every section has renewal terms from AMS360 or an uploaded quote". A coverage-gaps badge means a line of business on the policy didn't make it into the document; check it by hand.
 
-**Upload Quote** (button, or drop a carrier quote PDF on the row):
+**Upload Quote** (button, or drop a carrier quote on the row: PDF, Word .docx, Excel .xlsx, or a PNG/JPEG screenshot or photo):
 - Claude reads the quote. That line's section takes the quote's carrier, rating, limits, highlights and exclusions, but keeps AMS360's schedules of what's insured. Bind conditions are collected into one section.
 - Check every section filled from a quote against the quote before sending.
 - The quote's premium isn't printed.
@@ -107,7 +107,7 @@ The coverage sections never show premiums.
 - Example: "Build the pre-renewal risk profile for Acme Corp".
 
 ### Proposal Builder (Commercial)
-**What it is:** a branded Commercial Insurance Proposal (Word or PDF) built from files you upload: carrier quote PDFs and AMS360-generated proposals (.docx or PDF).
+**What it is:** a branded Commercial Insurance Proposal (Word or PDF) built from files you upload: carrier quotes (PDF, Word .docx, Excel .xlsx, or a PNG/JPEG screenshot or photo) and AMS360-generated proposals (.docx or PDF).
 - An AMS360 proposal supplies the current program. A quote replaces the same line from the same carrier.
 - It includes a Premium Summary, bind conditions and Why Boxwood.
 - Check each section against the file it came from before sending.

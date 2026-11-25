@@ -166,7 +166,7 @@ router.post(
     const file = req.body
 
     if(!Buffer.isBuffer(file) || file.length === 0) {
-      res.status(400).json({ error: "invalid_file", error_description: "Upload a PDF quote or an AMS360 proposal (.docx or PDF)." })
+      res.status(400).json({ error: "invalid_file", error_description: "Upload a quote (PDF, Word .docx, Excel .xlsx, or a PNG/JPEG image) or an AMS360 proposal (.docx or PDF)." })
       return
     }
 
