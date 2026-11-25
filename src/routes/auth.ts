@@ -44,6 +44,8 @@ router.get("/authorize", (req, res) => {
   const state = req.query.state === undefined ? undefined : String(req.query.state)
   const codeChallenge = String(req.query.code_challenge ?? "")
   const codeChallengeMethod = req.query.code_challenge_method
+  // Only "none" (silent sign-in) is passed through to Auth0; anything else gets the normal login
+  const prompt = req.query.prompt === "none" ? "none" : undefined
 
   const client = getClient(clientId)
 
@@ -61,7 +63,7 @@ router.get("/authorize", (req, res) => {
 
   logger.info({ transactionId, clientId, redirectUri }, "Created pending authorization")
 
-  res.redirect(buildAuth0AuthorizeUrl(transactionId))
+  res.redirect(buildAuth0AuthorizeUrl(transactionId, prompt))
 })
 
 router.get("/callback", async (req, res) => {
@@ -70,6 +72,21 @@ router.get("/callback", async (req, res) => {
 
   if(req.query.error) {
     logger.warn({ transactionId, auth0Error: req.query.error, auth0ErrorDescription: req.query.error_description }, "Auth0 returned an error to /callback")
+
+    // Hand the error back to the client's (already validated) redirect_uri, per OAuth, so a silent
+    // sign-in that hits login_required can fall back to showing a Login button
+    const pending = consumePendingAuthorization(transactionId)
+
+    if(pending) {
+      const redirectUrl = new URL(pending.redirectUri)
+      redirectUrl.searchParams.set("error", String(req.query.error))
+      if(req.query.error_description) redirectUrl.searchParams.set("error_description", String(req.query.error_description))
+      if(pending.state !== undefined) redirectUrl.searchParams.set("state", pending.state)
+
+      res.redirect(redirectUrl.toString())
+      return
+    }
+
     res.status(400).json({ error: req.query.error, error_description: req.query.error_description ?? "Auth0 returned an error" })
     return
   }

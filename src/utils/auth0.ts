@@ -18,7 +18,9 @@ const AUTH0_API_URI = process.env.AUTH0_API_URI!
 const AUTH0_ISSUER = `https://${ AUTH0_TENANT_DOMAIN }/`
 export const OUR_CALLBACK_URL = `${ publicBaseUrl }/callback`
 
-export function buildAuth0AuthorizeUrl(state: string) {
+// prompt "none" asks Auth0 to sign in from its existing session without showing any UI, failing
+// back to our /callback with error=login_required when there isn't one.
+export function buildAuth0AuthorizeUrl(state: string, prompt?: "none") {
   const url = new URL(`https://${ AUTH0_TENANT_DOMAIN }/authorize`)
 
   url.searchParams.set("response_type", "code")
@@ -27,6 +29,7 @@ export function buildAuth0AuthorizeUrl(state: string) {
   url.searchParams.set("scope", "openid profile email")
   url.searchParams.set("audience", AUTH0_API_URI)
   url.searchParams.set("state", state)
+  if(prompt) url.searchParams.set("prompt", prompt)
 
   return url.toString()
 }
