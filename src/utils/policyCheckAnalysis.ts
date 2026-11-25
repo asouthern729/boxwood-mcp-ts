@@ -5,7 +5,7 @@ import { PDFDocument } from "pdf-lib"
 import * as z from "zod"
 import type { AmsCrossCheck } from "./policyCheckAms.js"
 import { DOC_TOOL_MODEL, DocToolError, MAX_TOTAL_PAGES, analyzeDocuments, anthropic } from "./docToolClaude.js"
-import { normalizedPdf } from "./quoteExtraction.js"
+import { TEXT_PAGE_CHARS, documentBlock, textPages, type ReadableDoc } from "./uploadNormalize.js"
 
 // The two Claude reads behind the CL Policy Check (Andrew, 2026-11-22), built from Patrick's
 // org-shared "policy-check" skill:
@@ -65,12 +65,21 @@ async function firstPages(doc: PDFDocument, count: number): Promise<Buffer> {
   return Buffer.from(await out.save())
 }
 
-export async function readDocumentProfile(file: Buffer, filename: string): Promise<DocumentProfile> {
-  const pdf = normalizedPdf(file)
-  const { doc, pages } = await pageCount(pdf)
-  if(!doc) throw new PolicyCheckError("This PDF couldn't be opened — it may be damaged or password-protected. Download it again and re-upload.")
-  // A slice of a large policy keeps this read cheap; the dec page and forms schedule are up front.
-  const excerpt = pages > PROFILE_PAGES ? await firstPages(doc, PROFILE_PAGES) : pdf
+// `readable` is the upload after uploadNormalize.ts: a PDF, or a workbook as text.
+export async function readDocumentProfile(readable: ReadableDoc, filename: string): Promise<DocumentProfile> {
+  let block: ReturnType<typeof documentBlock>
+  let pages: number
+  if(readable.format === "text") {
+    pages = textPages(readable.data)
+    block = documentBlock({ format: "text", data: readable.data.slice(0, PROFILE_PAGES * TEXT_PAGE_CHARS) }, filename)
+  } else {
+    const pdf = readable.data
+    const counted = await pageCount(pdf)
+    if(!counted.doc) throw new PolicyCheckError("This PDF couldn't be opened — it may be damaged or password-protected. Download it again and re-upload.")
+    pages = counted.pages
+    // A slice of a large policy keeps this read cheap; the dec page and forms schedule are up front.
+    block = documentBlock({ format: "pdf", data: pages > PROFILE_PAGES ? await firstPages(counted.doc, PROFILE_PAGES) : pdf }, filename)
+  }
 
   const response = await anthropic().beta.messages.parse({
     model: MODEL,
@@ -82,8 +91,10 @@ export async function readDocumentProfile(file: Buffer, filename: string): Promi
     messages: [{
       role: "user",
       content: [
-        { type: "document", source: { type: "base64", media_type: "application/pdf", data: excerpt.toString("base64") }, title: filename },
-        { type: "text", text: `These are the first ${ Math.min(pages, PROFILE_PAGES) } of ${ pages } pages. Identify the document.` }
+        block,
+        { type: "text", text: readable.format === "text"
+          ? "This is an Excel workbook given as text (its opening sheets, if it's long). Identify the document."
+          : `These are the first ${ Math.min(pages, PROFILE_PAGES) } of ${ pages } pages. Identify the document.` }
       ]
     }]
   })
@@ -214,7 +225,7 @@ export function normalizeFindings(raw: RawFindings): PolicyCheckFindings {
   }
 }
 
-export type CheckDocument = { label: string; filename: string; role: PolicyCheckRole; file: Buffer; pages: number; profile?: DocumentProfile }
+export type CheckDocument = { label: string; filename: string; role: PolicyCheckRole; doc: ReadableDoc; pages: number; profile?: DocumentProfile }
 
 const ROLE_HEADING: Record<PolicyCheckRole, string> = {
   baseline: "BASELINE (should be: quote / binder / expiring policy)",
@@ -248,7 +259,7 @@ export async function runPolicyCheck({ documents, ams, notes }: { documents: Che
   const raw = await analyzeDocuments({
     groups: ROLES.map((role) => ({
       heading: ROLE_HEADING[role],
-      documents: documents.filter((d) => d.role === role).map((d) => ({ title: `${ d.label } — ${ d.filename } (${ d.pages } pp.)`, filename: d.filename, file: d.file }))
+      documents: documents.filter((d) => d.role === role).map((d) => ({ title: `${ d.label } — ${ d.filename } (${ d.pages } pp.)`, filename: d.filename, doc: d.doc }))
     })),
     trailingText: [
       `AMS360 cross-check (Boxwood MCP, pulled ${ ams.pulled_at }):`,

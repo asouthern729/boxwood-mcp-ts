@@ -15,7 +15,7 @@ export type GapEntry = BaseJobEntry<GapRole> & {
 const store = createDocToolStore<GapRole, GapEntry>("coverage-gap")
 
 export const {
-  saveAttachment, getOwnedAttachment, updateAttachment, deleteAttachment, readAttachmentFile,
+  saveAttachment, makeReadable, getOwnedAttachment, updateAttachment, deleteAttachment, readAttachmentDoc,
   writeJob, getJob, listJobs, createJob, finishRunning, saveFindings, readFindings, reportPath, writeReport, reportSize, deleteJob
 } = store
 

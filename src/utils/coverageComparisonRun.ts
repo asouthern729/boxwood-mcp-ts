@@ -4,7 +4,7 @@ import { logger } from "./logger.js"
 import { runCoverageComparison, type Comparison } from "./coverageComparisonAnalysis.js"
 import { buildCoverageComparisonDoc } from "./coverageComparisonDoc.js"
 import {
-  createJob, finishRunning, getJob, getOwnedAttachment, readAttachmentFile, saveFindings, writeJob, writeReport,
+  createJob, finishRunning, getJob, getOwnedAttachment, readAttachmentDoc, saveFindings, writeJob, writeReport,
   type ComparisonAttachment, type ComparisonEntry, type ComparisonUser
 } from "./coverageComparisonStore.js"
 
@@ -39,7 +39,7 @@ function reportFilename(client: string, id: string): string {
 async function executeComparison(entry: ComparisonEntry, attachments: ComparisonAttachment[]): Promise<void> {
   const started = Date.now()
   try {
-    const documents = attachments.map((a) => ({ role: a.role, filename: a.filename, file: readAttachmentFile(a), pages: a.profile?.pages ?? 0 }))
+    const documents = attachments.map((a) => ({ role: a.role, filename: a.filename, doc: readAttachmentDoc(a), pages: a.profile?.pages ?? 0 }))
     const comparison = await runCoverageComparison({ documents, notes: entry.notes, labels: entry.requested_labels })
     if(entry.client_name) comparison.client.name = entry.client_name
 

@@ -39,21 +39,32 @@ export async function pdfForDocx(docxPath: string): Promise<{ buffer: Buffer; fi
 }
 
 // The conversion itself, for a .docx that isn't archived (the Proposal Builder reads an uploaded
-// AMS360 proposal as a PDF so its tables keep their layout).
+// AMS360 proposal as a PDF so its tables keep their layout; uploaded Word documents are read the
+// same way, uploadNormalize.ts).
 export async function convertDocxToPdf(docx: Buffer): Promise<Buffer> {
+  return convertWithLibreOffice(docx, "docx", "pdf")
+}
+
+// An old binary Excel workbook (.xls) to .xlsx, so it's read like any other workbook
+// (uploadNormalize.ts). Needs `libreoffice-calc-nogui` on the box.
+export async function convertXlsToXlsx(xls: Buffer): Promise<Buffer> {
+  return convertWithLibreOffice(xls, "xls", "xlsx")
+}
+
+async function convertWithLibreOffice(input: Buffer, fromExt: string, toExt: string): Promise<Buffer> {
   const soffice = sofficePath()
-  const workDir = mkdtempSync(path.join(tmpdir(), "docx2pdf-"))
+  const workDir = mkdtempSync(path.join(tmpdir(), `${ fromExt }2${ toExt }-`))
 
   try {
-    const input = path.join(workDir, "document.docx")
-    writeFileSync(input, docx)
+    const inputPath = path.join(workDir, `document.${ fromExt }`)
+    writeFileSync(inputPath, input)
     await execFileAsync(soffice, [
       `-env:UserInstallation=file://${ path.join(workDir, "profile") }`,
-      "--headless", "--norestore", "--convert-to", "pdf", "--outdir", workDir, input
+      "--headless", "--norestore", "--convert-to", toExt, "--outdir", workDir, inputPath
     ], { timeout: CONVERT_TIMEOUT_MS })
 
-    const output = path.join(workDir, "document.pdf")
-    if(!existsSync(output)) throw new Error("LibreOffice finished without producing a PDF")
+    const output = path.join(workDir, `document.${ toExt }`)
+    if(!existsSync(output)) throw new Error(`LibreOffice finished without producing a .${ toExt }`)
 
     return readFileSync(output)
   } finally {

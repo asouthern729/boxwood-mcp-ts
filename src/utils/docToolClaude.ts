@@ -2,11 +2,12 @@ import Anthropic, { toFile } from "@anthropic-ai/sdk"
 import { betaZodOutputFormat } from "@anthropic-ai/sdk/helpers/beta/zod"
 import type * as z from "zod"
 import { logger } from "./logger.js"
-import { normalizedPdf } from "./quoteExtraction.js"
+import { UploadReadError, WORKBOOK_NOTE, documentBlock, type ReadableDoc } from "./uploadNormalize.js"
 
 // The one big read behind each upload-and-run document tool (Policy Check, CL Coverage
-// Comparison): every PDF in one request, uploaded through the Files API so the request stays far
-// under the 32 MB body limit, one structured answer back, uploads deleted afterwards.
+// Comparison, Coverage Gap): every document in one request — PDFs uploaded through the Files API so
+// the request stays far under the 32 MB body limit, workbooks inline as text (uploadNormalize.ts) —
+// one structured answer back, uploads deleted afterwards.
 
 export const DOC_TOOL_MODEL = "claude-opus-5-5"
 // Opus 5.5 takes up to 600 PDF pages in one request.
@@ -15,10 +16,12 @@ export const MAX_TOTAL_PAGES = 600
 let client: Anthropic | null = null
 export const anthropic = () => (client ??= new Anthropic())
 
-// Errors whose message is written for staff and can be shown as-is.
-export class DocToolError extends Error {}
+// Errors whose message is written for staff and can be shown as-is. The same class as upload errors
+// (uploadNormalize.ts), so a file that can't be converted reports its own message.
+export { UploadReadError as DocToolError }
+const DocToolError = UploadReadError
 
-export type DocumentGroup = { heading: string; documents: { title: string; filename: string; file: Buffer }[] }
+export type DocumentGroup = { heading: string; documents: { title: string; filename: string; doc: ReadableDoc }[] }
 
 export async function analyzeDocuments<T extends z.ZodType>({ groups, trailingText, system, schema, logLabel }: {
   groups: DocumentGroup[]
@@ -36,13 +39,18 @@ export async function analyzeDocuments<T extends z.ZodType>({ groups, trailingTe
     for(const group of groups) {
       if(group.documents.length === 0) continue
       blocks.push({ type: "text", text: group.heading })
-      for(const doc of group.documents) {
-        const meta = await anthropic().files.upload({ file: await toFile(normalizedPdf(doc.file), doc.filename, { type: "application/pdf" }) })
+      for(const { title, filename, doc } of group.documents) {
+        if(doc.format === "text") {
+          blocks.push(documentBlock(doc, title))
+          continue
+        }
+        const meta = await anthropic().files.upload({ file: await toFile(doc.data, filename, { type: "application/pdf" }) })
         uploaded.push(meta.id)
-        blocks.push({ type: "document", source: { type: "file", file_id: meta.id }, title: doc.title })
+        blocks.push({ type: "document", source: { type: "file", file_id: meta.id }, title })
       }
     }
-    blocks.push({ type: "text", text: trailingText })
+    const hasWorkbook = groups.some((g) => g.documents.some((d) => d.doc.format === "text"))
+    blocks.push({ type: "text", text: hasWorkbook ? `${ trailingText }\n\n${ WORKBOOK_NOTE }` : trailingText })
 
     const stream = anthropic().beta.messages.stream({
       model: DOC_TOOL_MODEL,

@@ -17,7 +17,8 @@ import {
 } from "../utils/clQuoteStore.js"
 import type { QuoteUpload } from "../utils/clQuoteStore.js"
 import { logger } from "../utils/logger.js"
-import { extractQuote, quoteFileKind, QuoteExtractionError } from "../utils/quoteExtraction.js"
+import { extractQuote, QuoteExtractionError } from "../utils/quoteExtraction.js"
+import { ACCEPTED_FILES_MESSAGE, sniffUpload, uploadExt } from "../utils/uploadNormalize.js"
 import { groupByCsr } from "./riskProfile.js"
 import { documentId, linksForClRenewalSummary } from "../utils/documentLinks.js"
 import { LinkedBuildError, buildClRenewalSummaryForSpreadsheet } from "../utils/linkedDocumentBuild.js"
@@ -180,9 +181,7 @@ router.get(`${ BASE }/cl-renewal-summary/files/:filename/quotes`, auth0, (req: R
   res.json({ quotes: listQuoteUploads(filename).map(quoteSummary) })
 })
 
-const QUOTE_TYPES_MESSAGE = "Upload the quote as a PDF, Word document (.docx), Excel workbook (.xlsx), or a PNG/JPEG image."
-
-// Body is the raw file: a PDF, or (since 2026-11-25) a .docx, .xlsx, or PNG/JPEG image. The type is read from
+// Body is the raw file: a PDF, or (since 2026-11-25) any type uploadNormalize.ts accepts. The type is read from
 // the bytes, so any Content-Type (or none) is accepted; browsers label spreadsheets inconsistently. The original
 // filename comes in ?name= so the quote's recorded source names the file the account manager uploaded.
 router.post(
@@ -206,17 +205,13 @@ router.post(
     const file = req.body
     // A PDF header can sit a little way in: American Modern's portal download starts with a 22-byte
     // wrapper before "%PDF-" (quoteExtraction.ts allows for it).
-    const kind = Buffer.isBuffer(file) ? quoteFileKind(file) : null
-    if(kind === "xls") {
-      res.status(400).json({ error: "invalid_file", error_description: "This is an older Excel file (.xls). Open it in Excel, save it as .xlsx, and upload that." })
-      return
-    }
+    const kind = Buffer.isBuffer(file) ? sniffUpload(file) : null
     if(kind === null) {
-      res.status(400).json({ error: "invalid_file", error_description: QUOTE_TYPES_MESSAGE })
+      res.status(400).json({ error: "invalid_file", error_description: ACCEPTED_FILES_MESSAGE })
       return
     }
 
-    const ext = kind === "jpeg" ? "jpg" : kind
+    const ext = uploadExt(kind)
     const name = typeof req.query.name === "string" && req.query.name.trim() ? path.basename(req.query.name.trim()) : `quote.${ ext }`
     const upload = saveQuoteUpload(filename, file, name, ext)
     void processQuoteUpload(filename, upload, file)

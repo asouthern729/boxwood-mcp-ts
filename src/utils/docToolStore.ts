@@ -1,14 +1,17 @@
 import { randomUUID } from "node:crypto"
 import { existsSync, mkdirSync, readdirSync, readFileSync, statSync, unlinkSync, writeFileSync } from "node:fs"
+import { ACCEPTED_FILES_MESSAGE, UploadReadError, normalizedPdf, sniffUpload, toReadable, type ReadableDoc } from "./uploadNormalize.js"
 import path from "node:path"
 import { outputDir } from "../config/config.js"
 import type { DocumentProfile } from "./policyCheckAnalysis.js"
 import { deleteUpload, readUpload, saveUpload, uploadFilePath, writeUploadRecord, type UploadRecord } from "./uploadStore.js"
 
 // Shared storage for the upload-and-run document tools (Policy Check, CL Coverage Comparison):
-// staff upload PDFs into named roles, a background job reads them all and writes a Word report.
+// staff upload files into named roles, a background job reads them all and writes a Word report.
+// Any type uploadNormalize.ts accepts is stored as uploaded, then replaced by its readable form
+// (makeReadable) during the first read: a PDF, or a .txt for a workbook.
 // Everything is owned by whoever uploaded/ran it (like the Proposal Builder).
-//   <OUTPUT_ROOT>/<subdir>/attachments/<id>.pdf + <id>.json   uploads (uploadStore.ts)
+//   <OUTPUT_ROOT>/<subdir>/attachments/<id>.<pdf|txt> + <id>.json   uploads (uploadStore.ts)
 //   <OUTPUT_ROOT>/<subdir>/jobs/<id>.json                      one record per run
 //   <OUTPUT_ROOT>/<subdir>/jobs/<id>.findings.json             what the analysis returned (chat follow-ups read it)
 //   <OUTPUT_ROOT>/<subdir>/<filename>.docx                     the report
@@ -51,8 +54,26 @@ export function createDocToolStore<Role extends string, Entry extends BaseJobEnt
 
   // ---------- Attachments ----------
 
-  function saveAttachment(file: Buffer, filename: string, role: Role, ownerSub: string): Attachment {
-    return saveUpload<Attachment>(ATTACHMENTS_DIR, file, { filename, role, owner_sub: ownerSub, ext: "pdf" } as Omit<Attachment, "id" | "uploaded_at" | "status">)
+  function saveAttachment(file: Buffer, filename: string, role: Role, ownerSub: string, ext = "pdf"): Attachment {
+    return saveUpload<Attachment>(ATTACHMENTS_DIR, file, { filename, role, owner_sub: ownerSub, ext } as Omit<Attachment, "id" | "uploaded_at" | "status">)
+  }
+
+  // Converts the stored upload to what Claude reads (uploadNormalize.ts) and keeps only that, so the
+  // first read, the page count and every later run all see the same document.
+  async function makeReadable(record: Attachment): Promise<{ record: Attachment; doc: ReadableDoc }> {
+    const originalPath = uploadFilePath(ATTACHMENTS_DIR, record)
+    const original = readFileSync(originalPath)
+    const kind = sniffUpload(original)
+    if(!kind) throw new UploadReadError(ACCEPTED_FILES_MESSAGE)
+
+    const doc = await toReadable(original, kind)
+    const ext = doc.format === "pdf" ? "pdf" : "txt"
+    writeFileSync(uploadFilePath(ATTACHMENTS_DIR, { id: record.id, ext }), doc.data)
+    if(ext !== (record.ext ?? "pdf") && existsSync(originalPath)) unlinkSync(originalPath)
+
+    // Re-read so a role change made meanwhile isn't overwritten.
+    const latest = getAttachment(record.id) ?? record
+    return { record: writeUploadRecord(ATTACHMENTS_DIR, { ...latest, ext }), doc }
   }
 
   function getAttachment(id: string): Attachment | null {
@@ -71,7 +92,11 @@ export function createDocToolStore<Role extends string, Entry extends BaseJobEnt
 
   const updateAttachment = (record: Attachment): Attachment => writeUploadRecord(ATTACHMENTS_DIR, record)
   const deleteAttachment = (id: string): boolean => deleteUpload(ATTACHMENTS_DIR, id)
-  const readAttachmentFile = (record: Attachment): Buffer => readFileSync(uploadFilePath(ATTACHMENTS_DIR, record))
+  function readAttachmentDoc(record: Attachment): ReadableDoc {
+    const file = readFileSync(uploadFilePath(ATTACHMENTS_DIR, record))
+    // Uploads from before 2026-11-25 were stored as uploaded, so a PDF may still carry a portal wrapper.
+    return record.ext === "txt" ? { format: "text", data: file.toString("utf8") } : { format: "pdf", data: normalizedPdf(file) }
+  }
 
   // What the API returns — the profile, never the file. `extraProfile` adds tool-specific fields
   // (Policy Check's suggested_role).
@@ -190,7 +215,7 @@ export function createDocToolStore<Role extends string, Entry extends BaseJobEnt
 
   return {
     OUTPUT_DIR,
-    saveAttachment, getAttachment, getOwnedAttachment, updateAttachment, deleteAttachment, readAttachmentFile, attachmentSummary,
+    saveAttachment, makeReadable, getAttachment, getOwnedAttachment, updateAttachment, deleteAttachment, readAttachmentDoc, attachmentSummary,
     writeJob, getJob, listJobs, createJob, finishRunning, saveFindings, readFindings, reportPath, writeReport, reportSize, deleteJob,
     isRunning: (id: string) => running.has(id)
   }

@@ -8,16 +8,17 @@ import { extractAmsProposal, type AmsProposalExtraction } from "./amsProposalExt
 import { convertDocxToPdf } from "./docxToPdf.js"
 import { logger } from "./logger.js"
 import { PROPOSAL_BUILDER_OUTPUT_DIR } from "./proposalBuilderArchive.js"
-import { QuoteExtractionError, extractQuote, quoteFileKind, type QuoteExtraction } from "./quoteExtraction.js"
+import { QuoteExtractionError, extractQuote, type QuoteExtraction } from "./quoteExtraction.js"
+import { ACCEPTED_FILES_MESSAGE, sniffUpload, uploadExt } from "./uploadNormalize.js"
 import { deleteUpload, readUpload, saveUpload, uploadFilePath, writeUploadRecord, type UploadRecord } from "./uploadStore.js"
 
 const execFileAsync = promisify(execFile)
 
-// Files dropped on the Proposal Builder chat: carrier quotes (PDF; since 2026-11-25 also Word .docx,
-// Excel .xlsx, or a PNG/JPEG screenshot or photo) and AMS360-generated proposals (.docx or PDF). Each is read by Claude in the background as soon as it's uploaded — the chat polls
+// Files dropped on the Proposal Builder chat: carrier quotes (PDF; since 2026-11-25 any type
+// uploadNormalize.ts accepts) and AMS360-generated proposals (.docx or PDF). Each is read by Claude in the background as soon as it's uploaded — the chat polls
 // its status — and owned by whoever uploaded it. A proposal records which attachments built it
 // (proposalBuilderArchive.ts), so they stay on disk until that proposal is deleted.
-//   <OUTPUT_ROOT>/proposal-builder/attachments/<id>.<pdf|docx|xlsx|png|jpg> + <id>.json
+//   <OUTPUT_ROOT>/proposal-builder/attachments/<id>.<pdf|docx|xlsx|xls|png|jpg> + <id>.json
 
 export type ProposalAttachmentKind = "quote_pdf" | "quote_docx" | "quote_xlsx" | "quote_image" | "ams_docx" | "ams_pdf"
 
@@ -80,12 +81,11 @@ function looksLikeAms(text: string): boolean {
 // otherwise. (Until 2026-11-25 a Word file that wasn't an AMS360 proposal was refused, since only
 // the AMS360 reader took Word; now it's read as a quote.)
 export async function detectKind(file: Buffer): Promise<ProposalAttachmentKind> {
-  const fileKind = quoteFileKind(file)
+  const fileKind = sniffUpload(file)
   if(fileKind === "docx") return looksLikeAms(await docxText(file)) ? "ams_docx" : "quote_docx"
-  if(fileKind === "xlsx") return "quote_xlsx"
+  if(fileKind === "xlsx" || fileKind === "xls") return "quote_xlsx"
   if(fileKind === "png" || fileKind === "jpeg") return "quote_image"
-  if(fileKind === "xls") throw new UnsupportedAttachmentError("This is an older Excel file (.xls). Open it in Excel, save it as .xlsx, and upload that.")
-  if(fileKind !== "pdf") throw new UnsupportedAttachmentError("Upload a quote (PDF, Word .docx, Excel .xlsx, or a PNG/JPEG image) or an AMS360 proposal (.docx or PDF).")
+  if(fileKind !== "pdf") throw new UnsupportedAttachmentError(ACCEPTED_FILES_MESSAGE)
 
   const text = await pdfText(file)
   return looksLikeAms(text) ? "ams_pdf" : "quote_pdf"
@@ -93,16 +93,14 @@ export async function detectKind(file: Buffer): Promise<ProposalAttachmentKind> 
 
 // ---------- Store ----------
 
-function attachmentExt(kind: ProposalAttachmentKind, file: Buffer): string {
-  if(kind === "ams_docx" || kind === "quote_docx") return "docx"
-  if(kind === "quote_xlsx") return "xlsx"
-  if(kind === "quote_image") return quoteFileKind(file) === "png" ? "png" : "jpg"
-  return "pdf"
+function attachmentExt(file: Buffer): string {
+  const kind = sniffUpload(file)
+  return kind ? uploadExt(kind) : "pdf"
 }
 
 export function saveAttachment(file: Buffer, filename: string, kind: ProposalAttachmentKind, ownerSub: string): ProposalAttachment {
   return saveUpload<ProposalAttachment>(ATTACHMENTS_DIR, file, {
-    filename, kind, owner_sub: ownerSub, ext: attachmentExt(kind, file)
+    filename, kind, owner_sub: ownerSub, ext: attachmentExt(file)
   })
 }
 

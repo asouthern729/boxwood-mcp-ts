@@ -4,7 +4,7 @@ import { pullAmsCrossCheck } from "./policyCheckAms.js"
 import { MAX_TOTAL_PAGES, PolicyCheckError, runPolicyCheck, type CheckDocument, type CheckRowFindings, type DocumentProfile, type PolicyCheckFindings } from "./policyCheckAnalysis.js"
 import { buildPolicyCheckDoc } from "./policyCheckDoc.js"
 import {
-  createCheck, finishRunning, getCheck, getOwnedAttachment, readAttachmentFile, saveFindings, writeCheck, writeReport,
+  createCheck, finishRunning, getCheck, getOwnedAttachment, readAttachmentDoc, saveFindings, writeCheck, writeReport,
   type CheckEntry, type PolicyCheckAttachment, type PolicyCheckUser
 } from "./policyCheckStore.js"
 
@@ -118,7 +118,7 @@ export function labelDocuments(attachments: PolicyCheckAttachment[]): CheckDocum
     const n = (used.get(base) ?? 0) + 1
     used.set(base, n)
     const count = attachments.filter((b) => (b.profile ? LABEL[b.profile.document_type] : null) === base).length
-    return { label: count > 1 ? `${ base } ${ n }` : base, filename: a.filename, role: a.role, file: readAttachmentFile(a), pages: a.profile?.pages ?? 0, profile: a.profile }
+    return { label: count > 1 ? `${ base } ${ n }` : base, filename: a.filename, role: a.role, doc: readAttachmentDoc(a), pages: a.profile?.pages ?? 0, profile: a.profile }
   })
 }
 

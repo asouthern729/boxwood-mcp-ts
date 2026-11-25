@@ -1,6 +1,7 @@
 import { readFileSync } from "node:fs"
 import path from "node:path"
 import * as z from "zod"
+import type { ReadableDoc } from "./uploadNormalize.js"
 import { DocToolError, MAX_TOTAL_PAGES, analyzeDocuments } from "./docToolClaude.js"
 
 // Coverage Gap (Andrew, 2026-11-25), from Patrick's org-shared "coverage-gap-analysis" skill: a
@@ -162,7 +163,7 @@ How this run differs from the instructions:
 ${ readFileSync(INSTRUCTIONS_PATH, "utf8") }`
 }
 
-export type GapDocument = { filename: string; file: Buffer; pages: number }
+export type GapDocument = { filename: string; doc: ReadableDoc; pages: number }
 
 export async function runCoverageGapAnalysis({ documents, notes }: { documents: GapDocument[]; notes?: string }): Promise<GapAnalysis> {
   const totalPages = documents.reduce((sum, d) => sum + d.pages, 0)
@@ -173,7 +174,7 @@ export async function runCoverageGapAnalysis({ documents, notes }: { documents: 
   const raw = await analyzeDocuments({
     groups: [{
       heading: "POLICY DOCUMENTS",
-      documents: documents.map((d) => ({ title: `${ d.filename } (${ d.pages } pp.)`, filename: d.filename, file: d.file }))
+      documents: documents.map((d) => ({ title: `${ d.filename } (${ d.pages } pp.)`, filename: d.filename, doc: d.doc }))
     }],
     trailingText: [
       notes?.trim() ? `Account notes from the staff member (not from the documents):\n${ notes.trim() }` : "No account notes were given.",

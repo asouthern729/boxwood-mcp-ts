@@ -8,7 +8,7 @@ import { runCoverageGapChatTurn } from "../utils/coverageGapChat.js"
 import { GapRefused, MAX_NOTES_LENGTH, startGapAnalysis } from "../utils/coverageGapRun.js"
 import {
   attachmentSummary, deleteAttachment, deleteJob, getJob, getOwnedAttachment, listJobs, reportPath, reportSize,
-  saveAttachment, updateAttachment, type GapAttachment, type GapEntry
+  makeReadable, saveAttachment, updateAttachment, type GapAttachment, type GapEntry
 } from "../utils/coverageGapStore.js"
 import { DocToolError } from "../utils/docToolClaude.js"
 import { currentUser, viewerSub } from "../utils/docToolUser.js"
@@ -17,7 +17,7 @@ import { PdfConverterUnavailableError, pdfForDocx } from "../utils/docxToPdf.js"
 import { ErrorResponse } from "../utils/errorResponse.js"
 import { logger } from "../utils/logger.js"
 import { readDocumentProfile } from "../utils/policyCheckAnalysis.js"
-import { normalizedPdf } from "../utils/quoteExtraction.js"
+import { ACCEPTED_FILES_MESSAGE, sniffUpload, uploadExt } from "../utils/uploadNormalize.js"
 
 // Coverage Gap page (Andrew, 2026-11-25) — Commercial tools. Staff upload a commercial account's
 // policy PDFs, optionally fill the account notes box, and get an internal Word gap analysis. Same
@@ -145,10 +145,13 @@ router.get(`${ BASE }/files/:filename/pdf`, auth0, asyncHandler(async(req: Reque
 
 // ---------- Attachments ----------
 
-async function readProfile(record: GapAttachment, file: Buffer): Promise<void> {
+// Converts the upload to what Claude reads (a PDF, or text for a workbook), then takes the first look.
+async function readProfile(record: GapAttachment): Promise<void> {
   try {
-    const profile = await readDocumentProfile(file, record.filename)
-    const latest = getOwnedAttachment(record.id, record.owner_sub) ?? record
+    const { record: ready, doc } = await makeReadable(record)
+    const profile = await readDocumentProfile(doc, ready.filename)
+    // Re-read so a role change made while this read ran isn't overwritten.
+    const latest = getOwnedAttachment(record.id, record.owner_sub) ?? ready
     updateAttachment({ ...latest, status: "done", profile })
   } catch(error) {
     logger.error({ err: error, attachment: record.id }, "coverage_gap attachment read failed")
@@ -166,20 +169,15 @@ router.post(
   asyncHandler(async(req: Request<unknown, unknown, Buffer, { name?: string }>, res: Response) => {
     const sub = viewerSub(req)
     const file = req.body
-    if(!Buffer.isBuffer(file) || file.length === 0) {
-      res.status(400).json({ error: "invalid_file", error_description: "Upload a PDF." })
-      return
-    }
-    try {
-      normalizedPdf(file)
-    } catch {
-      res.status(400).json({ error: "invalid_file", error_description: "This file isn't a PDF. Download it again as a PDF and upload that." })
+    const kind = Buffer.isBuffer(file) ? sniffUpload(file) : null
+    if(!kind) {
+      res.status(400).json({ error: "invalid_file", error_description: ACCEPTED_FILES_MESSAGE })
       return
     }
 
-    const name = typeof req.query.name === "string" && req.query.name.trim() ? path.basename(req.query.name.trim()) : "upload.pdf"
-    const record = saveAttachment(file, name, "policy", sub)
-    void readProfile(record, file)
+    const name = typeof req.query.name === "string" && req.query.name.trim() ? path.basename(req.query.name.trim()) : `upload.${ uploadExt(kind) }`
+    const record = saveAttachment(file, name, "policy", sub, uploadExt(kind))
+    void readProfile(record)
     res.status(202).json(attachmentSummary(record))
   })
 )

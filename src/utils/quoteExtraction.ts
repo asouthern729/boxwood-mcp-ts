@@ -1,8 +1,7 @@
 import Anthropic from "@anthropic-ai/sdk"
 import { betaZodOutputFormat } from "@anthropic-ai/sdk/helpers/beta/zod"
-import ExcelJS from "exceljs"
 import * as z from "zod"
-import { PdfConverterUnavailableError, convertDocxToPdf } from "./docxToPdf.js"
+import { UploadReadError, documentBlock, normalizedPdf, readableUpload } from "./uploadNormalize.js"
 
 // Reads an uploaded carrier quote PDF into structured, per-line-of-business fields — the "option to
 // upload pdf for separate policies" on the CL Renewal Summary (Patrick, 2026-09-29). Deliberately
@@ -102,18 +101,10 @@ function anthropic(): Anthropic {
   return client
 }
 
-export class QuoteExtractionError extends Error {}
-
-const PDF_HEADER = Buffer.from("%PDF-")
-
-// Some carrier portals wrap the download: American Modern's dec page (Patrick's TN Equine email,
-// 2026-10-07) starts with a 22-byte Java serialization header before "%PDF-". Desktop viewers skip
-// leading junk, but the API rejects the file as "not valid" — so anything before the header is cut.
-export function normalizedPdf(pdf: Buffer): Buffer {
-  const start = pdf.indexOf(PDF_HEADER)
-  if(start === -1 || start > 1024) throw new QuoteExtractionError("This file isn't a PDF — download the quote again as a PDF and upload that.")
-  return start === 0 ? pdf : pdf.subarray(start)
-}
+// Upload errors (uploadNormalize.ts) and extraction errors are one class, so a caller catching
+// either shows the message as written.
+export { UploadReadError as QuoteExtractionError, normalizedPdf }
+const QuoteExtractionError = UploadReadError
 
 // Streamed with a 64K output budget: a full carrier proposal (Cincinnati's 53-page TN Equine quote)
 // plus high-effort thinking overran the previous 16K cap mid-JSON. Streaming is what lets max_tokens
@@ -121,121 +112,23 @@ export function normalizedPdf(pdf: Buffer): Buffer {
 // message's stop reason still says whether it was cut short.
 export async function extractQuote(file: Buffer, filename: string): Promise<QuoteExtraction> {
   const opts = { schema: QuoteExtractionSchema, system: SYSTEM_PROMPT, instruction: "Extract every coverage line in this quote.", noun: "quote" }
-  const kind = quoteFileKind(file)
-
-  if(kind === "xlsx") {
-    return readStructured(
-      { type: "document", source: { type: "text", media_type: "text/plain", data: await workbookText(file) }, title: filename },
-      { ...opts, instruction: `${ opts.instruction }\n\n${ XLSX_NOTE }` }
-    )
-  }
-  if(kind === "png" || kind === "jpeg") {
-    if(file.length > MAX_IMAGE_BYTES) throw new QuoteExtractionError("This image is over 5 MB. Upload a screenshot or a smaller photo, or save the quote as a PDF.")
-    return readStructured(
-      { type: "image", source: { type: "base64", media_type: kind === "png" ? "image/png" : "image/jpeg", data: file.toString("base64") } },
-      { ...opts, instruction: `${ opts.instruction }\n\nThis quote is an image (a screenshot or photo); its page number is 1.` }
-    )
-  }
-  // A Word quote becomes a PDF first, so it's read (and its pages cited) exactly like a PDF quote.
-  if(kind === "docx") return readPdfStructured(await docxQuoteToPdf(file), filename, opts)
-
-  return readPdfStructured(file, filename, opts)
-}
-
-// ---------- Quotes that aren't PDFs ----------
-// .xlsx (2026-11-25): the workbook is turned into plain text, one block per sheet with each non-empty
-// row's cells joined by " | ". .docx and images (also 2026-11-25): a Word quote is converted to PDF
-// with LibreOffice; a PNG or JPEG screenshot/photo is sent as an image. All are read with the same
-// schema and prompt as a PDF, so the merge into the renewal summary or proposal doesn't know the
-// difference.
-
-export type QuoteFileKind = "pdf" | "xlsx" | "docx" | "png" | "jpeg" | "xls"
-
-// From the bytes, since browsers label Office files inconsistently. .xlsx and .docx are zips whose
-// entry names (stored as plain text) include xl/workbook.xml or word/document.xml; an old binary
-// .xls is an OLE file.
-export function quoteFileKind(file: Buffer): QuoteFileKind | null {
-  const pdfAt = file.indexOf(PDF_HEADER)
-  if(pdfAt !== -1 && pdfAt <= 1024) return "pdf"
-  if(file.subarray(0, 4).equals(Buffer.from([0x50, 0x4b, 0x03, 0x04]))) {
-    if(file.includes("xl/workbook")) return "xlsx"
-    if(file.includes("word/document")) return "docx"
-    return null
-  }
-  if(file.subarray(0, 8).equals(Buffer.from([0x89, 0x50, 0x4e, 0x47, 0x0d, 0x0a, 0x1a, 0x0a]))) return "png"
-  if(file.subarray(0, 3).equals(Buffer.from([0xff, 0xd8, 0xff]))) return "jpeg"
-  if(file.subarray(0, 8).equals(Buffer.from([0xd0, 0xcf, 0x11, 0xe0, 0xa1, 0xb1, 0x1a, 0xe1]))) return "xls"
-  return null
-}
-
-// The API's per-image limit.
-const MAX_IMAGE_BYTES = 5 * 1024 * 1024
-
-async function docxQuoteToPdf(docx: Buffer): Promise<Buffer> {
-  try {
-    return await convertDocxToPdf(docx)
-  } catch(error) {
-    if(error instanceof PdfConverterUnavailableError) throw new QuoteExtractionError("Word quotes can't be read on this server yet. Save the quote as a PDF and upload that.")
-    throw new QuoteExtractionError("This Word file couldn't be opened. Save it as a PDF and upload that.")
-  }
+  // Every accepted type (uploadNormalize.ts): PDFs, Word and images are read as a PDF, a workbook as text.
+  const doc = await readableUpload(file)
+  return readStructured(documentBlock(doc, filename), doc.format === "text" ? { ...opts, instruction: `${ opts.instruction }\n\n${ XLSX_NOTE }` } : opts)
 }
 
 const XLSX_NOTE = "This quote is an Excel workbook converted to text: each sheet starts with a \"## Sheet N\" heading and each row reads \"R<row>: cell | cell | ...\". In pages, list the sheet numbers the line came from instead of PDF pages. Numbers appear unformatted (e.g. 1000000 for $1,000,000; 0.02 may be 2%), so format limits and premiums as the quote evidently means them."
-
-// About 100k tokens; a quote workbook bigger than this is almost certainly a rating export, not a quote.
-const MAX_WORKBOOK_CHARS = 400_000
-
-function cellText(value: ExcelJS.CellValue): string {
-  if(value === null || value === undefined) return ""
-  if(value instanceof Date) return value.toISOString().slice(0, 10)
-  if(typeof value !== "object") return String(value)
-  if("richText" in value) return value.richText.map((r) => r.text).join("")
-  if("formula" in value || "sharedFormula" in value) return "result" in value && value.result !== undefined ? cellText(value.result as ExcelJS.CellValue) : ""
-  if("text" in value) return String(value.text)
-  if("error" in value) return ""
-  return ""
-}
-
-export async function workbookText(file: Buffer): Promise<string> {
-  const workbook = new ExcelJS.Workbook()
-  try {
-    await workbook.xlsx.load(file as unknown as ArrayBuffer)
-  } catch {
-    throw new QuoteExtractionError("This Excel file couldn't be opened. Save it again as .xlsx and upload that.")
-  }
-
-  const sheets: string[] = []
-  workbook.worksheets.forEach((sheet, i) => {
-    const rows: string[] = []
-    sheet.eachRow({ includeEmpty: false }, (row, rowNumber) => {
-      const cells: string[] = []
-      for(let c = 1; c <= row.cellCount; c++) {
-        const cell = row.getCell(c)
-        // A merged range repeats its value in every cell; keep it in the first one only.
-        cells.push(cell.isMerged && cell.master.address !== cell.address ? "" : cellText(cell.value).replace(/\s+/g, " ").trim())
-      }
-      while(cells.length && !cells[cells.length - 1]) cells.pop()
-      if(cells.some(Boolean)) rows.push(`R${ rowNumber }: ${ cells.join(" | ") }`)
-    })
-    if(rows.length) sheets.push(`## Sheet ${ i + 1 }: ${ sheet.name }${ sheet.state === "visible" ? "" : " (hidden)" }\n${ rows.join("\n") }`)
-  })
-
-  const text = sheets.join("\n\n")
-  if(!text) throw new QuoteExtractionError("This Excel file is empty.")
-  if(text.length > MAX_WORKBOOK_CHARS) throw new QuoteExtractionError("This Excel file has more detail than can be read in one pass — remove sheets that aren't part of the quote and upload it again.")
-  return text
-}
 
 // One structured read of a PDF — shared with the Proposal Builder's AMS360 proposal reader
 // (amsProposalExtraction.ts). `noun` names the document in the errors staff see.
 type StructuredRead<T extends z.ZodType> = { schema: T; system: string; instruction: string; noun: string }
 
 export async function readPdfStructured<T extends z.ZodType>(pdf: Buffer, filename: string, opts: StructuredRead<T>): Promise<z.infer<T>> {
-  return readStructured({ type: "document", source: { type: "base64", media_type: "application/pdf", data: normalizedPdf(pdf).toString("base64") }, title: filename }, opts)
+  return readStructured(documentBlock({ format: "pdf", data: normalizedPdf(pdf) }, filename), opts)
 }
 
 async function readStructured<T extends z.ZodType>(
-  document: Anthropic.Beta.BetaRequestDocumentBlock | Anthropic.Beta.BetaImageBlockParam, { schema, system, instruction, noun }: StructuredRead<T>
+  document: Anthropic.Beta.BetaRequestDocumentBlock, { schema, system, instruction, noun }: StructuredRead<T>
 ): Promise<z.infer<T>> {
   const tooLong = `This ${ noun } has more detail than can be read in one pass — upload the lines as separate files.`
   const unparsed = `The ${ noun } was read but the result couldn't be parsed — try uploading it again.`

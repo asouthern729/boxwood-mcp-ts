@@ -14,9 +14,9 @@ import { runPolicyCheckChatTurn } from "../utils/policyCheckChat.js"
 import { CheckRefused, startCheck } from "../utils/policyCheckRun.js"
 import {
   attachmentSummary, deleteAttachment, deleteCheck, getCheck, getOwnedAttachment, listChecks, reportPath, reportSize,
-  saveAttachment, updateAttachment, type CheckEntry, type PolicyCheckAttachment
+  makeReadable, saveAttachment, updateAttachment, type CheckEntry, type PolicyCheckAttachment
 } from "../utils/policyCheckStore.js"
-import { normalizedPdf } from "../utils/quoteExtraction.js"
+import { ACCEPTED_FILES_MESSAGE, sniffUpload, uploadExt } from "../utils/uploadNormalize.js"
 
 // Policy Check page (Andrew, 2026-11-22) — commercial lines account managers check an issued or
 // renewal policy against the quote/binder/expiring policy. Contract agreed with the frontend
@@ -134,14 +134,19 @@ router.get(`${ BASE }/files/:filename/pdf`, auth0, asyncHandler(async(req: Reque
 
 // ---------- Attachments ----------
 
-async function readProfile(record: PolicyCheckAttachment, file: Buffer): Promise<void> {
+// Converts the upload to what Claude reads (a PDF, or text for a workbook), then takes the first look.
+async function readProfile(record: PolicyCheckAttachment): Promise<void> {
   try {
-    const profile = await readDocumentProfile(file, record.filename)
-    updateAttachment({ ...record, status: "done", profile })
+    const { record: ready, doc } = await makeReadable(record)
+    const profile = await readDocumentProfile(doc, ready.filename)
+    // Re-read so a role change made while this read ran isn't overwritten.
+    const latest = getOwnedAttachment(record.id, record.owner_sub) ?? ready
+    updateAttachment({ ...latest, status: "done", profile })
   } catch(error) {
     logger.error({ err: error, attachment: record.id }, "policy_check attachment read failed")
     const message = error instanceof PolicyCheckError ? error.message : "Something went wrong reading this file. Try uploading it again."
-    updateAttachment({ ...record, status: "error", error: message })
+    const latest = getOwnedAttachment(record.id, record.owner_sub) ?? record
+    updateAttachment({ ...latest, status: "error", error: message })
   }
 }
 
@@ -157,20 +162,15 @@ router.post(
       res.status(400).json({ error: "invalid_role", error_description: "role must be baseline, compared or reference." })
       return
     }
-    if(!Buffer.isBuffer(file) || file.length === 0) {
-      res.status(400).json({ error: "invalid_file", error_description: "Upload a PDF." })
-      return
-    }
-    try {
-      normalizedPdf(file)
-    } catch {
-      res.status(400).json({ error: "invalid_file", error_description: "This file isn't a PDF. Download it again as a PDF and upload that." })
+    const kind = Buffer.isBuffer(file) ? sniffUpload(file) : null
+    if(!kind) {
+      res.status(400).json({ error: "invalid_file", error_description: ACCEPTED_FILES_MESSAGE })
       return
     }
 
-    const name = typeof req.query.name === "string" && req.query.name.trim() ? path.basename(req.query.name.trim()) : "upload.pdf"
-    const record = saveAttachment(file, name, req.query.role, sub)
-    void readProfile(record, file)
+    const name = typeof req.query.name === "string" && req.query.name.trim() ? path.basename(req.query.name.trim()) : `upload.${ uploadExt(kind) }`
+    const record = saveAttachment(file, name, req.query.role, sub, uploadExt(kind))
+    void readProfile(record)
     res.status(202).json(attachmentSummary(record))
   })
 )

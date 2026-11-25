@@ -14,7 +14,7 @@ export function registerCoverageGapTools(server: McpServer, user: GapUser) {
   server.registerTool(
     "coverage_gap_analysis",
     {
-      description: "Starts a Coverage Gap Analysis of the commercial policy PDFs the person uploaded to the page: Boxwood's 11-step review (named insureds, terms, locations, limits vs exposures, exclusions, conditions, umbrella underlying, missing lines, client questions). It runs in the background for a few minutes and the internal Word report appears in the page's list — this returns as soon as it starts.",
+      description: "Starts a Coverage Gap Analysis of the commercial policy documents the person uploaded to the page: Boxwood's 11-step review (named insureds, terms, locations, limits vs exposures, exclusions, conditions, umbrella underlying, missing lines, client questions). It runs in the background for a few minutes and the internal Word report appears in the page's list — this returns as soon as it starts.",
       inputSchema: {
         attachment_ids: z.array(z.string()).describe("Ids of the uploaded policy files, as listed in the message"),
         notes: z.string().optional().describe("Account information the person gave that the policies may not show: operations, revenue, payroll, employee count, contract requirements, what the client said. Include what's in the page's account notes box if they ask you to start it."),

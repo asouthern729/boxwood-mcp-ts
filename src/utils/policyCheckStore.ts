@@ -19,7 +19,7 @@ const store = createDocToolStore<PolicyCheckRole, CheckEntry>("policy-check")
 
 export const POLICY_CHECK_OUTPUT_DIR = store.OUTPUT_DIR
 export const {
-  saveAttachment, getAttachment, getOwnedAttachment, updateAttachment, deleteAttachment, readAttachmentFile,
+  saveAttachment, makeReadable, getAttachment, getOwnedAttachment, updateAttachment, deleteAttachment, readAttachmentDoc,
   writeJob: writeCheck, getJob: getCheck, listJobs: listChecks, createJob: createCheck, finishRunning,
   saveFindings, readFindings, reportPath, writeReport, reportSize, deleteJob: deleteCheck, isRunning
 } = store

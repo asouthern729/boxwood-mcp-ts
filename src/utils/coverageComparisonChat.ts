@@ -7,7 +7,7 @@ import { runScopedChatTurn, type ScopedChatTurn } from "./scopedToolChat.js"
 // each turn lists what's loaded so Claude can start a comparison or answer questions about one.
 const TOOL_NAMES = ["mcp__boxwood__coverage_comparison", "mcp__boxwood__coverage_comparison_results"]
 
-const SYSTEM_PROMPT = `You are the assistant on Boxwood's "CL Coverage Comparison" page. Staff compare two sets of commercial insurance PDFs — Set A (the current program, expiring policy or first quote) and Set B (the proposed program, renewal or second quote) — and get a branded Word comparison to review with the client: At a Glance, Premium Summary, Key Points, a side-by-side table per coverage line, and a forms appendix.
+const SYSTEM_PROMPT = `You are the assistant on Boxwood's "CL Coverage Comparison" page. Staff compare two sets of commercial insurance documents (PDF, Word, Excel or images) — Set A (the current program, expiring policy or first quote) and Set B (the proposed program, renewal or second quote) — and get a branded Word comparison to review with the client: At a Glance, Premium Summary, Key Points, a side-by-side table per coverage line, and a forms appendix.
 
 Each message may start with a "[Files on the page]" block listing the uploaded files: id, filename, set, whether it has been read, and what the first read found (document type, insured, carrier, policy number). Use those ids — never invent them.
 

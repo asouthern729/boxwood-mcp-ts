@@ -1,6 +1,7 @@
 import { readFileSync } from "node:fs"
 import path from "node:path"
 import * as z from "zod"
+import type { ReadableDoc } from "./uploadNormalize.js"
 import { DocToolError, MAX_TOTAL_PAGES, analyzeDocuments } from "./docToolClaude.js"
 
 // CL Coverage Comparison (Andrew, 2026-11-22), from Patrick's org-shared "coverage-comparison"
@@ -174,7 +175,7 @@ How this run differs from the instructions:
 ${ readFileSync(INSTRUCTIONS_PATH, "utf8") }`
 }
 
-export type ComparisonDocument = { role: ComparisonRole; filename: string; file: Buffer; pages: number }
+export type ComparisonDocument = { role: ComparisonRole; filename: string; doc: ReadableDoc; pages: number }
 
 export async function runCoverageComparison({ documents, notes, labels }: { documents: ComparisonDocument[]; notes?: string; labels?: { a?: string; b?: string } }): Promise<Comparison> {
   const totalPages = documents.reduce((sum, d) => sum + d.pages, 0)
@@ -186,7 +187,7 @@ export async function runCoverageComparison({ documents, notes, labels }: { docu
   const raw = await analyzeDocuments({
     groups: COMPARISON_ROLES.map((role) => ({
       heading: SET_HEADING[role],
-      documents: documents.filter((d) => d.role === role).map((d) => ({ title: `${ d.filename } (${ d.pages } pp.)`, filename: d.filename, file: d.file }))
+      documents: documents.filter((d) => d.role === role).map((d) => ({ title: `${ d.filename } (${ d.pages } pp.)`, filename: d.filename, doc: d.doc }))
     })),
     trailingText: [
       ...labelHints,

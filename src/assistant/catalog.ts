@@ -77,8 +77,8 @@ export const ASSISTANT_PAGES: AssistantPage[] = [
     path: "commercial/coverage-comparison",
     title: "CL Coverage Comparison",
     team: "Commercial",
-    summary: "Compares two sets of commercial quote or policy PDFs (current vs proposed, quote vs quote, expiring vs renewal) into a branded Word document to review with the client: At a Glance, Premium Summary, Key Points to Review, a side-by-side table for each coverage line, and a forms appendix.",
-    whenToUse: "Shopping or remarketing a commercial account and showing the client how two carriers' quotes, or their current program and a proposal, differ line by line. Works from uploaded PDFs only; it doesn't read AMS360.",
+    summary: "Compares two sets of commercial quotes or policies (current vs proposed, quote vs quote, expiring vs renewal) into a branded Word document to review with the client: At a Glance, Premium Summary, Key Points to Review, a side-by-side table for each coverage line, and a forms appendix.",
+    whenToUse: "Shopping or remarketing a commercial account and showing the client how two carriers' quotes, or their current program and a proposal, differ line by line. Works from uploaded files only (PDF, Word, Excel or images); it doesn't read AMS360.",
     outputs: ["docx", "pdf"],
     mcpCapabilities: ["coverage_comparison", "coverage_comparison_results"]
   },
@@ -86,8 +86,8 @@ export const ASSISTANT_PAGES: AssistantPage[] = [
     path: "commercial/coverage-gap",
     title: "Coverage Gap",
     team: "Commercial",
-    summary: "Runs Boxwood's 11-step coverage gap review on a commercial account's policy PDFs: named insureds, policy terms and locations across policies, limits vs exposures, exclusions, conditions, the umbrella's underlying schedule and missing lines. Produces an internal Word report with a scorecard, priority findings, supporting exhibits and questions to confirm with the client. An account notes box takes what the policies don't show (revenue, payroll, operations, contract requirements).",
-    whenToUse: "Reviewing a commercial account's whole program for gaps and conflicts between policies, e.g. before a renewal meeting or when taking over an account. Works from uploaded policy PDFs only; it doesn't read AMS360.",
+    summary: "Runs Boxwood's 11-step coverage gap review on a commercial account's policy documents: named insureds, policy terms and locations across policies, limits vs exposures, exclusions, conditions, the umbrella's underlying schedule and missing lines. Produces an internal Word report with a scorecard, priority findings, supporting exhibits and questions to confirm with the client. An account notes box takes what the policies don't show (revenue, payroll, operations, contract requirements).",
+    whenToUse: "Reviewing a commercial account's whole program for gaps and conflicts between policies, e.g. before a renewal meeting or when taking over an account. Works from uploaded files only (PDF, Word, Excel or images); it doesn't read AMS360.",
     outputs: ["docx", "pdf"],
     mcpCapabilities: ["coverage_gap_analysis", "coverage_gap_results"]
   },

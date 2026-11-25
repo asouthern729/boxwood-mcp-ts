@@ -18,7 +18,7 @@ export type ComparisonEntry = BaseJobEntry<ComparisonRole> & {
 const store = createDocToolStore<ComparisonRole, ComparisonEntry>("coverage-comparison")
 
 export const {
-  saveAttachment, getOwnedAttachment, updateAttachment, deleteAttachment, readAttachmentFile,
+  saveAttachment, makeReadable, getOwnedAttachment, updateAttachment, deleteAttachment, readAttachmentDoc,
   writeJob, getJob, listJobs, createJob, finishRunning, saveFindings, readFindings, reportPath, writeReport, reportSize, deleteJob
 } = store
 

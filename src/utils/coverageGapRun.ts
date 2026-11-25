@@ -4,7 +4,7 @@ import { logger } from "./logger.js"
 import { runCoverageGapAnalysis } from "./coverageGapAnalysis.js"
 import { buildCoverageGapDoc } from "./coverageGapDoc.js"
 import {
-  createJob, finishRunning, getJob, getOwnedAttachment, readAttachmentFile, saveFindings, writeJob, writeReport,
+  createJob, finishRunning, getJob, getOwnedAttachment, readAttachmentDoc, saveFindings, writeJob, writeReport,
   type GapAttachment, type GapEntry, type GapUser
 } from "./coverageGapStore.js"
 
@@ -28,7 +28,7 @@ function reportFilename(client: string, id: string): string {
 async function executeGapAnalysis(entry: GapEntry, attachments: GapAttachment[]): Promise<void> {
   const started = Date.now()
   try {
-    const documents = attachments.map((a) => ({ filename: a.filename, file: readAttachmentFile(a), pages: a.profile?.pages ?? 0 }))
+    const documents = attachments.map((a) => ({ filename: a.filename, doc: readAttachmentDoc(a), pages: a.profile?.pages ?? 0 }))
     const analysis = await runCoverageGapAnalysis({ documents, notes: entry.notes })
     if(entry.client_name) analysis.client_name = entry.client_name
 
