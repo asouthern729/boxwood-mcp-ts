@@ -1,191 +1,171 @@
-import { Document, Packer, Paragraph, SectionType } from "docx"
-import type { Comparison, ComparisonRow } from "./coverageComparisonAnalysis.js"
-import { blocksPiece, createLayout, tablePiece, type Block, type Piece } from "./docLayout.js"
+import { readFileSync } from "node:fs"
+import path from "node:path"
 import {
-  AGENCY_PREPARED_BY, CHAR, COVER_MARGINS, FOOTER_STYLE, GREEN, INTERIOR_MARGINS, PAGE_HEIGHT, PAGE_WIDTH, TEXT_WIDTH, BULLETS, BULLET_NUMBERING,
-  closingFooter, coverPage, dataTable, footnote, interiorFooter, interiorHeader, run, sectionOpener, subHeader
-} from "./proposalBrand.js"
+  AlignmentType, BorderStyle, Document, Footer, ImageRun, LevelFormat, Packer, PageBreak, PageNumber, Paragraph, ShadingType,
+  Table, TableCell, TableLayoutType, TableRow, TextRun, WidthType
+} from "docx"
+import type { Comparison, ComparisonRow } from "./coverageComparisonAnalysis.js"
 
-// The CL Coverage Comparison document. Content and order follow Patrick's coverage-comparison skill
-// (At a Glance → Premium Summary → Key Points → line-by-line tables → forms appendix → disclaimer,
-// with the skill's Same / Current only / Better / Reduced tags). Presented in Boxwood's house style
-// (proposalBrand.ts; Patrick 2026-11-21: every output document shares it — Andrew, 2026-11-22):
-// the house cover, logo + client-name page header, section openers, charcoal-header tables, and the
-// mint contact band with the disclaimer at the foot of the last page. The skill's rust for gaps and
-// reductions is kept on the tags — it carries meaning, and the house palette has no warning colour.
+// The CL Coverage Comparison document, laid out exactly as Patrick's coverage-comparison skill
+// (scripts/build_comparison.js): letter portrait, 0.5" margins, Arial 9pt body / 8.5pt tables /
+// 7.5pt forms, brand green headings and table headers, logo on page 1 only, address footer on every
+// page. Order: header → At a Glance → Premium Summary → Key Points → (page break) line-by-line
+// tables → (page break) Forms appendix → disclaimer. It's an internal tool, so it keeps the skill's
+// simple format rather than the client-facing house style (Patrick, 2026-11-24).
 
-const RUST = "A0522D"
+const GREEN = "459361", TINT = "E3F0E7", ZEBRA = "F6FAF7", INK = "231F20", GRAY = "6B6B6B", RUST = "A0522D", LINE = "BFBFBF"
+const W = 10800, FONT = "Arial"
+
+const LOGO_PATH = path.join(import.meta.dirname, "..", "..", "assets", "boxwood-logo.png")
 
 const DISCLAIMER = "This comparison is a summary prepared for discussion purposes only and does not amend, extend or alter coverage. Quotes and proposals are not binding until coverage is bound by the carrier. In the event of any difference, the actual policy forms, declarations and endorsements govern. Please review with your Boxwood account team before making coverage decisions."
 
-const layout = createLayout(TEXT_WIDTH)
-const page = { size: { width: PAGE_WIDTH, height: PAGE_HEIGHT }, margin: INTERIOR_MARGINS }
-// Room above the closing band (contact band + disclaimer + page footer ≈ 3300 twips), with a margin
-// for estimate error — an underestimate would print the band on two pages.
-const CLOSING_PAGE_HEIGHT = Math.floor(0.88 * (PAGE_HEIGHT - INTERIOR_MARGINS.top - INTERIOR_MARGINS.bottom - 3300))
+type RunOpts = { size?: number; bold?: boolean; color?: string; italics?: boolean }
+type CellValue = string | ({ text: string; fill?: string } & RunOpts)
+
+const t = (text: string, o: RunOpts = {}) => new TextRun({ text: String(text ?? ""), font: FONT, size: o.size ?? 18, bold: o.bold, color: o.color ?? INK, italics: o.italics })
+const p = (runs: TextRun | TextRun[], o: { before?: number; after?: number; keepNext?: boolean } = {}) =>
+  new Paragraph({ children: Array.isArray(runs) ? runs : [runs], spacing: { before: o.before ?? 0, after: o.after ?? 60 }, keepNext: o.keepNext })
+const small = (text: string) => p(t(text, { size: 15, italics: true, color: GRAY }), { before: 60 })
+const H1 = (text: string) => new Paragraph({
+  children: [t(text.toUpperCase(), { size: 26, bold: true, color: GREEN })], spacing: { before: 240, after: 100 }, keepNext: true,
+  border: { bottom: { style: BorderStyle.SINGLE, size: 12, color: GREEN, space: 2 } }
+})
+const H2 = (text: string) => new Paragraph({ children: [t(text, { size: 20, bold: true })], spacing: { before: 160, after: 60 }, keepNext: true })
+const bd = { style: BorderStyle.SINGLE, size: 4, color: LINE }
+const borders = { top: bd, bottom: bd, left: bd, right: bd }
+const pageBreak = () => new Paragraph({ children: [new PageBreak()] })
+
+// A cell value is a string ("\n" for line breaks) or {text, bold, color, fill, size}; bold applies to the first line.
+function cell(v: CellValue, width: number, base: Partial<Exclude<CellValue, string>> = {}): TableCell {
+  const o = typeof v === "object" ? { ...base, ...v } : { ...base, text: v }
+  const lines = String(o.text ?? "").split("\n")
+  return new TableCell({
+    width: { size: width, type: WidthType.DXA }, borders,
+    shading: o.fill ? { type: ShadingType.CLEAR, color: "auto", fill: o.fill } : undefined,
+    margins: { top: 50, bottom: 50, left: 90, right: 90 },
+    children: lines.map((ln, i) => p(t(ln, { size: o.size ?? 17, bold: o.bold && i === 0, color: o.color }), { after: 0 }))
+  })
+}
+
+function table(widths: number[], header: string[], rows: CellValue[][], o: { size?: number } = {}): Table {
+  const hdr = new TableRow({ tableHeader: true, cantSplit: true, children: header.map((h, i) => cell(h, widths[i], { fill: GREEN, color: "FFFFFF", bold: true })) })
+  const body = rows.map((r, ri) => new TableRow({ cantSplit: true, children: r.map((c, i) => cell(c, widths[i], { fill: ri % 2 ? ZEBRA : undefined, size: o.size })) }))
+  return new Table({ width: { size: W, type: WidthType.DXA }, columnWidths: widths, layout: TableLayoutType.FIXED, rows: [hdr, ...body] })
+}
 
 const money = (n: number) => (n < 0 ? "–$" : "$") + Math.abs(Math.round(n)).toLocaleString("en-US")
 const amount = (v: number | string | null) => (typeof v === "number" ? money(v) : (v ?? "—"))
 
-type Style = { color?: string; bold?: boolean } | undefined
-
-function difference(a: unknown, b: unknown): { text: string; style: Style } {
-  if(typeof a !== "number" || typeof b !== "number") return { text: "", style: undefined }
+function diff(a: unknown, b: unknown): CellValue {
+  if(typeof a !== "number" || typeof b !== "number") return ""
   const d = b - a
-  return { text: d === 0 ? "$0" : (d > 0 ? "+" : "") + money(d), style: { bold: true, color: d < 0 ? GREEN : d > 0 ? RUST : CHAR } }
+  return { text: (d > 0 ? "+" : "") + money(d), bold: true, color: d < 0 ? GREEN : d > 0 ? RUST : INK }
 }
 
 // The skill's comparison tag: same | a_only | b_only | different | better | worse | info (+ note).
-function tag(r: ComparisonRow, AS: string, BS: string): { text: string; style: Style } {
+function note(r: ComparisonRow, AS: string, BS: string): CellValue {
   const label = { same: "Same", a_only: `${ AS } only`, b_only: `${ BS } only`, different: r.note ? "" : "Different", better: `Better in ${ BS }`, worse: `Reduced in ${ BS }`, info: "" }[r.status]
   const text = [label, r.note].filter(Boolean).join(label && r.note ? "; " : "")
-  const color = r.status === "same" || r.status === "better" ? GREEN : (r.status === "a_only" || r.status === "worse" || r.flag) ? RUST : undefined
-  const bold = (r.status !== "info" && r.status !== "different" && r.status !== "b_only") || r.flag
-  return { text, style: color || bold ? { color, bold } : undefined }
+  const color = r.status === "same" || r.status === "better" ? GREEN : (r.status === "a_only" || r.status === "worse" || r.flag) ? RUST : INK
+  return { text, color, bold: (r.status !== "info" && r.status !== "different" && r.status !== "b_only") || r.flag }
 }
 
-// The house table cell prints one run, so a "\n" inside a value would just run the lines together.
-const oneLine = (text: string) => text.split("\n").map((t) => t.trim()).filter(Boolean).join("; ")
-
-// A comparison table as a layout piece: height estimated as the equivalent plain table, rendered
-// with per-cell styles (which tablePiece can't carry). Everything left-aligned — the values are
-// carrier wording ("$250,000 each claim"), and the house money-column detection would right-align
-// some tables and not others.
-function comparisonTable(headers: string[], rows: string[][], styles: Style[][], fractions: number[]): Piece {
-  const cells = rows.map((r) => r.map(oneLine))
-  const height = layout.pieceHeight(tablePiece(headers, cells, { fractions }))
-  const rightAlign = headers.map(() => false)
-  return blocksPiece(height, () => [dataTable(headers, cells, { fractions, rightAlign, cellStyle: (r, c) => styles[r]?.[c] })])
+function premiumRow(r: Comparison["premium"]["rows"][number]): CellValue[] {
+  const d = r.diff_text ? { text: r.diff_text, bold: r.total } : diff(r.a, r.b)
+  if(!r.total) return [{ text: r.line, bold: true }, amount(r.a), amount(r.b), d]
+  const dv = typeof d === "string" ? { text: d } : d
+  return [{ text: r.line, bold: true, fill: TINT }, { text: amount(r.a), bold: true, fill: TINT }, { text: amount(r.b), bold: true, fill: TINT }, { ...dv, bold: true, fill: TINT }]
 }
 
-// A section opener (eyebrow, accent rule, headline). It forces its own page break when it opens a
-// run (pageBreakBefore, so no empty line at the top), and drops its leading space at a page top.
-const heading = (eyebrowText: string, text: string, first: boolean) => blocksPiece(first ? 900 : 1200, (startsPage, breakBefore) =>
-  sectionOpener({ eyebrowText, title: text, compact: true, pageBreak: breakBefore, before: startsPage || breakBefore ? 0 : 320 }), { keepWithNext: true })
-const sub = (text: string) => blocksPiece(420, () => [subHeader(text)], { keepWithNext: true })
-const notes = (lines: string[]) => lines.map((n) => blocksPiece(300, () => [footnote(n)]))
+export async function buildCoverageComparisonDoc(D: Comparison, preparedDate: string): Promise<Buffer> {
+  const A = D.set_a.label, B = D.set_b.label, AS = D.set_a.short || "Current", BS = D.set_b.short || "Proposed"
+  const C: (Paragraph | Table)[] = []
 
-function coverBlocks(D: Comparison): Block[] {
-  return coverPage({
-    eyebrow: "Coverage Comparison",
-    title: D.client.name,
-    titleAccent: "Your options, side by side.",
-    subtitle: D.intro,
-    preparedFor: {
-      headline: ["Confidence in your coverage", "comes first."],
-      facts: [["Named Insured", D.client.name], [D.set_a.short, D.set_a.label], [D.set_b.short, D.set_b.label]]
-    },
-    preparedBy: AGENCY_PREPARED_BY
-  })
-}
+  // ---------- Header ----------
+  let logo: Buffer | null = null
+  try { logo = readFileSync(LOGO_PATH) } catch { logo = null }
+  if(logo) C.push(new Paragraph({ children: [new ImageRun({ type: "png", data: logo, transformation: { width: 221, height: 60 } })], spacing: { after: 120 } }))
+  C.push(p(t("Coverage Comparison", { size: 40, bold: true }), { after: 40 }))
+  C.push(p(t(D.client.name, { size: 24, bold: true, color: GREEN }), { after: 40 }))
+  if(D.client.address) C.push(p(t(D.client.address, { color: GRAY }), { after: 40 }))
+  C.push(p(t(`Prepared by Boxwood Insurance Group  ·  ${ preparedDate }`, { color: GRAY }), { after: 120 }))
+  C.push(new Paragraph({ border: { bottom: { style: BorderStyle.SINGLE, size: 12, color: GREEN, space: 1 } }, spacing: { after: 120 }, children: [] }))
+  C.push(p([t(`${ D.intro } Items marked `), t(`${ AS } only`, { bold: true, color: RUST }), t(` appear in the ${ AS } documents but not in the ${ BS } documents and are worth reviewing together.`)], { after: 80 }))
 
-// At a Glance, Premium Summary, Key Points — the summary pages.
-function summaryPieces(D: Comparison): Piece[] {
-  const A = D.set_a.label, B = D.set_b.label, AS = D.set_a.short, BS = D.set_b.short
-  const pieces: Piece[] = [
-    // The intro sentence is on the cover; the interior opens with the skill's legend line.
-    blocksPiece(600, () => [new Paragraph({
-      spacing: { after: 200 },
-      children: [run("Items marked ", { size: 19 }), run(`${ AS } only`, { bold: true, color: RUST, size: 19 }), run(` appear in the ${ AS } documents but not in the ${ BS } documents and are worth reviewing together.`, { size: 19 })]
-    })]),
-    heading("Summary", "At a Glance", true),
-    comparisonTable(["Coverage", A, B], D.glance.map((g) => [g.item, g.a || "—", g.b || "—"]), D.glance.map(() => [{ bold: true }]), [2400, 4200, 4200]),
-    ...notes(D.glance_notes)
-  ]
+  // ---------- At a glance ----------
+  C.push(H1("At a Glance"))
+  C.push(table([2400, 4200, 4200], ["Coverage", A, B], D.glance.map((g) => [{ text: g.item, bold: true }, g.a || "—", g.b || "—"])))
+  D.glance_notes.forEach((n) => C.push(small(n)))
 
+  // ---------- Premium ----------
   if(D.premium.rows.length > 0) {
-    const plain = D.premium.rows.filter((r) => !r.total)
-    const total = D.premium.rows.find((r) => r.total)
-    const diffs = plain.map((r) => (r.diff_text ? { text: r.diff_text, style: undefined } : difference(r.a, r.b)))
-    const totalDiff = total ? (total.diff_text ?? difference(total.a, total.b).text) : ""
-    const headers = ["Line of coverage", A, B, "Difference"]
-    const rows = plain.map((r, i) => [r.line, amount(r.a), amount(r.b), diffs[i].text])
-    const totalRow = total ? [total.line, amount(total.a), amount(total.b), totalDiff] : undefined
-    const fractions = [3600, 2400, 2400, 2400]
-    const height = layout.pieceHeight(tablePiece(headers, totalRow ? [...rows, totalRow] : rows, { fractions }))
-    pieces.push(
-      heading("Summary", "Premium Summary", false),
-      blocksPiece(height, () => [dataTable(headers, rows, { fractions, totalRow, rightAlign: [false, true, true, true], cellStyle: (r, c) => (c === 0 ? { bold: true } : c === 3 ? diffs[r]?.style : undefined) })]),
-      ...notes(D.premium.notes)
-    )
+    C.push(H1("Premium Summary"))
+    C.push(table([3600, 2400, 2400, 2400], ["Line of coverage", A, B, "Difference"], D.premium.rows.map(premiumRow)))
+    D.premium.notes.forEach((n) => C.push(small(n)))
   }
-
   for(const pt of D.premium_tables) {
-    pieces.push(sub(pt.title), tablePiece(pt.header, pt.rows.map((r) => pt.header.map((_, i) => r[i] ?? ""))), ...notes(pt.notes))
+    C.push(H2(pt.title))
+    const n = pt.header.length
+    const w = n === 2 ? [5400, 5400] : n === 3 ? [5400, 2700, 2700] : Array(n).fill(Math.floor(W / n))
+    C.push(table(w, pt.header, pt.rows.map((r) => pt.header.map((_, i) => r[i] ?? ""))))
+    pt.notes.forEach((x) => C.push(small(x)))
   }
 
-  pieces.push(heading("Summary", "Key Points to Review", false))
-  for(const k of D.key_points) {
-    pieces.push(blocksPiece(200 + 230 * Math.ceil((k.lead.length + k.text.length) / 95), () => [new Paragraph({
-      numbering: { reference: BULLETS, level: 0 },
-      spacing: { after: 90 },
-      children: [run(`${ k.lead } `, { bold: true, size: 19 }), run(k.text, { size: 19 })]
-    })]))
-  }
-  return pieces
-}
+  // ---------- Key points ----------
+  C.push(H1("Key Points to Review"))
+  D.key_points.forEach((k) => C.push(new Paragraph({ numbering: { reference: "bul", level: 0 }, spacing: { after: 70 }, children: [t(`${ k.lead } `, { bold: true }), t(k.text)] })))
 
-// One section per coverage line, the skill's side-by-side tables.
-function linePieces(D: Comparison): Piece[] {
-  const A = D.set_a.label, B = D.set_b.label, AS = D.set_a.short, BS = D.set_b.short
-  return D.lines.flatMap((L, li) => {
-    const pieces: Piece[] = [heading("Line by Line", L.title, li === 0)]
+  // ---------- Line-by-line ----------
+  if(D.lines.length > 0) C.push(pageBreak())
+  for(const L of D.lines) {
+    C.push(H1(L.title))
     for(const s of L.sections) {
-      pieces.push(sub(s.title))
-      if(L.single) {
-        pieces.push(comparisonTable(["Item", L.single === "a" ? A : B], s.rows.map((r) => [r.item, (L.single === "a" ? r.a : r.b) ?? "—"]), [], [4400, 6400]))
-      } else {
-        const tags = s.rows.map((r) => tag(r, AS, BS))
-        pieces.push(comparisonTable(
-          ["Item", A, B, "Comparison"],
-          s.rows.map((r, i) => [r.item, r.a ?? "—", r.b ?? "—", tags[i].text]),
-          tags.map((t) => [undefined, undefined, undefined, t.style]),
-          [3000, 2700, 2700, 2400]
-        ))
-      }
+      C.push(H2(s.title))
+      if(L.single) C.push(table([4400, 6400], ["Item", L.single === "a" ? A : B], s.rows.map((r) => [r.item, (L.single === "a" ? r.a : r.b) ?? "—"])))
+      else C.push(table([3000, 2700, 2700, 2400], ["Item", A, B, "Comparison"], s.rows.map((r) => [r.item, r.a ?? "—", r.b ?? "—", note(r, AS, BS)])))
     }
     if(L.extensions && L.extensions.rows.length > 0) {
+      C.push(H2(L.extensions.title))
+      if(L.extensions.note) C.push(p(t(L.extensions.note, { size: 16, italics: true, color: GRAY })))
       const e = L.extensions.rows, h = Math.ceil(e.length / 2), rows: string[][] = []
       for(let i = 0; i < h; i++) rows.push([e[i].item, e[i].value, e[i + h]?.item ?? "", e[i + h]?.value ?? ""])
-      pieces.push(sub(L.extensions.title))
-      if(L.extensions.note) pieces.push(...notes([L.extensions.note]))
-      pieces.push(comparisonTable(["Coverage", "Limit", "Coverage", "Limit"], rows, [], [3400, 2000, 3400, 2000]))
+      C.push(table([3400, 2000, 3400, 2000], ["Coverage", "Limit", "Coverage", "Limit"], rows))
     }
-    return pieces
+  }
+
+  // ---------- Forms ----------
+  if(D.forms.length > 0) {
+    C.push(pageBreak())
+    C.push(H1("Appendix — Forms & Endorsements"))
+    for(const f of D.forms) {
+      C.push(H2(f.title))
+      C.push(table([1800, 1200, 7800], ["Form", "Edition", "Description"], f.rows.map((r) => [r.form, r.edition || "—", r.description]), { size: 15 }))
+    }
+  }
+
+  C.push(p(t(DISCLAIMER, { size: 15, italics: true, color: GRAY }), { before: 240 }))
+
+  const footer = new Footer({
+    children: [new Paragraph({
+      alignment: AlignmentType.CENTER, border: { top: { style: BorderStyle.SINGLE, size: 4, color: GREEN, space: 4 } },
+      children: [
+        t("Boxwood Insurance Group  ·  3020 Stansberry Lane, Suite 202, Franklin, TN 37069  ·  615-245-5851  ·  Page ", { size: 14, color: GRAY }),
+        new TextRun({ children: [PageNumber.CURRENT], font: FONT, size: 14, color: GRAY })
+      ]
+    })]
   })
-}
-
-function formsPieces(D: Comparison): Piece[] {
-  if(D.forms.length === 0) return []
-  return [
-    heading("Appendix", "Forms & Endorsements", true),
-    ...D.forms.flatMap((f) => [sub(f.title), tablePiece(["Form", "Edition", "Description"], f.rows.map((r) => [r.form, r.edition || "—", r.description]), { fractions: [1800, 1200, 7800] })] as Piece[])
-  ]
-}
-
-export async function buildCoverageComparisonDoc(D: Comparison, _preparedDate: string): Promise<Buffer> {
-  // Three runs of content, each starting a page (the skill's page breaks): summary, line by line,
-  // forms. The last run's end goes on the closing page with the band.
-  const runs = [summaryPieces(D), linePieces(D), formsPieces(D)].filter((r) => r.length > 0)
-  const last = runs.pop()!
-  const { before, closing } = layout.splitForClosing(last, CLOSING_PAGE_HEIGHT, { breakBefore: runs.length > 0 })
-
-  const flow: Block[] = [
-    ...runs.flatMap((pieces, i) => layout.render(pieces, i === 0, i > 0)),
-    ...before
-  ]
-  const header = { default: interiorHeader(D.client.name) }
 
   const doc = new Document({
     creator: "Boxwood Insurance Group",
     title: `Coverage Comparison — ${ D.client.name }`,
-    styles: { default: { document: { run: { font: "Arial", size: 20, color: CHAR } } }, paragraphStyles: [FOOTER_STYLE] },
-    numbering: { config: [BULLET_NUMBERING] },
-    sections: [
-      { properties: { page: { size: { width: PAGE_WIDTH, height: PAGE_HEIGHT }, margin: COVER_MARGINS } }, children: coverBlocks(D) },
-      ...(flow.length > 0 ? [{ properties: { type: SectionType.NEXT_PAGE, page }, headers: header, footers: { default: interiorFooter() }, children: flow }] : []),
-      { properties: { type: SectionType.NEXT_PAGE, page }, headers: header, footers: { default: closingFooter({ disclaimer: DISCLAIMER }) }, children: closing }
-    ]
+    styles: { default: { document: { run: { font: FONT, size: 18 } } } },
+    numbering: { config: [{ reference: "bul", levels: [{ level: 0, format: LevelFormat.BULLET, text: "•", alignment: AlignmentType.LEFT, style: { paragraph: { indent: { left: 360, hanging: 240 } } } }] }] },
+    sections: [{
+      properties: { page: { size: { width: 12240, height: 15840 }, margin: { top: 720, bottom: 720, left: 720, right: 720 } } },
+      footers: { default: footer },
+      children: C
+    }]
   })
   return Buffer.from(await Packer.toBuffer(doc) as unknown as Uint8Array)
 }

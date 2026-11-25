@@ -1,27 +1,21 @@
+import { readFileSync } from "node:fs"
+import path from "node:path"
 import {
-  AlignmentType, BorderStyle, Document, Footer, Packer, PageBreak, PageNumber, Paragraph, ShadingType,
-  Table, TableCell, TableLayoutType, TableRow, TabStopType, TextRun, VerticalAlign, WidthType
+  AlignmentType, BorderStyle, Document, Footer, ImageRun, Packer, PageBreak, PageNumber, Paragraph, ShadingType,
+  Table, TableCell, TableLayoutType, TableRow, TextRun, VerticalAlign, WidthType
 } from "docx"
-import { FOOTER_STYLE, accentRule, eyebrow, headline, interiorHeader, sectionOpener, subHeader } from "./proposalBrand.js"
 import type { CheckDocument, CheckRowFindings, PolicyCheckFindings } from "./policyCheckAnalysis.js"
 import type { NumberedItem, Priority, ProcessedCheck } from "./policyCheckRun.js"
 
 // The Policy Check report, laid out per section 4 of Patrick's policy-check skill: letter portrait,
-// 0.5" side margins, Arial 9pt body / 8.5pt tables, a page-one "Check These First" summary, whole
-// rows filled by priority (red Correction, amber Confirm, blue-grey Housekeeping).
-//
-// Light house-style pass (Andrew, 2026-11-22; Patrick 2026-11-21: every output document shares the
-// house style, proposalBrand.ts): the house page header (logo + client name), eyebrow / accent-rule
-// section openers, charcoal table headers with hairline rules, and a house-look footer. It's an
-// internal working document, so no cover page — page one stays the summary the skill requires —
-// and the priority colours stay, since they carry the meaning.
+// 0.5" margins, Arial 9pt body / 8.5pt tables, brand green headers, a page-one "Check These First"
+// summary, whole rows filled by priority (red Correction, amber Confirm, blue-grey Housekeeping).
 
 const GREEN = "459361"
 const TEXT = "231F20"
 const GREY = "777777"
 const WHITE = "FFFFFF"
-const HAIRLINE = "D9D9D9"
-const CHAR = "231F20"
+const BORDER = "BFBFBF"
 const MINT = "E3F0E7"
 const MATCH_TEXT = "2E6B43"
 
@@ -33,7 +27,6 @@ const PRIORITY_STYLE: Record<Priority, { fill: string; text: string; label: stri
 
 const PAGE_WIDTH = 12240
 const MARGIN = 720
-const MARGINS = { top: 1150, bottom: 900, left: MARGIN, right: MARGIN, header: 360, footer: 360 }
 const WIDTH = PAGE_WIDTH - 2 * MARGIN // 10800 twips
 const BODY = 18 // 9pt
 const TABLE = 17 // 8.5pt
@@ -41,8 +34,8 @@ const TABLE = 17 // 8.5pt
 // Page one must not spill (skill section 4). Its height is budgeted in 8.5pt text lines: rows are
 // estimated from how many lines their longest cell wraps to at its column width. Priority 1 items
 // always stay on page one; the rest continue at the top of page two.
-const PAGE_ONE_LINES = 52
-const ITEM_FRACTIONS = [0.45, 1.45, 1.15, 1.75, 1.75, 1.75, 2.05]
+const PAGE_ONE_LINES = 60
+const ITEM_FRACTIONS = [0.35, 1.45, 1.15, 1.8, 1.75, 1.75, 2.05]
 // Average Arial character width at 8.5pt, in twips, plus cell padding.
 const CHAR_TWIPS = 95
 const CELL_PADDING_TWIPS = 160
@@ -67,9 +60,11 @@ function headerLines(processed: ProcessedCheck, o: BuildOptions): number {
     f.not_reviewed.join("; ") || "None", "date", o.preparedFor
   ]
   // Logo + title, then each header row (+ padding), banner, scorecard, heading, table header, legend, overflow note.
-  return 5 + values.reduce((total, v) => total + wrappedLines(v, valueWidth) + 0.4, 0) + 4 + 4 + 2 + 1.5 + 1 + 1.5
+  return 6 + values.reduce((total, v) => total + wrappedLines(v, valueWidth) + 0.4, 0) + 4 + 4 + 2 + 1.5 + 1 + 1.5
 }
 
+const LOGO_PATH = path.join(import.meta.dirname, "..", "..", "assets", "boxwood-logo.png")
+const LOGO_RATIO = 1600 / 435
 
 const MODE_LABEL: Record<PolicyCheckFindings["mode"], string> = {
   quote_to_issued: "Quote → Issued",
@@ -81,44 +76,36 @@ type Block = Paragraph | Table
 
 // ---------- Primitives ----------
 
-function run(text: string, o: { bold?: boolean; size?: number; color?: string; italics?: boolean; font?: string; characterSpacing?: number } = {}): TextRun {
-  return new TextRun({ text, font: o.font ?? "Arial", bold: o.bold, italics: o.italics, size: o.size ?? BODY, color: o.color ?? TEXT, characterSpacing: o.characterSpacing })
+function run(text: string, o: { bold?: boolean; size?: number; color?: string; italics?: boolean; font?: string } = {}): TextRun {
+  return new TextRun({ text, font: o.font ?? "Arial", bold: o.bold, italics: o.italics, size: o.size ?? BODY, color: o.color ?? TEXT })
 }
 
 function para(children: TextRun[], o: { after?: number; before?: number; align?: (typeof AlignmentType)[keyof typeof AlignmentType] } = {}): Paragraph {
   return new Paragraph({ children, spacing: { after: o.after ?? 60, before: o.before ?? 0 }, alignment: o.align })
 }
 
-// House section opener: green letter-spaced eyebrow, short accent rule, charcoal headline.
-function heading(eyebrowText: string, title: string, before = 280): Paragraph[] {
-  return sectionOpener({ eyebrowText, title, compact: true, before, textWidth: WIDTH })
+function heading(text: string, before = 200): Paragraph {
+  return para([run(text, { bold: true, size: 24, color: GREEN })], { before, after: 80 })
 }
 
-// House sub-header: a smaller green letter-spaced eyebrow.
-const subheading = (text: string): Paragraph => subHeader(text)
+function subheading(text: string): Paragraph {
+  return para([run(text, { bold: true, size: 19, color: GREEN })], { before: 140, after: 60 })
+}
 
-// House table rules: hairlines between rows, no vertical lines; a green rule under the header.
-const NONE = { style: BorderStyle.NONE, size: 0, color: "FFFFFF" }
-const hairline = { style: BorderStyle.SINGLE, size: 4, color: HAIRLINE }
-const borders = { top: hairline, bottom: hairline, left: NONE, right: NONE }
-const headBorders = { top: NONE, bottom: { style: BorderStyle.SINGLE, size: 12, color: GREEN }, left: NONE, right: NONE }
+const border = { style: BorderStyle.SINGLE, size: 4, color: BORDER }
+const borders = { top: border, bottom: border, left: border, right: border }
 
-type CellOpts = { fill?: string; color?: string; bold?: boolean; size?: number; align?: (typeof AlignmentType)[keyof typeof AlignmentType]; head?: boolean }
+type CellOpts = { fill?: string; color?: string; bold?: boolean; size?: number; align?: (typeof AlignmentType)[keyof typeof AlignmentType] }
 
 function cell(text: string, width: number, o: CellOpts = {}): TableCell {
   const lines = (text || "—").split("\n")
   return new TableCell({
     width: { size: width, type: WidthType.DXA },
     shading: o.fill ? { fill: o.fill, type: ShadingType.CLEAR, color: "auto" } : undefined,
-    borders: o.head ? headBorders : borders,
+    borders,
     verticalAlign: VerticalAlign.CENTER,
-    margins: o.head ? { top: 70, bottom: 70, left: 90, right: 90 } : { top: 50, bottom: 50, left: 90, right: 90 },
-    children: lines.map((line) => new Paragraph({
-      alignment: o.align,
-      children: [o.head
-        ? run(line.toUpperCase(), { size: 14, bold: true, color: WHITE, characterSpacing: 15 })
-        : run(line, { size: o.size ?? TABLE, bold: o.bold, color: o.color })]
-    }))
+    margins: { top: 40, bottom: 40, left: 80, right: 80 },
+    children: lines.map((line) => new Paragraph({ alignment: o.align, children: [run(line, { size: o.size ?? TABLE, bold: o.bold, color: o.color })] }))
   })
 }
 
@@ -138,9 +125,8 @@ function table(headers: string[], rows: RowSpec[], fractions: number[], o: { ali
     width: { size: WIDTH, type: WidthType.DXA },
     columnWidths: widths,
     layout: TableLayoutType.FIXED,
-    borders: { top: NONE, bottom: NONE, left: NONE, right: NONE, insideHorizontal: NONE, insideVertical: NONE },
     rows: [
-      new TableRow({ tableHeader: true, cantSplit: true, children: headers.map((h, i) => cell(h, widths[i], { fill: CHAR, head: true, align: align(i) })) }),
+      new TableRow({ tableHeader: true, cantSplit: true, children: headers.map((h, i) => cell(h, widths[i], { fill: GREEN, color: WHITE, bold: true, align: align(i) })) }),
       ...rows.map((r) => new TableRow({
         cantSplit: true,
         children: r.cells.map((text, i) => cell(text, widths[i], { fill: r.fill, color: r.color, bold: r.bold, align: align(i), ...r.cellStyles?.[i] }))
@@ -191,22 +177,14 @@ function headerBlock(processed: ProcessedCheck, o: BuildOptions): Block[] {
     ["Prepared for", o.preparedFor]
   ]
   const widths = widthsFrom([1.3, 6])
-  const label = (text: string) => new TableCell({
-    width: { size: widths[0], type: WidthType.DXA }, borders, verticalAlign: VerticalAlign.CENTER, margins: { top: 50, bottom: 50, left: 0, right: 90 },
-    children: [new Paragraph({ children: [run(text.toUpperCase(), { size: 14, bold: true, color: GREEN, characterSpacing: 20 })] })]
-  })
-  // The logo is in the page header; page one opens with the house eyebrow, accent rule and a
-  // compact headline (Andrew, 2026-11-22: no mode in the headline — it's the Mode row below).
   return [
-    eyebrow("Internal Accuracy Review", { before: 0, after: 60 }),
-    accentRule({ textWidth: WIDTH, after: 120 }),
-    headline([["Policy Check", CHAR]], { size: 26, after: 120 }),
+    new Paragraph({ spacing: { after: 60 }, children: [new ImageRun({ type: "png", data: readFileSync(LOGO_PATH), transformation: { width: 0.45 * LOGO_RATIO * 96, height: 0.45 * 96 } })] }),
+    para([run("Policy Check", { bold: true, size: 32, color: GREEN })], { after: 80 }),
     new Table({
       width: { size: WIDTH, type: WidthType.DXA },
       columnWidths: widths,
       layout: TableLayoutType.FIXED,
-      borders: { top: NONE, bottom: NONE, left: NONE, right: NONE, insideHorizontal: NONE, insideVertical: NONE },
-      rows: rows.map(([l, value]) => new TableRow({ cantSplit: true, children: [label(l), cell(value, widths[1])] }))
+      rows: rows.map(([label, value]) => new TableRow({ cantSplit: true, children: [cell(label, widths[0], { bold: true, fill: MINT }), cell(value, widths[1])] }))
     })
   ]
 }
@@ -279,7 +257,7 @@ function legend(): Paragraph {
 function premiumSchedule(processed: ProcessedCheck): Block[] {
   const { premium, numberByRef } = processed
   if(premium.change === null || Math.abs(premium.change) < 0.01) {
-    return [...heading("Premium", "Premium Change Schedule"), para([run(`Premium: no change — ${ money(premium.baseline) } baseline and compared.`)])]
+    return [heading("Premium Change Schedule"), para([run(`Premium: no change — ${ money(premium.baseline) } baseline and compared.`)])]
   }
 
   const lineRows: RowSpec[] = premium.lines.map((l) => {
@@ -301,7 +279,7 @@ function premiumSchedule(processed: ProcessedCheck): Block[] {
   driverRows.push({ cells: ["Total change", "", "", signedMoney(Math.round(driverTotal * 100) / 100), ""], fill: MINT, bold: true })
 
   return [
-    ...heading("Premium", "Premium Change Schedule"),
+    heading("Premium Change Schedule"),
     subheading("Premium by line"),
     table(["Line of coverage", "Baseline", "Compared", "$ Change", "% Change", "What drove it"], lineRows, [2, 1.1, 1.1, 1.1, 0.8, 2.9], { align: ["left", "right", "right", "right", "right", "left"] }),
     subheading("What drove the change"),
@@ -313,7 +291,7 @@ function amsSection(processed: ProcessedCheck, amsPulledAt: string | null): Bloc
   const rows = processed.findings.ams_cross_reference
   if(!amsPulledAt || rows.length === 0) return []
   return [
-    ...heading("Agency Record", "AMS360 Cross-Reference"),
+    heading("AMS360 Cross-Reference"),
     para([run(`Boxwood MCP, pulled ${ usDate(amsPulledAt) }`, { size: 16, color: GREY, italics: true })]),
     table(["Topic", "AMS360 shows", "Effect on this check"],
       rows.map((r) => ({ cells: [r.topic, r.ams_shows, `${ r.ref && processed.numberByRef.get(r.ref) ? `#${ processed.numberByRef.get(r.ref) } — ` : "" }${ r.effect }`] })),
@@ -330,7 +308,7 @@ const SECTION_TITLES: Record<CheckRowFindings["section"], string> = {
 
 function detailSections(processed: ProcessedCheck): Block[] {
   const { findings, numberByRef, items } = processed
-  const blocks: Block[] = [...heading("Detail", "Detail Checklist")]
+  const blocks: Block[] = [heading("Detail Checklist")]
 
   for(const section of ["A", "B", "C", "D"] as const) {
     const rows = findings.rows.filter((r) => r.section === section)
@@ -356,7 +334,7 @@ function detailSections(processed: ProcessedCheck): Block[] {
               cellStyles: [undefined, undefined, undefined, undefined, statusCellStyle(r.status, pri)]
             }
           }),
-          [0.45, 1.8, 1.75, 1.75, 0.8, 2, 1.25]
+          [0.35, 1.8, 1.8, 1.8, 0.8, 2, 1.25]
         ))
       }
       for(const t of tables.filter((x) => line === null || x.line === line)) {
@@ -378,7 +356,7 @@ function formsSection(findings: PolicyCheckFindings): Block[] {
   const order = { Added: 0, Removed: 1, Edition: 2, Same: 3 }
   const forms = [...findings.forms].sort((a, b) => order[a.change] - order[b.change])
   return [
-    ...heading("Forms", "Forms Comparison"),
+    heading("Forms Comparison"),
     table(["Form #", "Edition (baseline)", "Edition (compared)", "Title", "Change", "Coverage effect"],
       forms.map((f) => ({
         cells: [f.form_number, f.baseline_edition ?? "—", f.compared_edition ?? "—", f.title, f.change, f.coverage_effect],
@@ -394,7 +372,7 @@ function correctionRequest(processed: ProcessedCheck, clientName: string): Block
   if(corrections.length === 0) {
     const confirms = processed.items.filter((i) => i.pri === 2).map((i) => `#${ i.number }`)
     return [
-      ...heading("Carrier Request", "Correction Request Draft"),
+      heading("Correction Request Draft"),
       para([run(`Not needed — no correction items.${ confirms.length > 0 ? ` Confirm ${ confirms.join(", ") } with the underwriter by email or phone.` : "" }`)])
     ]
   }
@@ -406,35 +384,30 @@ function correctionRequest(processed: ProcessedCheck, clientName: string): Block
     ...corrections.map((c, i) => `${ i + 1 }. ${ c.correction_text ?? `${ c.item }: currently shows ${ c.compared }; should be ${ c.baseline } (${ c.citation }).` }`)
   ]
   return [
-    ...heading("Carrier Request", "Correction Request Draft"),
+    heading("Correction Request Draft"),
     para([run("Paste into an email to the carrier/underwriter.", { size: 16, color: GREY, italics: true })]),
-    oneCell(lines.map((l) => para([run(l || " ", { font: "Consolas", size: 17 })], { after: 20 })), "F7F8F7", HAIRLINE)
+    oneCell(lines.map((l) => para([run(l || " ", { font: "Consolas", size: 17 })], { after: 20 })), "F7F7F7", BORDER)
   ]
 }
 
 function signOff(): Block[] {
   return [
-    ...heading("Sign-off", "Review Sign-off"),
+    heading("Sign-off"),
     table(["Reviewed by", "Date", "Endorsement request sent", "Carrier confirmation received", "Delivered to client"],
       [{ cells: ["\n\n", "", "", "", ""] }], [1.6, 1, 1.6, 1.8, 1.4]),
     para([run("Internal accuracy review prepared by Boxwood Insurance Group. Based solely on the documents listed above; confirm against the full policy and with the carrier. Not a coverage opinion.", { size: 16, color: GREY })], { before: 160 })
   ]
 }
 
-// House-look footer (proposalBrand's footerLine) keeping the skill's wording and "Page X of Y".
 function footer(): Footer {
-  const pageRun = (children: (string | typeof PageNumber.CURRENT)[]) => new TextRun({ children, font: "Arial", bold: true, size: 14, color: GREEN })
   return new Footer({
     children: [new Paragraph({
-      style: FOOTER_STYLE.id,
-      tabStops: [{ type: TabStopType.RIGHT, position: WIDTH }],
+      alignment: AlignmentType.CENTER,
       children: [
-        run("Boxwood Insurance Group · Internal accuracy review", { size: 14, color: GREY }),
-        run("\t"),
-        run("PAGE ", { bold: true, size: 14, color: GREEN, characterSpacing: 30 }),
-        pageRun([PageNumber.CURRENT]),
-        run(" OF ", { bold: true, size: 14, color: GREEN, characterSpacing: 30 }),
-        pageRun([PageNumber.TOTAL_PAGES])
+        run("Boxwood Insurance Group · Internal accuracy review · Page ", { size: 15, color: GREY }),
+        new TextRun({ children: [PageNumber.CURRENT], font: "Arial", size: 15, color: GREY }),
+        run(" of ", { size: 15, color: GREY }),
+        new TextRun({ children: [PageNumber.TOTAL_PAGES], font: "Arial", size: 15, color: GREY })
       ]
     })]
   })
@@ -468,8 +441,7 @@ export async function buildPolicyCheckDoc(processed: ProcessedCheck, o: BuildOpt
     resultBanner(processed),
     para([], { after: 60 }),
     scorecard(processed),
-    // Page one is tight (the skill: it must not spill), so its heading is a single eyebrow line.
-    eyebrow("Check These First — Items to Check", { before: 160, after: 80 })
+    heading("Items to Check First", 140)
   ]
 
   if(processed.items.length === 0) {
@@ -485,7 +457,7 @@ export async function buildPolicyCheckDoc(processed: ProcessedCheck, o: BuildOpt
   }
 
   children.push(new Paragraph({ children: [new PageBreak()] }))
-  if(overflow.length > 0) children.push(...heading("Check These First", "Items to Check (continued)", 0), itemsTable(overflow), legend())
+  if(overflow.length > 0) children.push(heading("Items to Check (continued)", 0), itemsTable(overflow), legend())
   children.push(
     ...premiumSchedule(processed),
     ...amsSection(processed, o.amsPulledAt),
@@ -498,10 +470,9 @@ export async function buildPolicyCheckDoc(processed: ProcessedCheck, o: BuildOpt
   const doc = new Document({
     creator: "Boxwood Insurance Group",
     title: `${ o.clientName } — Policy Check`,
-    styles: { default: { document: { run: { font: "Arial", size: BODY, color: TEXT } } }, paragraphStyles: [FOOTER_STYLE] },
+    styles: { default: { document: { run: { font: "Arial", size: BODY, color: TEXT } } } },
     sections: [{
-      properties: { page: { size: { width: PAGE_WIDTH, height: 15840 }, margin: MARGINS } },
-      headers: { default: interiorHeader(o.clientName, { textWidth: WIDTH }) },
+      properties: { page: { size: { width: PAGE_WIDTH, height: 15840 }, margin: { top: MARGIN, bottom: MARGIN, left: MARGIN, right: MARGIN, header: 360, footer: 360 } } },
       footers: { default: footer() },
       children
     }]
