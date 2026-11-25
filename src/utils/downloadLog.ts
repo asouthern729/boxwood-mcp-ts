@@ -100,6 +100,7 @@ const TOOLS = [
   "proposal-builder",
   "policy-check",
   "coverage-comparison",
+  "coverage-gap",
   "pl-renewal-summary",
   "download-report"
 ]
