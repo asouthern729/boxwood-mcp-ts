@@ -1,5 +1,6 @@
 import "dotenv/config"
-import { createMcpExpressApp } from "@modelcontextprotocol/sdk/server/express.js"
+import express from "express"
+import { hostHeaderValidation } from "@modelcontextprotocol/sdk/server/middleware/hostHeaderValidation.js"
 import { allowedHosts } from "./config/config.js"
 import { logger } from "./utils/logger.js"
 import errorHandler from "./middleware/error/index.js"
@@ -27,7 +28,17 @@ import { router as jobsRouter } from "./routes/jobs.js"
 import { router as assistantRouter } from "./routes/assistant.js"
 import { router as siteRouter } from "./routes/site.js"
 
-const app = createMcpExpressApp({ allowedHosts })
+const app = express()
+
+// Liveness probe for the container HEALTHCHECK. Registered ahead of the Host-header check, which
+// would reject the probe's Host of 127.0.0.1 in production.
+app.get("/healthz", (_req, res) => {
+  res.type("text/plain").send("ok\n")
+})
+
+// What createMcpExpressApp({ allowedHosts }) sets up, done by hand so /healthz can come first.
+app.use(express.json())
+app.use(hostHeaderValidation(allowedHosts))
 
 // Mount routers
 app.use(mcpRouter)

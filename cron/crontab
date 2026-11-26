@@ -1,4 +1,4 @@
-# boxwood-mcp scheduled jobs, run by supercronic inside the `jobs` service (deploy/docker-compose.yml).
+# boxwood-mcp scheduled jobs, run by supercronic inside the `boxwood-jobs` service (deploy/docker-compose.yml).
 # Times are Central; supercronic handles DST via CRON_TZ. The AMS360 sync (07:30) runs on the host,
 # not here.
 CRON_TZ=America/Chicago
