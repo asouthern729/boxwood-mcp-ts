@@ -4,7 +4,7 @@
   "description": "MCP server exposing customer/policy/invoice lookup tools over the boxwood-ams360 Postgres database",
   "type": "module",
   "main": "dist/app.js",
-  "image": "ghcr.io/asouthern729/boxwood-mcp-ts:1.1.6",
+  "image": "ghcr.io/asouthern729/boxwood-mcp-ts:1.1.7",
   "scripts": {
     "dev": "tsx watch src/app.ts",
     "build": "tsc -b",
